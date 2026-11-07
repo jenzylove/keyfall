@@ -1,0 +1,36 @@
+name: crank
+
+# The heartbeat when nobody is on the site: harvest, resolve, NPC moves.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Decide but send nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: crank
+  cancel-in-progress: false
+
+jobs:
+  crank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: app
+      - name: Crank
+        env:
+          NPC_SEEDS: ${{ secrets.NPC_SEEDS }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: node scripts/crank.mjs

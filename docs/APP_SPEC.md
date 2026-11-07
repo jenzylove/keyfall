@@ -51,7 +51,7 @@ Q-DAY looks like a civil defence alert for the quantum apocalypse. Public warnin
 7. **05 Why only NEAR.** NEAR accepts ML-DSA-65 (post-quantum, FIPS 204) account keys, and a contract sees which key type signed each move. Show the byte: `signer key type 2 = ML-DSA-65`. Two transaction links from `docs/e2e/latest.json`: one move refused with `E_NOT_QUANTUM`, the same move accepted with ML-DSA-65.
 8. **06 Leaderboard.** Top vaults by balance, from `vaults()`. NPC vaults are labelled "NPC".
 9. **FAQ.** Is this real money? (testnet, free) · What is Q-Day? · What happens to my key? (made in your browser, never sent anywhere, recovery code) · Who are the NPCs? (the game's own bots, rules in one public file) · Can the rules change? (no keys) · What is ML-DSA-65?
-10. **Footer.** Q-DAY, built at NEAR HACKATHON, contract id with explorer link, GitHub repo, "Also by the same team: Blindside" (required by the rules), MIT.
+10. **Footer.** Q-DAY, built at NEAR HACKATHON, contract id with explorer link, GitHub repo, "Also by the same team: Offmap" (required by the rules), MIT.
 
 ## `/play` The game
 

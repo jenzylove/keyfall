@@ -1,0 +1,223 @@
+{
+  "contract": "qday-fast-mw6v53dy3fp.testnet",
+  "ran_at": "2026-11-07T20:44:08.218Z",
+  "all_pass": true,
+  "checks": [
+    {
+      "name": "alice buys from the market",
+      "pass": true,
+      "hash": "728SJ7bXVq6oT92xapzovvqwCbpeRZ49fZbhyAX3QfQN",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/728SJ7bXVq6oT92xapzovvqwCbpeRZ49fZbhyAX3QfQN"
+    },
+    {
+      "name": "bob buys from the market",
+      "pass": true,
+      "hash": "8LSyw5cmb4fQVXbSS6Awak8f3nnNXmHSotvjTHva9cS5",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/8LSyw5cmb4fQVXbSS6Awak8f3nnNXmHSotvjTHva9cS5"
+    },
+    {
+      "name": "carol buys from the market",
+      "pass": true,
+      "hash": "H8USKhrzRa6RsH2LotszHadtFsAsEmQfKSsPSJ8FwA64",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/H8USKhrzRa6RsH2LotszHadtFsAsEmQfKSsPSJ8FwA64"
+    },
+    {
+      "name": "dave buys from the market",
+      "pass": true,
+      "hash": "52KpoMrEznTc1DW2eAgBzaWa7ez7JvgKPDo8f5DGDP3L",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/52KpoMrEznTc1DW2eAgBzaWa7ez7JvgKPDo8f5DGDP3L"
+    },
+    {
+      "name": "a normal wallet is an exposed holder",
+      "pass": true
+    },
+    {
+      "name": "exposed wallet cannot raid (E_NOT_VAULT)",
+      "pass": true,
+      "hash": "23KhKPBfYMvLgFDtuSJzEnaC899QMiREcBcKzKZpYYys",
+      "error": "{\"ActionError\":{\"index\":0,\"kind\":{\"FunctionCallError\":{\"ExecutionError\":\"Smart contract panicked: E_NOT_VAULT: only a quantum vault can do this\"}}}}",
+      "link": "https://testnet.nearblocks.io/txns/23KhKPBfYMvLgFDtuSJzEnaC899QMiREcBcKzKZpYYys"
+    },
+    {
+      "name": "alice's vault is born quantum-only and registered",
+      "pass": true,
+      "hash": "CCwubXdDJuUCTu8w1Pc5ieB38gYdVcYDtN3ooQFRgRmE",
+      "keys": [
+        {
+          "public_key": "ml-dsa-65-hash:CaudHGvTiXVTtx4GAGSUNEX3D9CfByyAhZqVLQ37xczV",
+          "permission": "FullAccess"
+        }
+      ],
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/CCwubXdDJuUCTu8w1Pc5ieB38gYdVcYDtN3ooQFRgRmE"
+    },
+    {
+      "name": "bob's vault is born quantum-only and registered",
+      "pass": true,
+      "hash": "5bHSCfkhzk7ncEM7Uxp1PA392UCneSxZwYY5FpfW81xu",
+      "keys": [
+        {
+          "public_key": "ml-dsa-65-hash:EDixwtCtiDqYwLXXM5ivZTdbBEF5SVxfbuNeAWCWrrx6",
+          "permission": "FullAccess"
+        }
+      ],
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/5bHSCfkhzk7ncEM7Uxp1PA392UCneSxZwYY5FpfW81xu"
+    },
+    {
+      "name": "dave's vault is born quantum-only and registered",
+      "pass": true,
+      "hash": "FUbEsQJ2iyfNQpBu4CsWPJNczUPLTxq3kwcgQ34GHqm1",
+      "keys": [
+        {
+          "public_key": "ml-dsa-65-hash:F1w3VJvXo8degozGYrESgy1LGqXPWqLmpaDASUPXaMDC",
+          "permission": "FullAccess"
+        }
+      ],
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/FUbEsQJ2iyfNQpBu4CsWPJNczUPLTxq3kwcgQ34GHqm1"
+    },
+    {
+      "name": "alice migrates the whole bag into the vault",
+      "pass": true,
+      "hash": "7K3m45uHFbvifW2NHsPJ3EonHXhsEgadpuSPRjVtecg9",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/7K3m45uHFbvifW2NHsPJ3EonHXhsEgadpuSPRjVtecg9"
+    },
+    {
+      "name": "bob migrates the whole bag into the vault",
+      "pass": true,
+      "hash": "9DBzp5TRy6YS6Jbd4EEBS9oxQr9Hese8HvfKcpzCZSvA",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/9DBzp5TRy6YS6Jbd4EEBS9oxQr9Hese8HvfKcpzCZSvA"
+    },
+    {
+      "name": "vault raids an exposed wallet (signed with ML-DSA-65)",
+      "pass": true,
+      "hash": "BGKWPjDDkm1N4ZDjUYQBw2oZFJQZHudENy6UtgBmPEuK",
+      "error": null,
+      "raid_id": "1",
+      "link": "https://testnet.nearblocks.io/txns/BGKWPjDDkm1N4ZDjUYQBw2oZFJQZHudENy6UtgBmPEuK"
+    },
+    {
+      "name": "anyone resolves it after the window; take = take_bps of the bag",
+      "pass": true,
+      "hash": "7fwUAPDemgcyHTZwyS3Y4WHLXRSe8BzVNYQL5Sa6GMzv",
+      "take": "6000000000000000000000",
+      "expected": "64908962468064898253254",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/7fwUAPDemgcyHTZwyS3Y4WHLXRSe8BzVNYQL5Sa6GMzv"
+    },
+    {
+      "name": "vault raids another vault",
+      "pass": true,
+      "hash": "4ktEDFiPrfKRHMELF3zUC9cR5NiDNGjqibtPioU7qFYn",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/4ktEDFiPrfKRHMELF3zUC9cR5NiDNGjqibtPioU7qFYn"
+    },
+    {
+      "name": "target defends in time and takes the stake (minus burn)",
+      "pass": true,
+      "hash": "sR47ipT3CUj3oDRQxjoqqx8bCFmMiDgXjNMksaqkiSh",
+      "won": "2700000000000000000000",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/sR47ipT3CUj3oDRQxjoqqx8bCFmMiDgXjNMksaqkiSh"
+    },
+    {
+      "name": "vault raids a second exposed wallet",
+      "pass": true,
+      "hash": "CNr1VBvDnAf71NqwxcET5vRwFqscHjZqu9fg9PXSyKKX",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/CNr1VBvDnAf71NqwxcET5vRwFqscHjZqu9fg9PXSyKKX"
+    },
+    {
+      "name": "the target escapes by migrating during the window",
+      "pass": true,
+      "hash": "BNUAHEL6hVDs14jint7ubgSbKRTgtVdBenWQv7hAzJy5",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/BNUAHEL6hVDs14jint7ubgSbKRTgtVdBenWQv7hAzJy5"
+    },
+    {
+      "name": "the escaped raid takes nothing",
+      "pass": true,
+      "hash": "BpeEpzNA97QxZu6LrjGfkYXwq2fWD6oQnKfNUZj31mJS",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/BpeEpzNA97QxZu6LrjGfkYXwq2fWD6oQnKfNUZj31mJS"
+    },
+    {
+      "name": "burning 4% of the bag buys a 20% shield",
+      "pass": true,
+      "hash": "HMDot6xLm6F7ci2DFc4uy6nLXyNMwDuEdoUXim35t14t",
+      "shield_bps": 2000,
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/HMDot6xLm6F7ci2DFc4uy6nLXyNMwDuEdoUXim35t14t"
+    },
+    {
+      "name": "boss raid takes from Satoshi's stash",
+      "pass": true,
+      "hash": "2MycF314VWBfUvMTtctvWK6sg3Avrkhg9v13Srq52mni",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/2MycF314VWBfUvMTtctvWK6sg3Avrkhg9v13Srq52mni"
+    },
+    {
+      "name": "only once per epoch (E_BOSS_DONE)",
+      "pass": true,
+      "hash": "3HrgFurpNe6RsEwZVGx3ZwqHhydmJ11nSa1wM8fbTviN",
+      "link": "https://testnet.nearblocks.io/txns/3HrgFurpNe6RsEwZVGx3ZwqHhydmJ11nSa1wM8fbTviN"
+    },
+    {
+      "name": "a vault move signed with a classical key is refused (E_NOT_QUANTUM)",
+      "pass": true,
+      "hash": "8BR2aEvVKXYn9AWy4VsYoZVXb4sjQNRoPM4KBuwaevqP",
+      "add_tx": "3oG4pok197hGhhTJSqFVKGgY7vutoMRv1ttGCMV868hz",
+      "error": "{\"ActionError\":{\"index\":0,\"kind\":{\"FunctionCallError\":{\"ExecutionError\":\"Smart contract panicked: E_NOT_QUANTUM: signed with key type 0; vault moves need an ML-DSA-65 signature\"}}}}",
+      "link": "https://testnet.nearblocks.io/txns/8BR2aEvVKXYn9AWy4VsYoZVXb4sjQNRoPM4KBuwaevqP"
+    },
+    {
+      "name": "tokens cannot leave a vault with a classical signature",
+      "pass": true,
+      "hash": "HdX3DVoZGfdh9YTPTDfRMHzmNBLadeaV32TEXY1gt6eX",
+      "link": "https://testnet.nearblocks.io/txns/HdX3DVoZGfdh9YTPTDfRMHzmNBLadeaV32TEXY1gt6eX"
+    },
+    {
+      "name": "the classical key is removed again; vault is quantum-only",
+      "pass": true,
+      "hash": "3Z559mRYfXuADKKKb9PZzsceYMysp7f1QjZVyphMkKSC",
+      "link": "https://testnet.nearblocks.io/txns/3Z559mRYfXuADKKKb9PZzsceYMysp7f1QjZVyphMkKSC"
+    },
+    {
+      "name": "harvest moves tokens from exposed wallets to vaults",
+      "pass": true,
+      "hash": "4NQd9smKMBmTRFJREaoXzxTqMTJaFWXTA4mxWotV86ec",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/4NQd9smKMBmTRFJREaoXzxTqMTJaFWXTA4mxWotV86ec"
+    },
+    {
+      "name": "harvest gas is the same at 6 and 46 exposed holders",
+      "pass": true,
+      "hash": "AcS9R7nnvRyxXSEFwtCcoYmyLKopFuLQbnA3sEZPJcK1",
+      "gas_small": "2301453692460",
+      "gas_large": "2328973048139",
+      "diff_pct": "1.20",
+      "first_tx": "4NQd9smKMBmTRFJREaoXzxTqMTJaFWXTA4mxWotV86ec",
+      "link": "https://testnet.nearblocks.io/txns/AcS9R7nnvRyxXSEFwtCcoYmyLKopFuLQbnA3sEZPJcK1"
+    },
+    {
+      "name": "a vault sells to the market for NEAR (signed with ML-DSA-65)",
+      "pass": true,
+      "hash": "2KJmuUJCZVVGBd1wXex6M2Q1ZjjT5Uh31FsUMTxLDW1G",
+      "near": "169510311185771300232585",
+      "error": null,
+      "link": "https://testnet.nearblocks.io/txns/2KJmuUJCZVVGBd1wXex6M2Q1ZjjT5Uh31FsUMTxLDW1G"
+    },
+    {
+      "name": "on-chain feed records the moves",
+      "pass": true,
+      "latest": "sell"
+    }
+  ]
+}
