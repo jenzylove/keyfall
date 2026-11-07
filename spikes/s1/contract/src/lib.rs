@@ -121,18 +121,23 @@ impl Spike {
         borsh_pk.push(ML_DSA_65_TAG);
         borsh_pk.extend_from_slice(&raw);
 
-        let p = env::promise_batch_create(&account);
-        env::promise_batch_action_create_account(p);
-        env::promise_batch_action_transfer(p, deposit);
+        let account_bytes = account.as_str().as_bytes();
+        let amount: u128 = deposit.as_yoctonear();
         unsafe {
+            let p = near_sys::promise_batch_create(
+                account_bytes.len() as u64,
+                account_bytes.as_ptr() as u64,
+            );
+            near_sys::promise_batch_action_create_account(p);
+            near_sys::promise_batch_action_transfer(p, &amount as *const u128 as u64);
             near_sys::promise_batch_action_add_key_with_full_access(
                 p,
                 borsh_pk.len() as u64,
                 borsh_pk.as_ptr() as u64,
                 0,
             );
+            near_sys::promise_return(p);
         }
-        env::promise_return(p);
         account
     }
 
