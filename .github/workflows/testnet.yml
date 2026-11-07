@@ -1,0 +1,77 @@
+name: testnet
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "fast (1-hour demo season + end-to-end run) or live (14-day season)"
+        required: true
+        default: fast
+        type: choice
+        options: [fast, live]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: testnet-${{ inputs.season }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install cargo-near
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Test rules and contract
+        run: cargo test -p qday-core -p qday-contract
+
+      - name: Build contract
+        working-directory: contract
+        run: cargo near build non-reproducible-wasm --no-abi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deploy (deploy + init + delete key in one transaction)
+        working-directory: scripts
+        run: |
+          npm install --no-audit --no-fund
+          WASM=$(find ../target ../contract/target -name 'qday_contract.wasm' -path '*near*' 2>/dev/null | head -1)
+          if [ "${{ inputs.season }}" = "fast" ]; then
+            node deploy.mjs "$WASM" ../sim/params-fast.json fast "$(($(date +%s%3N) + 20000))"
+          else
+            node deploy.mjs "$WASM" ../sim/params.json live
+          fi
+
+      - name: End-to-end run with real transactions
+        if: inputs.season == 'fast'
+        working-directory: scripts
+        run: |
+          CONTRACT=$(node -e 'console.log(require("../deployments/testnet-fast.json").contract)')
+          node e2e.mjs "$CONTRACT" ../docs/e2e
+
+      - name: Summary
+        if: always()
+        run: |
+          cat deployments/testnet-${{ inputs.season }}.json >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          cat docs/e2e/latest.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+
+      - name: Commit deployment record
+        if: always()
+        run: |
+          git config user.name "jenzylove"
+          git config user.email "jennifereze12@gmail.com"
+          git add deployments docs/e2e 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Testnet ${{ inputs.season }} season: deployment record$( [ -f docs/e2e/latest.json ] && echo ' and end-to-end run')"
+          git pull --rebase -q && git push -q || true

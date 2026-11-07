@@ -1,0 +1,10 @@
+{
+  "name": "qday-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fastnear/api": "2.5.0",
+    "@fastnear/ml-dsa-65": "2.5.0",
+    "@fastnear/utils": "2.5.0"
+  }
+}

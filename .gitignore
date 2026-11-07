@@ -4,3 +4,4 @@ spike-results/
 .env
 *.key
 Cargo.lock.bak
+scripts/node_modules/
