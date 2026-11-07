@@ -287,18 +287,42 @@ function needVault() {
 
 // ------------------------------------------------------------------ moves
 
-/** A fresh, funded testnet account (an ordinary, exposed wallet). No sign-up. */
-export async function join(): Promise<{ accountId: string }> {
+/** A fresh, funded testnet account (an ordinary, exposed wallet). No sign-up.
+ * First choice: the game's sponsor funds an implicit account for a key made
+ * right here (`/api/join` only ever sees the account id). Fallback: the public
+ * testnet faucet, which allows a few accounts per network per day. */
+export async function join(): Promise<{ accountId: string; via: "sponsor" | "faucet" }> {
   const secretKey = privateKeyFromRandom();
   const publicKey = publicKeyFromPrivate(secretKey);
-  const rand = crypto.getRandomValues(new Uint8Array(5));
-  const accountId = `qd-${[...rand].map((b) => b.toString(36)).join("").slice(0, 8)}${Date.now().toString(36).slice(-4)}.testnet`;
-  await near.createFundedTestnetAccount({ newAccountId: accountId, publicKey });
+  let accountId = [...fromBase58(publicKey.replace(/^ed25519:/, ""))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  let via: "sponsor" | "faucet" = "sponsor";
+  let sponsorError = "";
+  try {
+    const r = await fetch("/api/join", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId }) });
+    if (!r.ok) sponsorError = (await r.json().catch(() => ({})))?.error || `sponsor answered ${r.status}`;
+  } catch (e: any) {
+    sponsorError = String(e?.message || e);
+  }
+  if (sponsorError) {
+    via = "faucet";
+    const rand = crypto.getRandomValues(new Uint8Array(5));
+    accountId = `qd-${[...rand].map((b) => b.toString(36)).join("").slice(0, 8)}${Date.now().toString(36).slice(-4)}.testnet`;
+    try {
+      await near.createFundedTestnetAccount({ newAccountId: accountId, publicKey });
+    } catch (e: any) {
+      const limited = /429|rate limit/i.test(String(e?.message || e));
+      throw new ChainError(
+        limited
+          ? `No free testnet wallet available right now (${sponsorError}; the public faucet limits each network). Try again later.`
+          : `Could not create a testnet wallet: ${sponsorError}; faucet: ${String(e?.message || e).slice(0, 120)}`,
+      );
+    }
+  }
   for (let i = 0; i < 30 && (await nearBalance(accountId)) === 0n; i++) await new Promise((r) => setTimeout(r, 1500));
-  if ((await nearBalance(accountId)) === 0n) throw new ChainError("The testnet faucet did not fund the account. Try again in a minute.");
+  if ((await nearBalance(accountId)) === 0n) throw new ChainError("The new wallet was not funded. Try again in a minute.");
   lsSet(LS_WALLET, { accountId, secretKey, contract: CONTRACT } satisfies WalletRecord);
   walletSigner = { accountId, signer: signerFromPrivateKey(secretKey) };
-  return { accountId };
+  return { accountId, via };
 }
 
 export async function buy(nearAmount: number, from: "wallet" | "vault" = "wallet", minOut?: string) {

@@ -21,4 +21,4 @@ jobs:
       - working-directory: scripts
         run: |
           npm install --no-audit --no-fund
-          node fund.mjs "${{ vars.SPONSOR_ACCOUNT }}" "${{ inputs.rounds || '1' }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          node fund.mjs "${{ vars.SPONSOR_ACCOUNT }}" "${{ inputs.rounds || '3' }}" | tee -a "$GITHUB_STEP_SUMMARY"
