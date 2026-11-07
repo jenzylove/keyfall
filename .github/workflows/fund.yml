@@ -1,0 +1,24 @@
+name: fund
+
+# Top up the sponsor account (funds new players and NPC gas) from the testnet faucet.
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Faucet accounts to pour in (about 10 NEAR each)"
+        default: "1"
+  schedule:
+    - cron: "17 */6 * * *"
+
+jobs:
+  fund:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - working-directory: scripts
+        run: |
+          npm install --no-audit --no-fund
+          node fund.mjs "${{ vars.SPONSOR_ACCOUNT }}" "${{ inputs.rounds || '1' }}" | tee -a "$GITHUB_STEP_SUMMARY"
