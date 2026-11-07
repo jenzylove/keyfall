@@ -1,0 +1,51 @@
+name: spike-s1
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "spikes/s1/**"
+      - ".github/workflows/spike-s1.yml"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install cargo-near
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build contract
+        working-directory: spikes/s1/contract
+        run: |
+          cargo near build non-reproducible-wasm --no-abi
+          find target -name '*.wasm' -path '*near*' -exec ls -la {} \;
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run spike on testnet
+        working-directory: spikes/s1/script
+        run: |
+          npm install --no-audit --no-fund
+          WASM=$(find ../contract/target -name 'qday_spike_s1.wasm' -path '*near*' | head -1)
+          node run.mjs "$WASM" ../../../spike-results
+
+      - name: Summary
+        if: always()
+        run: cat spike-results/s1-results.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: s1-results
+          path: spike-results/

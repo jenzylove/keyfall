@@ -1,0 +1,13 @@
+{
+  "name": "qday-spike-s1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike": "node run.mjs"
+  },
+  "dependencies": {
+    "@fastnear/api": "2.5.0",
+    "@fastnear/ml-dsa-65": "2.5.0",
+    "@fastnear/utils": "2.5.0"
+  }
+}
