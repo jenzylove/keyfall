@@ -123,7 +123,7 @@ All numbers are fixed at launch, readable through `config()`, and picked by the 
 2. All game math lives in `core/`, a pure crate with no chain code, shared with the simulation, so the contract and the simulation run the same rules.
 3. Deployed, initialised and stripped of every access key in **one** transaction. `scripts/judge-checks` proves it from a public RPC.
 4. `config()` returns every parameter and must equal `sim/params.json`.
-5. Views: `stats()`, `holder(account)`, `raid(id)`, `open_raids_for(account)`, `feed()`, `vaults(from, limit)`, `season()`.
+5. Views: `stats()`, `holder(account)`, `get_raid(id)`, `open_raids(scan)`, `holders(from, limit)`, `holder_count()`, `feed()`, `vaults(from, limit)`, `season()`, `quote_buy`, `quote_sell`.
 6. Every state change emits a NEP-297 event and is kept in an on-chain feed of the latest moves.
 
 ## 9. App
@@ -140,7 +140,11 @@ Phone first. One clean screen per job.
 | `/boss` | Daily Satoshi raid |
 | `/proof` | Judge checks, vault census, simulation, every claim with its evidence |
 
-**Key custody:** the vault key's 32-byte seed is created in the browser, encrypted with a passphrase the player chooses, and stored in the browser. The player must save a recovery code before the vault is created. It is never sent anywhere and never committed.
+**Key custody:** the vault key's 32-byte seed is created in the browser and sealed with an AES-GCM key that cannot be exported from that browser (kept in IndexedDB). The player must save a recovery code (the seed, 64 hex characters) before the vault is created; the code restores the vault on any device. The seed is never sent anywhere and never committed. (Changed from a passphrase: no prompt in the game loop, same protection on the device, spike S2.)
+
+### NPCs
+
+The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary quantum vaults playing under the same contract rules. Their behaviour lives in one readable file, `app/npc/rules.mjs`, and every NPC move carries a one-line reason the app shows. Qubits greet new players with a raid within minutes, so every player meets the core moment: escape by migrating. They run from the app's `/api/tick` and a 10-minute GitHub Actions heartbeat that also runs the harvest and settles raids. Spec: `docs/NPC_SPEC.md`.
 
 ## 10. Judging criteria
 
