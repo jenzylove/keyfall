@@ -3,3 +3,4 @@ target/
 spike-results/
 .env
 *.key
+Cargo.lock.bak

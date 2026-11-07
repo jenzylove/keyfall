@@ -1,0 +1,118 @@
+use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
+
+/// u128 values travel as decimal strings in JSON so nothing loses precision.
+pub mod u128_str {
+    use serde::{Deserialize, Deserializer, Serializer};
+    pub fn serialize<S: Serializer>(v: &u128, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&v.to_string())
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u128, D::Error> {
+        let s = String::deserialize(d)?;
+        s.parse::<u128>().map_err(serde::de::Error::custom)
+    }
+}
+
+pub const DECIMALS: u8 = 18;
+pub const ONE: u128 = 1_000_000_000_000_000_000; // 1 $QDAY
+pub const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
+
+/// Every rule number of a season. Fixed at init; readable through `config()`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct Params {
+    /// Total supply in base units.
+    #[serde(with = "u128_str")]
+    pub total_supply: u128,
+    /// Satoshi's stash in base units (exposed, can never move).
+    #[serde(with = "u128_str")]
+    pub satoshi_supply: u128,
+
+    /// Bonding curve virtual NEAR reserve (yocto).
+    #[serde(with = "u128_str")]
+    pub curve_virtual_near: u128,
+    /// Bonding curve virtual token reserve (base units). Must exceed the
+    /// tokens for sale so the price stays finite.
+    #[serde(with = "u128_str")]
+    pub curve_virtual_tokens: u128,
+    /// Hard cap on real NEAR held by the curve (yocto).
+    #[serde(with = "u128_str")]
+    pub reserve_cap: u128,
+    /// Fee on sells, in tokens: half burned, half to vaults.
+    pub sell_fee_bps: u32,
+
+    /// Epoch length in milliseconds.
+    pub epoch_ms: u64,
+    /// Number of epochs until Q-Day.
+    pub season_epochs: u64,
+
+    /// Share of every exposed balance taken each epoch.
+    pub harvest_bps: u32,
+
+    /// Smallest raid stake.
+    #[serde(with = "u128_str")]
+    pub min_stake: u128,
+    /// Smallest target balance that can be raided.
+    #[serde(with = "u128_str")]
+    pub min_target_balance: u128,
+    /// Share of the target's balance a successful raid takes (before shield).
+    pub take_bps: u32,
+    /// A raid never takes more than this many times its stake.
+    pub stake_mult: u32,
+    /// Share of a raid's take (or a defended stake) that burns.
+    pub raid_burn_bps: u32,
+    /// Defend window in milliseconds.
+    pub defend_window_ms: u64,
+    /// Immunity after a raid ends, in milliseconds.
+    pub immunity_ms: u64,
+    /// Raids a vault can open per epoch.
+    pub max_raids_per_epoch: u32,
+
+    /// Strongest possible shield.
+    pub max_shield_bps: u32,
+
+    /// Share of Satoshi's stash one boss raid takes.
+    pub boss_bps: u32,
+    /// Most a single boss raid can take.
+    #[serde(with = "u128_str")]
+    pub boss_cap: u128,
+    /// Share of a boss raid that burns.
+    pub boss_burn_bps: u32,
+    /// A vault needs at least this balance to hit the boss.
+    #[serde(with = "u128_str")]
+    pub boss_min_balance: u128,
+}
+
+impl Params {
+    pub fn curve_supply(&self) -> u128 {
+        self.total_supply - self.satoshi_supply
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.satoshi_supply >= self.total_supply {
+            return Err("satoshi_supply must be below total_supply");
+        }
+        if self.curve_virtual_tokens <= self.curve_supply() {
+            return Err("curve_virtual_tokens must exceed the tokens for sale");
+        }
+        if self.curve_virtual_near == 0 || self.epoch_ms == 0 || self.season_epochs == 0 {
+            return Err("zero curve, epoch or season");
+        }
+        for b in [
+            self.sell_fee_bps,
+            self.harvest_bps,
+            self.take_bps,
+            self.raid_burn_bps,
+            self.max_shield_bps,
+            self.boss_bps,
+            self.boss_burn_bps,
+        ] {
+            if b >= 10_000 {
+                return Err("every bps value must be below 10000");
+            }
+        }
+        if self.stake_mult == 0 || self.max_raids_per_epoch == 0 {
+            return Err("stake_mult and max_raids_per_epoch must be positive");
+        }
+        Ok(())
+    }
+}
