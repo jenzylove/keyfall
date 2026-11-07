@@ -13,7 +13,7 @@ use near_sdk::json_types::{Base64VecU8, U128, U64};
 use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue};
 use qday_core::{
-    quote_buy, quote_sell, spot_price, Error, Game, Holder, Kind, Params, Raid, State, Store, DECIMALS,
+    quote_buy as core_quote_buy, quote_sell as core_quote_sell, spot_price, Error, Game, Holder, Kind, Params, Raid, State, Store, DECIMALS,
 };
 use serde_json::json;
 
@@ -61,6 +61,8 @@ pub struct Contract {
     holders: LookupMap<String, Holder>,
     raids: LookupMap<u64, Raid>,
     vault_list: near_sdk::store::Vector<AccountId>,
+    /// Every registered holder, exposed or vault, in order of arrival.
+    holder_list: near_sdk::store::Vector<AccountId>,
     feed: LookupMap<u64, FeedItem>,
     feed_count: u64,
     season: Option<SeasonResult>,
@@ -187,6 +189,7 @@ impl Contract {
             holders: LookupMap::new(b"h"),
             raids: LookupMap::new(b"r"),
             vault_list: near_sdk::store::Vector::new(b"v"),
+            holder_list: near_sdk::store::Vector::new(b"l"),
             feed: LookupMap::new(b"f"),
             feed_count: 0,
             season: None,
@@ -255,6 +258,7 @@ impl Contract {
     fn register_exposed(&mut self, id: &AccountId) {
         let (p, s, mut st) = self.game_parts();
         Game::new(p, s, &mut st).register(id.as_str(), Kind::Exposed).unwrap_or_else(|e| fail(e));
+        self.holder_list.push(id.clone());
     }
 
     fn view_holder(&self, id: &AccountId, h: &Holder) -> HolderView {
@@ -339,6 +343,7 @@ impl Contract {
             let (p, s, mut st) = self.game_parts();
             Game::new(p, s, &mut st).register(vault.as_str(), Kind::Vault).unwrap_or_else(|e| fail(e));
             self.vault_list.push(vault.clone());
+            self.holder_list.push(vault.clone());
             emit("vault_created", json!({ "vault": vault, "payer": payer }));
             self.push_feed("vault", vault.as_str(), None, 0, None);
             true
@@ -563,17 +568,44 @@ impl Contract {
             .collect()
     }
 
+    /// Every holder (exposed wallets and vaults), in order of arrival.
+    pub fn holders(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<HolderView> {
+        let from = from_index.unwrap_or(0);
+        let limit = limit.unwrap_or(50).min(200);
+        (from..(from + limit).min(self.holder_list.len()))
+            .filter_map(|i| {
+                let v = self.holder_list[i].clone();
+                self.holders.get(v.as_str()).map(|h| self.view_holder(&v, h))
+            })
+            .collect()
+    }
+
+    pub fn holder_count(&self) -> u32 {
+        self.holder_list.len()
+    }
+
+    /// Open raids among the latest `scan` raids (default 100), newest first.
+    pub fn open_raids(&self, scan: Option<u64>) -> Vec<Raid> {
+        let last = self.state.next_raid_id.saturating_sub(1);
+        let lo = last.saturating_sub(scan.unwrap_or(100).min(300));
+        ((lo + 1)..=last)
+            .rev()
+            .filter_map(|id| self.raids.get(&id).cloned())
+            .filter(|r| r.status == qday_core::RaidStatus::Open)
+            .collect()
+    }
+
     pub fn season(&self) -> Option<SeasonResult> {
         self.season.clone()
     }
 
     pub fn quote_buy(&self, near: U128) -> Option<U128> {
-        quote_buy(&self.params, &self.state, near.0).map(U128)
+        core_quote_buy(&self.params, &self.state, near.0).map(U128)
     }
 
     pub fn quote_sell(&self, amount: U128) -> Option<U128> {
         let fee = qday_core::math::bps(amount.0, self.params.sell_fee_bps);
-        quote_sell(&self.params, &self.state, amount.0 - fee).map(U128)
+        core_quote_sell(&self.params, &self.state, amount.0 - fee).map(U128)
     }
 
     // ------------------------------------------------------------ NEP-141

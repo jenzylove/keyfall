@@ -300,3 +300,25 @@ fn contract_equals_core_rules_golden() {
         assert!(c.state.balanced(&p));
     }
 }
+
+#[test]
+fn holders_and_open_raids_views() {
+    let mut c = setup();
+    buy_as(&mut c, "alice.testnet", 2 * N, START + 1);
+    let v = make_vault(&mut c, "bob", START + 2);
+    buy_as(&mut c, v.as_str(), 3 * N, START + 3);
+    assert_eq!(c.holder_count(), 2);
+    let hs = c.holders(None, None);
+    assert_eq!(hs[0].account.as_str(), "alice.testnet");
+    assert_eq!(hs[0].kind, Kind::Exposed);
+    assert_eq!(hs[1].kind, Kind::Vault);
+    assert!(c.open_raids(None).is_empty());
+    ctx(v.as_str(), v.as_str(), START + 4, 0);
+    let id = c.raid(acc("alice.testnet"), U128(1_000 * T));
+    let open = c.open_raids(None);
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].id, id.0);
+    ctx("anyone.testnet", "anyone.testnet", START + 4 + c.config().defend_window_ms + 1, 0);
+    c.resolve(id);
+    assert!(c.open_raids(None).is_empty());
+}
