@@ -1,0 +1,15 @@
+{
+  "network": "testnet",
+  "label": "fast",
+  "contract": "qday-fast-mw6viyog4km.testnet",
+  "deploy_tx": "4BgWEauSthMtLqycwbcKXVuyR448zPGxXKwpXBpne2Pt",
+  "deploy_link": "https://testnet.nearblocks.io/txns/4BgWEauSthMtLqycwbcKXVuyR448zPGxXKwpXBpne2Pt",
+  "deployed_at": "2026-11-07T20:46:45.151Z",
+  "start_ms": 1794084414415,
+  "q_day_ms": 1794088014415,
+  "params_file": "sim\\params-fast.json",
+  "wasm_sha256": "0f0f2a5b840660efc90ad0d02c892f2e2333d4e1c218f735d23da7644bf4353c",
+  "wasm_bytes": 276081,
+  "keyless": true,
+  "config_matches_params": true
+}

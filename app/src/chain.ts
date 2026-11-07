@@ -70,7 +70,7 @@ const MESSAGES: Record<string, string> = {
   E_BOSS_DONE: "You already hit Satoshi this epoch.",
   E_BOSS_MIN_BALANCE: "Hold more $QDAY to raid Satoshi.",
   E_FROZEN: "Frozen at Q-Day.",
-  E_Q_DAY_PASSED: "Q-Day has passed.",
+  E_QDAY_PASSED: "Q-Day has passed. The season is over.",
   E_TAKEN: "That vault name is taken.",
   E_SLIPPAGE: "Price moved. Try again.",
 };

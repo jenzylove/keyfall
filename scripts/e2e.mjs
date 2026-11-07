@@ -99,8 +99,11 @@ for (const [w, v, n] of [[alice, va, "alice"], [bob, vb, "bob"]]) {
   await waitUntil(Number(raid.deadline) + 1500);
   const res = await call(contract, bank.accountId, bank.signer, "resolve", { raid_id: id });
   const take = big(successValue(res.res));
-  const expected = (before * BigInt(cfg.take_bps)) / 10000n;
-  check("anyone resolves it after the window; take = take_bps of the bag", !res.error && take > 0n && (take - expected < 10n || expected - take < 10n), { hash: res.hash, take: take.toString(), expected: expected.toString(), error: res.error });
+  const byShare = (before * BigInt(cfg.take_bps)) / 10000n;
+  const cap = BigInt(tok(2000)) * BigInt(cfg.stake_mult);
+  const expected = byShare < cap ? byShare : cap;
+  const diff = take > expected ? take - expected : expected - take;
+  check("anyone resolves it after the window; take = take_bps of the bag, capped at stake_mult x stake", !res.error && take > 0n && diff < 1000n, { hash: res.hash, take: take.toString(), expected: expected.toString(), capped: byShare >= cap, error: res.error });
 }
 
 // 6. Raid a vault: the target defends inside the window and wins the stake
@@ -209,6 +212,31 @@ for (const [w, v, n] of [[alice, va, "alice"], [bob, vb, "bob"]]) {
   const feed = await view(contract, "feed", { limit: 10 });
   check("on-chain feed records the moves", Array.isArray(feed) && feed.length > 0, { latest: feed[0]?.kind });
   console.log("stats:", JSON.stringify(s));
+}
+
+// 12. Q-Day: exposed bags freeze, vaults keep playing their tokens, the season is written on chain
+if (process.env.SKIP_QDAY !== "1") {
+  const s = await view(contract, "stats");
+  console.log("waiting for Q-Day at", new Date(Number(s.q_day_ms)).toISOString());
+  await waitUntil(Number(s.q_day_ms) + 2000);
+  const frozen = await bal(carol.accountId);
+  const t = await send({
+    signerId: carol.accountId, signer: carol.signer, receiverId: contract,
+    actions: [near.actions.functionCall({ methodName: "ft_transfer", args: { receiver_id: va.accountId, amount: tok(1) }, gas: TGAS(50), deposit: "1" })],
+  });
+  check("after Q-Day an exposed bag cannot move (E_FROZEN)", frozen > 0n && /E_FROZEN/.test(t.error || ""), { hash: t.hash, frozen: frozen.toString() });
+  const sl = await call(contract, carol.accountId, carol.signer, "sell", { amount: tok(1) });
+  check("after Q-Day an exposed bag cannot sell (E_FROZEN)", /E_FROZEN/.test(sl.error || ""), { hash: sl.hash });
+  const r = await call(contract, va.accountId, va.signer, "raid", { target: vb.accountId, stake: tok(1000) });
+  check("after Q-Day raids stop (E_QDAY_PASSED)", /E_QDAY_PASSED/.test(r.error || ""), { hash: r.hash });
+  const vt = await send({
+    signerId: va.accountId, signer: va.signer, receiverId: contract,
+    actions: [near.actions.functionCall({ methodName: "ft_transfer", args: { receiver_id: vb.accountId, amount: tok(1) }, gas: TGAS(50), deposit: "1" })],
+  });
+  check("after Q-Day a vault still transfers (signed with ML-DSA-65)", !vt.error, { hash: vt.hash, error: vt.error });
+  const f = await call(contract, bank.accountId, bank.signer, "finalize", {}, { gas: 200 });
+  const season = await view(contract, "season");
+  check("finalize writes the season result on chain", !f.error && season && BigInt(season.frozen_exposed) > 0n && Number(season.vaults) >= 3, { hash: f.hash, season, error: f.error });
 }
 
 for (const v of [va, vb, vd]) v.signer.destroy();
