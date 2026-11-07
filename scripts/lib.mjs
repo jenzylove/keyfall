@@ -81,8 +81,15 @@ export function call(contract, signerId, signer, methodName, args = {}, { deposi
 }
 
 export async function view(contractId, methodName, args = {}) {
-  const r = await near.view({ contractId, methodName, args, network });
-  return r;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await near.view({ contractId, methodName, args, network });
+    } catch (e) {
+      // Retry transport problems only; a view the contract refused is real.
+      if (attempt >= 5 || !/fetch|transport|ECONN|timeout|503|502|429/i.test(String(e?.message || e))) throw e;
+      await sleep(2000 * (attempt + 1));
+    }
+  }
 }
 
 export async function accountExists(accountId) {
