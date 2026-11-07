@@ -131,6 +131,11 @@ dependencies = [
 [[package]]
 name = "qday-sim"
 version = "0.1.0"
+dependencies = [
+ "qday-core",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "quote"

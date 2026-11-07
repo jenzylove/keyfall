@@ -18,6 +18,8 @@ fn params() -> Params {
         min_stake: 100 * T,
         min_target_balance: 1_000 * T,
         take_bps: 1_000,
+        vault_take_bps: 1_000,
+        punch_down_band: 1_000_000,
         stake_mult: 5,
         raid_burn_bps: 1_000,
         defend_window_ms: 600_000,
@@ -341,4 +343,29 @@ fn random_moves_keep_the_books_exact() {
         assert_eq!(share_q, w.s.q_shares);
         assert!(w.s.circulating(&w.p) <= w.p.total_supply);
     }
+}
+
+#[test]
+fn vaults_are_armour_and_no_punching_down() {
+    let mut w = World::new();
+    w.p.vault_take_bps = 300;
+    w.p.punch_down_band = 4;
+    for (id, k) in [("whale", Kind::Vault), ("small", Kind::Vault), ("peer", Kind::Vault), ("exp", Kind::Exposed)] {
+        w.g().register(id, k).unwrap();
+    }
+    w.g().buy("whale", 60 * N, 0, 0).unwrap();
+    w.g().buy("small", 2 * N, 0, 0).unwrap();
+    w.g().buy("peer", 3 * N, 0, 0).unwrap();
+    w.g().buy("exp", 3 * N, 0, 0).unwrap();
+    assert_eq!(w.g().raid("whale", "small", 10_000 * T, 0), Err(Error::PunchDown));
+    // peers can raid each other; vault take is 3%, exposed take is 10%
+    let v0 = w.bal("small");
+    let id = w.g().raid("peer", "small", 100_000 * T, 0).unwrap();
+    let r = w.g().resolve(id, 600_001).unwrap();
+    assert!(r.take.abs_diff(v0 * 3 / 100) <= 2);
+    let e0 = w.bal("exp");
+    let id = w.g().raid("peer", "exp", 100_000 * T, 0).unwrap();
+    let r = w.g().resolve(id, 600_001).unwrap();
+    assert!(r.take.abs_diff(e0 / 10) <= 2);
+    w.check();
 }

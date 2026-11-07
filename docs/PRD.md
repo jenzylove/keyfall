@@ -87,11 +87,12 @@ All numbers are fixed at launch, readable through `config()`, and picked by the 
 ### 7.4 Raids
 
 1. `raid(target, stake)`: a vault locks `stake` and opens a raid on any holder that is not itself, Satoshi, the market, frozen, immune, or already under raid.
-2. A defend window opens (`defend_window_secs`). The app makes a **defend link** `/d/<raid id>`.
+2. A defend window opens (`defend_window_ms`). The app makes a **defend link** `/d/<raid id>`.
 3. **Target is a vault:** it can `defend(raid_id)` inside the window. The attacker's stake goes to the defender, minus a burn.
 4. **Target is an exposed wallet:** it cannot defend. It can still **escape**: move the bag into a vault before the window ends. The take is computed on what is left.
-5. After the window anyone can `resolve(raid_id)`. The take is `take_bps` of the target's balance, reduced by the target's shield, and never more than `stake_mult` times the stake. Part burns, the rest goes to the attacker with their stake back.
-6. The target becomes immune for `immunity_secs`. Each vault can open at most `max_raids_per_epoch` raids per epoch.
+5. After the window anyone can `resolve(raid_id)`. The take is `take_bps` of an exposed target's balance, or the smaller `vault_take_bps` of a vault's balance (a vault is armour), reduced by the target's shield, and never more than `stake_mult` times the stake. Part burns, the rest goes to the attacker with their stake back.
+6. **No punching down:** a raid needs the target's balance times `punch_down_band` to be at least the attacker's balance, so big holders cannot hunt small bags.
+7. The target becomes immune for `immunity_ms`. Each vault can open at most `max_raids_per_epoch` raids per epoch.
 
 ### 7.5 Shields
 

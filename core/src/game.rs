@@ -138,6 +138,7 @@ pub enum Error {
     TargetImmune,
     TargetBusy,
     TargetTooSmall,
+    PunchDown,
     StakeTooSmall,
     RaidLimit,
     RaidNotOpen,
@@ -169,6 +170,7 @@ impl Error {
             Error::TargetImmune => "E_TARGET_IMMUNE: target was raided recently",
             Error::TargetBusy => "E_TARGET_BUSY: target is already under raid",
             Error::TargetTooSmall => "E_TARGET_TOO_SMALL",
+            Error::PunchDown => "E_PUNCH_DOWN: target is too small next to you",
             Error::StakeTooSmall => "E_STAKE_TOO_SMALL",
             Error::RaidLimit => "E_RAID_LIMIT: no raids left this epoch",
             Error::RaidNotOpen => "E_RAID_NOT_OPEN",
@@ -596,8 +598,13 @@ impl<'a, S: Store> Game<'a, S> {
         if ht.immune_until > now {
             return Err(Error::TargetImmune);
         }
-        if self.s.balance(ht.kind, ht.shares) < self.p.min_target_balance {
+        let tbal = self.s.balance(ht.kind, ht.shares);
+        if tbal < self.p.min_target_balance {
             return Err(Error::TargetTooSmall);
+        }
+        let abal = self.s.balance(ha.kind, ha.shares);
+        if tbal.saturating_mul(self.p.punch_down_band as u128) < abal {
+            return Err(Error::PunchDown);
         }
         let epoch = self.s.epoch(self.p, now);
         if ha.raid_epoch != epoch {
@@ -676,7 +683,8 @@ impl<'a, S: Store> Game<'a, S> {
             0
         } else {
             let shield = self.effective_shield(&ht, r.deadline);
-            let raw = bps(bps(bal, self.p.take_bps), 10_000 - shield);
+            let share = if ht.kind == Kind::Vault { self.p.vault_take_bps } else { self.p.take_bps };
+            let raw = bps(bps(bal, share), 10_000 - shield);
             raw.min(r.stake.saturating_mul(self.p.stake_mult as u128))
         };
         let burn = bps(take, self.p.raid_burn_bps);

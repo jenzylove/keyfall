@@ -54,8 +54,13 @@ pub struct Params {
     /// Smallest target balance that can be raided.
     #[serde(with = "u128_str")]
     pub min_target_balance: u128,
-    /// Share of the target's balance a successful raid takes (before shield).
+    /// Share of an exposed target's balance a successful raid takes.
     pub take_bps: u32,
+    /// Share of a vault target's balance a successful raid takes (before shield).
+    /// Lower than `take_bps`: a vault is armour.
+    pub vault_take_bps: u32,
+    /// No punching down: a raid needs `target balance * band >= attacker balance`.
+    pub punch_down_band: u32,
     /// A raid never takes more than this many times its stake.
     pub stake_mult: u32,
     /// Share of a raid's take (or a defended stake) that burns.
@@ -101,6 +106,7 @@ impl Params {
             self.sell_fee_bps,
             self.harvest_bps,
             self.take_bps,
+            self.vault_take_bps,
             self.raid_burn_bps,
             self.max_shield_bps,
             self.boss_bps,
@@ -110,8 +116,8 @@ impl Params {
                 return Err("every bps value must be below 10000");
             }
         }
-        if self.stake_mult == 0 || self.max_raids_per_epoch == 0 {
-            return Err("stake_mult and max_raids_per_epoch must be positive");
+        if self.stake_mult == 0 || self.max_raids_per_epoch == 0 || self.punch_down_band == 0 {
+            return Err("stake_mult, max_raids_per_epoch and punch_down_band must be positive");
         }
         Ok(())
     }
