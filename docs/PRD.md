@@ -1,6 +1,6 @@
 # Q-DAY
 
-A memecoin you play. Raid other holders, defend your own bag, and survive Q-Day. The only weapon and the only shield is a quantum-safe key, and only NEAR has those live.
+A memecoin you play. Raid other holders, defend your own bag, and survive Q-Day. The only weapon and the only shield is a quantum-safe key, and on NEAR that key is a native account key the contract can check.
 
 Hackathon: NEAR HACKATHON: Build Beyond Boundaries. Submissions close **14 Nov 2026, 23:59 UTC**.
 Tracks: Memecoins With Mechanics (`memecoins`, primary), Games With Real Economies (`games`).
@@ -15,17 +15,16 @@ Post-quantum security doesn't have a technology problem, it has a motivation pro
 
 ## 3. Why only NEAR
 
-1. NEAR accepts **ML-DSA-65** (FIPS 204) post-quantum keys as account keys and transaction signers since protocol version 85 (July 2026). It is the first major chain with live quantum-safe account keys.
+1. NEAR accepts **ML-DSA-65** (FIPS 204) post-quantum keys as account access keys and transaction signers since protocol version 85 (July 2026; nearcore 2.13, NEP-645). Sources in `docs/SOURCES.md`.
 2. A NEAR contract receives the signer's public key on every call, and the first byte says the key type: `0` ed25519, `1` secp256k1, `2` ML-DSA-65. So **the contract can refuse any move that was not signed with a quantum-safe key.** Proven on testnet in spike S1 (`docs/spikes/s1.md`).
 3. A NEAR contract can create a new account that is **born with only an ML-DSA-65 key**. Proven in spike S1.
-4. No other major chain has quantum-safe account keys live, so this game cannot run anywhere else today.
+4. Other chains have post-quantum signatures in some form (Algorand ran a Falcon-signed mainnet transaction in 2025; QRL uses XMSS). What Q-DAY needs is all three together on a general smart contract chain: post-quantum keys as ordinary account keys, the signer's key type visible to every contract call, and contracts that can create accounts born with only that key. We claim only what spike S1 proved on NEAR, not that it is impossible elsewhere.
 
 ## 4. Problem and evidence
 
 1. **Classical keys can be harvested later.** Every NEAR access key's public key sits in chain state from the moment it is added. A large enough quantum computer could derive the private key of any ed25519 or secp256k1 key it can read.
-2. **Almost nobody has moved.** Public samples in October 2026 found no ML-DSA-65 signed transactions in a sampled mainnet window. Moving takes an explicit action, and most wallets cannot hold an ML-DSA-65 key yet.
-3. **The same fight is coming to Bitcoin.** Over 30% of BTC supply sits at addresses with exposed public keys, and BIP-361 proposes freezing coins that never migrate.
-4. **Raid and defend is the most engaging loop in games right now.** A raid-and-steal game was the first ever to pass 25M concurrent players.
+2. **Moving takes an explicit action.** A classical key stays classical until its owner adds a new key, and most wallets cannot hold an ML-DSA-65 key yet. (No public count of ML-DSA-65 use exists; we do not state one.)
+3. **The same fight is coming to Bitcoin.** About a quarter to a third of all bitcoin sits at addresses with exposed public keys (Citi Institute, Glassnode, 2026), and BIP-361, a draft proposal, would freeze coins that never migrate.
 
 **Who has the problem:** every holder of a classical key, and NEAR itself, whose flagship security feature is barely used.
 
@@ -151,7 +150,7 @@ The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary qu
 1. **Technical implementation:** a contract that checks the signer's key type on every move, creates quantum-only accounts, runs constant-gas bucket accounting, raids with escrow, and a market, all keyless. A simulation and the contract share one rules crate.
 2. **Design:** one message, "Migrate before Q-Day or freeze", one live number, one shrinking stash, and a defend link with a countdown.
 3. **Impact:** every vault is a real account controlled only by a quantum-safe key, counted on chain.
-4. **Originality:** the first coin whose rules depend on what kind of key signed the move.
+4. **Originality:** a coin whose rules depend on what kind of key signed the move.
 5. **Sustainability:** fixed rules, no team allocation, sell fees feed vault holders, seasons can repeat.
 
 ## 11. Claims and proof
