@@ -5,3 +5,4 @@ spike-results/
 *.key
 Cargo.lock.bak
 scripts/node_modules/
+.vercel/
