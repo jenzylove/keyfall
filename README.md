@@ -14,7 +14,7 @@
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-EDEBE3?style=flat-square&labelColor=0C0C0B"></a>
 </p>
 
-<p align="center"><img src="docs/img/hero.png" alt="Q-DAY landing page: Migrate before Q-Day or freeze, with a live countdown and exposed bags dripping into quantum vaults" width="900" /></p>
+<p align="center"><img src="docs/img/hero.png" alt="Q-DAY title screen: the live radar of every player around the share of coins held in quantum vaults" width="900" /></p>
 
 Built at **NEAR HACKATHON** (November 2026). Tracks: **Memecoins With Mechanics** and **Games With Real Economies**.
 
@@ -44,7 +44,7 @@ No wallet, no sign up, no popups. Testnet only, free.
 4. **Build vault & move in.** Your coins move into an account whose only key is quantum safe. When the clock runs out the raid settles, and because you escaped, **it takes nothing**. Had you stayed, it would have taken 10%.
 5. **Strike back.** Tap the raider on the radar and raid it. Then shield, hit Satoshi and climb the board from the action bar. Every move is signed in your browser with ML-DSA-65.
 
-<p align="center"><img src="docs/img/raid-alert.png" alt="The raid alert on a phone: hazard stripes frame the screen while the exposed bag drips" width="320" /></p>
+<p align="center"><img src="docs/img/raid-alert.png" alt="A Qubit raids your exposed bag: the mission card turns red with a 10 minute clock while rivals circle on the radar" width="320" /></p>
 
 Prefer to check without playing? Open **Under the hood** (https://qday-one.vercel.app/proof): every check there reads the chain from your browser.
 
