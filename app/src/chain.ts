@@ -13,6 +13,10 @@ import {
 } from "@fastnear/utils";
 
 export const NETWORK = "testnet" as const;
+// Reads and transactions go through the app's own RPC proxy (/api/rpc), which
+// falls back across public testnet nodes. Off Vercel (vite dev) use a public node.
+const RPC_URL = typeof location !== "undefined" && /localhost|127\.0\.0\.1/.test(location.hostname) ? "https://rpc.testnet.fastnear.com" : `${location.origin}/api/rpc`;
+near.config({ networkId: NETWORK, nodeUrl: RPC_URL } as any);
 export const CONTRACT: string = import.meta.env.VITE_CONTRACT || "";
 export const EXPLORER = "https://testnet.nearblocks.io";
 export const txLink = (h: string) => `${EXPLORER}/txns/${h}`;

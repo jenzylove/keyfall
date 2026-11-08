@@ -704,11 +704,15 @@ export function play(root: HTMLElement) {
 
   const stop = poll(async () => { await chain.loadSession(); await refresh(); }, 5000);
   tick();
+  // While the game is open, wake the NPCs once a minute: they settle closed raids,
+  // run the harvest when it is due, and answer raids on their own vaults.
+  const npcBeat = window.setInterval(() => fetch("/api/tick", { method: "POST" }).catch(() => {}), 60_000);
 
   return () => {
     alive = false;
     stop();
     clearInterval(clock);
+    clearInterval(npcBeat);
     alertCd?.stop();
     bleed.destroy();
     document.body.classList.remove("alert");
