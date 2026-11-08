@@ -11,6 +11,10 @@ import { isNpc, nameOf, suggestVaultName } from "../ui/names";
 import { openSheet, currentSheet, type Sheet } from "../ui/sheet";
 import { P, PB, clock, every, full, hudClock, minutes, pct, plainError, short, span, whole } from "../ui/plain";
 import { explainRaid } from "../../npc/rules.mjs";
+import * as sfx from "../ui/sound";
+import * as fx from "../ui/fx";
+import { line } from "../ui/lines";
+import { ART_DOOR, ART_QC, ART_SATOSHI, ART_VAULT, MARK } from "../ui/pixels";
 
 const bps = (x: bigint, b: number | bigint) => (x * BigInt(b)) / 10000n;
 const isqrt = (n: bigint) => { if (n < 2n) return n; let x = BigInt(Math.floor(Math.sqrt(Number(n)))); while (x * x > n) x--; while ((x + 1n) * (x + 1n) <= n) x++; return x; };
@@ -32,6 +36,20 @@ const LS = "qday.game.v2";
 function prog(): Progress { try { return JSON.parse(localStorage.getItem(LS) || "{}"); } catch { return {}; } }
 function setProg(p: Partial<Progress>) { try { localStorage.setItem(LS, JSON.stringify({ ...prog(), ...p })); } catch {} }
 
+// Titles are earned only from confirmed results seen in this browser.
+type TitleKey = "native" | "escape" | "shield" | "slayer" | "raider" | "wall";
+const TITLES: Record<TitleKey, [string, string]> = {
+  native: ["Quantum Native", "You own a quantum vault"],
+  escape: ["Escape Artist", "A raid on your old wallet found nothing"],
+  shield: ["Shield Up", "You charged a shield"],
+  slayer: ["Satoshi Slayer", "You hit Satoshi"],
+  raider: ["Raider", "One of your raids took coins"],
+  wall: ["Wall", "You defended a raid"],
+};
+const LS_T = "qday.titles.v1";
+function titles(): TitleKey[] { try { return JSON.parse(localStorage.getItem(LS_T) || "[]"); } catch { return []; } }
+const LS_INTRO = "qday.intro.v1";
+
 interface Receipt { kind: string; at: number; hash: string }
 const LS_R = "qday.receipts.v1";
 function receipts(): Receipt[] { try { return JSON.parse(localStorage.getItem(LS_R) || "[]"); } catch { return []; } }
@@ -43,11 +61,12 @@ function keepReceipt(kind: string, hash?: string) {
 // ------------------------------------------------------------------ icons
 
 const I = {
-  raid: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="2.2"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5" stroke="currentColor" stroke-width="2.2"/></svg>`,
-  shield: `<svg viewBox="0 0 24 24"><path d="M12 2.2 20.5 5.4v5.8c0 5.2-3.6 8.6-8.5 10.6-4.9-2-8.5-5.4-8.5-10.6V5.4Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M12 6v12" stroke="currentColor" stroke-width="2.2"/></svg>`,
-  satoshi: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M9.5 6.5v11M12.5 6.5v11M8 8h5.5a2.5 2.5 0 0 1 0 5H8m0 0h6a2.5 2.5 0 0 1 0 5H8" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
-  market: `<svg viewBox="0 0 24 24"><path d="M3 17l5.5-5.5 4 4L21 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M15 7h6v6" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`,
-  menu: `<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2.2"/></svg>`,
+  raid: `<svg viewBox="0 0 24 24" shape-rendering="crispEdges"><path d="M11 2h2v4h-2zM11 18h2v4h-2zM2 11h4v2H2zM18 11h4v2h-4z" fill="currentColor"/><path d="M8 6h8v2h2v8h-2v2H8v-2H6V8h2zm0 2v8h8V8z" fill="currentColor" fill-rule="evenodd"/><rect x="10" y="10" width="4" height="4" fill="currentColor"/></svg>`,
+  shield: `<svg viewBox="0 0 24 24" shape-rendering="crispEdges"><path d="M4 3h16v9h-2v4h-2v2h-2v2h-4v-2H8v-2H6v-4H4z M6 5v6h2v4h2v2h4v-2h2v-4h2V5z" fill="currentColor" fill-rule="evenodd"/><rect x="11" y="7" width="2" height="8" fill="currentColor"/></svg>`,
+  satoshi: `<svg viewBox="0 0 24 24" shape-rendering="crispEdges"><path d="M9 2h6v2h2v2h2v4h-2v2h2v4h-2v2h-2v2H9v-2H7v-2H5v-4h2v-2H5V6h2V4h2z M9 6v4h6V6zm0 8v4h6v-4z" fill="currentColor" fill-rule="evenodd"/></svg>`,
+  market: `<svg viewBox="0 0 24 24" shape-rendering="crispEdges"><path d="M3 15h3v4H3zM8 11h3v8H8zM13 13h3v6h-3zM18 6h3v13h-3z" fill="currentColor"/><path d="M14 4h6v6h-2V7h-2V5h-2z" fill="currentColor"/></svg>`,
+  menu: `<svg viewBox="0 0 24 24" shape-rendering="crispEdges"><path d="M4 6h16v2H4zM4 11h16v2H4zM4 16h16v2H4z" fill="currentColor"/></svg>`,
+  share: `<svg viewBox="0 0 24 24" shape-rendering="crispEdges"><path d="M13 3h8v8h-2V7h-2v2h-2v2h-2v2H9v-2h2V9h2V7h2V5h-2zM3 7h6v2H5v10h10v-4h2v6H3z" fill="currentColor"/></svg>`,
   sun: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1" stroke="currentColor" stroke-width="2"/></svg>`,
 };
 
@@ -88,11 +107,12 @@ export function play(root: HTMLElement) {
   root.innerHTML = `
     <div class="game">
       <header class="hud">
-        <a class="hud-home" href="/" data-link aria-label="Q-DAY home"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="21" fill="none" stroke="#FFD60A" stroke-width="8"/><path d="M13 51L51 13" stroke="#FF3D2E" stroke-width="8" stroke-linecap="round"/></svg></a>
-        <div class="hud-cell"><span class="hud-k">Q-Day in</span><span class="hud-v" id="h-qday">·</span></div>
-        <div class="hud-cell bag"><span class="hud-k">Your bag</span><span class="hud-v"><span id="h-bag">·</span><span class="chip" id="h-chip"></span></span></div>
-        <div class="hud-cell"><span class="hud-k">Rank</span><span class="hud-v" id="h-rank">·</span></div>
-        <p class="hud-goal"><b>Goal</b>Hold the biggest vault when Q-Day hits</p>
+        <a class="hud-home" href="/" data-link aria-label="Q-DAY title">${MARK}</a>
+        <div class="hud-cell"><span class="hud-k">Q-Day in</span><span class="hud-v" id="h-qday">··</span></div>
+        <div class="hud-cell bag"><span class="hud-k">Your bag</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span></div>
+        <div class="hud-cell rank"><span class="hud-k">Rank</span><span class="hud-v" id="h-rank">··</span></div>
+        <p class="hud-goal"><b>Goal</b>Biggest vault at Q-Day</p>
+        <button class="hud-snd" type="button" id="h-snd" aria-label="Sound"></button>
         <button class="hud-menu" type="button" id="h-menu" aria-label="Menu">${I.menu}<i class="rdot" hidden></i></button>
       </header>
       <aside class="side left">
@@ -100,12 +120,13 @@ export function play(root: HTMLElement) {
         <section class="stats panel" id="stats" aria-label="Your stats"></section>
       </aside>
       <main class="field" id="field">
-        <p class="goal"><b>Goal</b> Hold the biggest vault when Q-Day hits</p>
+        <p class="goal"><b>Goal</b> Biggest vault at Q-Day</p>
         <div class="events" id="events" aria-live="polite"></div>
         <div class="field-msg" id="field-msg" hidden></div>
+        <button class="feed-peek" id="feed-peek" type="button" aria-label="Activity"><i></i><span id="peek-t">Activity</span></button>
       </main>
       <nav class="actions" id="actions" aria-label="Moves">
-        ${(["raid", "shield", "satoshi", "market"] as const).map((k) => `<button type="button" class="act" data-act="${k}"><span class="act-fill"></span><span class="act-ic">${I[k]}</span><span class="act-nm">${k}</span><span class="act-st" id="a-${k}">·</span></button>`).join("")}
+        ${(["raid", "shield", "satoshi", "market"] as const).map((k) => `<button type="button" class="act" data-act="${k}"><span class="act-fill"></span><span class="act-ic">${k === "satoshi" ? `<i class="act-ring"></i>` : ""}${I[k]}</span><span class="act-nm">${k}</span><span class="act-st" id="a-${k}">·</span></button>`).join("")}
       </nav>
       <aside class="side right">
         <section class="panel activity"><header><h2>Activity</h2><span class="live"><i></i>live</span></header><ul class="log" id="log"></ul></section>
@@ -119,9 +140,61 @@ export function play(root: HTMLElement) {
   // centre: your bag
   const core = document.createElement("div");
   core.className = "core";
-  core.innerHTML = `<canvas></canvas><span class="core-lab" id="core-lab">You</span>`;
+  core.innerHTML = `<canvas></canvas><span class="core-dome" aria-hidden="true"><i></i><i></i><i></i></span><span class="core-door" aria-hidden="true">${ART_VAULT}</span><span class="core-lab" id="core-lab">You</span>`;
   const bleed = new Bleed(core.querySelector("canvas")!, "bag");
   const radar = new Radar(field, core, { interactive: true, onTap: (id) => openRaid(id) });
+  const game = root.querySelector<HTMLElement>(".game")!;
+
+  // sound toggle in the HUD
+  const sndBtn = root.querySelector<HTMLButtonElement>("#h-snd")!;
+  const sndLabel = (m: boolean) => { sndBtn.innerHTML = m ? sfx.SPEAKER_OFF : sfx.SPEAKER; sndBtn.classList.toggle("off", m); sndBtn.setAttribute("aria-label", m ? "Sound off. Turn on" : "Sound on. Mute"); };
+  sndLabel(sfx.isMuted());
+  const offMute = sfx.onMute(sndLabel);
+  sndBtn.onclick = () => { sfx.unlock(); sfx.toggleMute(); if (!sfx.isMuted()) sfx.play("blip"); };
+
+  // ---------------------------------------------------------------- cold open (once)
+  let introDone = (() => { try { return localStorage.getItem(LS_INTRO) === "1"; } catch { return true; } })();
+  function coldOpen(): Promise<void> {
+    return new Promise((res) => {
+      const panels: [string, string][] = [
+        [ART_QC, "2031. A quantum computer wakes up."],
+        [ART_DOOR, "Every old crypto key is now a door left open. Including yours."],
+        [ART_VAULT, "Get your coins behind a quantum key. Then take everyone else's."],
+      ];
+      const ov = document.createElement("div");
+      ov.className = "intro";
+      ov.innerHTML = `<div class="intro-art" id="in-art"></div><p class="intro-text" id="in-text"></p><p class="intro-hint" id="in-hint">Tap to continue</p><button type="button" class="intro-skip" id="in-skip">Skip</button>`;
+      game.appendChild(ov);
+      const art = ov.querySelector<HTMLElement>("#in-art")!, text = ov.querySelector<HTMLElement>("#in-text")!, hint = ov.querySelector<HTMLElement>("#in-hint")!;
+      let i = -1, tw: ReturnType<typeof fx.typewriter> | null = null, ended = false, timer = 0;
+      const finish = () => {
+        if (ended) return;
+        ended = true;
+        tw?.cancel();
+        clearTimeout(timer);
+        try { localStorage.setItem(LS_INTRO, "1"); } catch {}
+        ov.classList.add("out");
+        field.classList.add("power-on");
+        sfx.play("chime");
+        setTimeout(() => { ov.remove(); res(); }, 500);
+        setTimeout(() => field.classList.remove("power-on"), 2600);
+      };
+      const next = () => {
+        if (ended) return;
+        if (tw && text.textContent !== panels[i][1]) { tw.cancel(); hint.hidden = false; return; }
+        i++;
+        if (i >= panels.length) { finish(); return; }
+        clearTimeout(timer);
+        hint.hidden = true;
+        art.innerHTML = panels[i][0];
+        art.className = `intro-art p${i}`;
+        tw = fx.typewriter(text, panels[i][1], () => sfx.play("tick"));
+        tw.done.then(() => { if (!ended && i < panels.length) { hint.hidden = false; timer = window.setTimeout(next, 3200); } });
+      };
+      ov.addEventListener("click", (e) => { if ((e.target as HTMLElement).id === "in-skip") finish(); else next(); });
+      next();
+    });
+  }
 
   let alive = true;
   let w: World = { ok: false, stats: null, config: null, wallet: null, vault: null, walletBal: 0n, vaultBal: 0n, walletNear: null, vaultNear: null, holders: [], open: [], feed: [], myRaids: [], incoming: null, escape: null };
@@ -135,6 +208,27 @@ export function play(root: HTMLElement) {
   let sheetKind = "";
   let sheetArg = "";
   let sheet: Sheet | null = null;
+  let pendingRaid = ""; // target of a raid in flight (sent, not yet confirmed)
+  let prevState = "";
+  let prevThreat = false;
+  let prevRank = 0;
+  let rankArrow = "";
+  let rankArrowT = 0;
+  let prevShield = -1;
+
+  // ---------------------------------------------------------------- titles
+  function earn(k: TitleKey) {
+    const have = titles();
+    if (have.includes(k)) return;
+    try { localStorage.setItem(LS_T, JSON.stringify([...have, k])); } catch {}
+    const [name, why] = TITLES[k];
+    setTimeout(() => {
+      sfx.play("fanfare");
+      sfx.vibrate([30, 40, 30, 40, 80]);
+      fx.banner(field, "TITLE EARNED", `${name} · ${why}`, "cyan", 3200);
+      toast({ tone: "gold", title: `New title: <b>${esc(name)}</b>. Share it from the menu.`, open: () => openSettings() });
+    }, 900);
+  }
 
   const sess = () => chain.session();
   const mine = () => [sess().wallet?.accountId, sess().vault?.accountId].filter(Boolean) as string[];
@@ -237,10 +331,13 @@ export function play(root: HTMLElement) {
 
   function bestTarget(): Holder | null {
     const list = rivals().filter((h) => blocker(h).state === "open");
-    const esc = w.escape ? list.find((h) => h.account === w.escape!.attacker) : null;
-    if (esc) return esc;
+    // Revenge first: whoever raided you (the escape raid, or any raid on you seen in the feed).
+    const me = mine();
+    const raiders = [w.escape?.attacker, ...w.feed.filter((f) => f.kind === "raid" && me.includes(f.target || "")).map((f) => f.actor)].filter(Boolean) as string[];
+    for (const r of raiders) { const h = list.find((x) => x.account === r); if (h) return h; }
     return list.sort((a, b) => (rawTake(b) > rawTake(a) ? 1 : -1))[0] || null;
   }
+  const raidedMe = (id: string) => w.escape?.attacker === id || w.feed.some((f) => f.kind === "raid" && f.actor === id && mine().includes(f.target || ""));
 
   function vaultsRanked(): Holder[] {
     return w.holders.filter((h) => h.kind === "vault").sort((a, b) => (BigInt(b.balance) > BigInt(a.balance) ? 1 : BigInt(b.balance) < BigInt(a.balance) ? -1 : 0));
@@ -279,12 +376,13 @@ export function play(root: HTMLElement) {
     const raid = (m.k === "build" || m.k === "movein") && m.raid ? m.raid : null;
     const target = m.k === "strike" ? bestTarget() : null;
     const esc2 = w.escape;
-    const key = [m.k, raid?.id ?? "", busy, target?.account ?? "", esc2 ? `${esc2.id}:${esc2.status}` : "", m.k === "grab" && m.buyOnly].join("|");
+    const key = [m.k, raid?.id ?? "", busy, target?.account ?? "", esc2 ? `${esc2.id}:${esc2.status}` : "", m.k === "grab" && m.buyOnly, pendingRaid].join("|");
     root.classList.toggle("has-mission", m.k !== "none" && m.k !== "load");
     if (key === missionKey) { updateMissionLive(); return; }
     missionKey = key;
     const card = (tone: string, head: string, title: string, body: string, act: string) =>
       `<section class="mission tone-${tone}" data-k="${m.k}"><div class="m-head">${head}</div><h2 class="m-title">${title}</h2>${body}<div class="m-act">${act}</div><p class="m-msg" id="m-msg" role="status"></p></section>`;
+    const backup = raid ? `<button type="button" class="btn ghost wide small" id="m-backup">${I.share} Call for backup</button>` : "";
     let html = "";
     const harvestEvery = every(P(c(), "epoch_ms") || 21_600_000);
     switch (m.k) {
@@ -305,12 +403,12 @@ export function play(root: HTMLElement) {
       case "movein": {
         const moveOnly = m.k === "movein";
         const field = moveOnly ? "" : `<label class="m-field"><span>Vault name</span><input id="m-name" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(vaultName)}" ${busy ? "disabled" : ""}/></label><p class="m-hint" id="m-hint"></p>`;
-        const btn = `<button class="btn wide${raid ? " hot" : ""}" id="m-go">${busy === "build" ? esc(busyText) : moveOnly ? "Move in now" : "Build vault & move in"}</button>`;
+        const btn = `<button class="btn wide${raid ? " hot" : ""}" id="m-go">${busy === "build" ? esc(busyText) : moveOnly ? "Move in now" : raid ? "Build vault & escape" : "Build vault & move in"}</button>`;
         if (raid)
           html = card("alarm", `${pips(m.k)}<span class="m-clock" data-until="${raid.deadline}">${clock(raid.deadline - chainNow())}</span>`,
             `${N(raid.attacker)} is raiding you`,
-            `<p class="m-text">Exposed coins can't fight back. ${moveOnly ? "Move your coins into your vault" : "Build your vault and move in"} before <b class="m-clock-in" data-until="${raid.deadline}">${clock(raid.deadline - chainNow())}</b> runs out. The raid gets nothing.</p>${field}`,
-            btn);
+            `<p class="m-text">Exposed coins can't fight back. ${moveOnly ? "Move your coins into your vault" : "Build your vault and move in"} before the clock runs out and the raid gets nothing.</p>${field}`,
+            btn + backup);
         else
           html = card("gold", pips(m.k), moveOnly ? "Move your coins in" : "Build your vault",
             moveOnly
@@ -323,7 +421,7 @@ export function play(root: HTMLElement) {
         let text = "Your coins can't bleed or freeze now. Next: strike back.";
         if (esc2 && esc2.target === sess().wallet?.accountId) {
           if (esc2.status === "open") text = `${N(esc2.attacker)}'s raid will find nothing. Watch the clock: <b data-until="${esc2.deadline}">${clock(esc2.deadline - chainNow())}</b>.`;
-          else if (BigInt(esc2.take) === 0n) text = `Escaped. ${N(esc2.attacker)}'s raid took 0. Next: strike back.`;
+          else if (BigInt(esc2.take) === 0n) { text = `Escaped. ${N(esc2.attacker)}'s raid took 0. Next: strike back.`; earn("escape"); }
           else text = `${N(esc2.attacker)}'s raid took ${full(esc2.take)} before you moved in. The rest is safe. Next: strike back.`;
         }
         html = card("gold", pips("safe"), "You're quantum safe", `<p class="m-text">${text}</p>`, `<button class="btn wide" id="m-go">Strike back</button>`);
@@ -331,10 +429,12 @@ export function play(root: HTMLElement) {
       }
       case "strike":
         html = card("gold", pips("strike"), "Strike back",
-          target
-            ? `<p class="m-text">Raid ${N(target.account)}. If ${target.kind === "vault" ? "it doesn't defend" : "they don't escape"} in ${minutes(P(c(), "defend_window_ms"))} you take a share of ${target.kind === "vault" ? "its" : "their"} bag.</p>`
+          pendingRaid
+            ? `<p class="m-text">Your beam is in flight to ${N(pendingRaid)}. Waiting for the chain to confirm.</p>`
+            : target
+            ? `<p class="m-text">${raidedMe(target.account) ? `${N(target.account)} raided you. Pay it back: raid it now.` : `Raid ${N(target.account)}.`} If ${target.kind === "vault" ? "it doesn't defend" : "they don't escape"} in ${minutes(P(c(), "defend_window_ms"))} you take a share of ${target.kind === "vault" ? "its" : "their"} bag.</p>`
             : `<p class="m-text">Nobody is in range right now. Pick any glowing blip on the radar when one lights up.</p>`,
-          target ? `<button class="btn wide hot" id="m-go">Raid ${N(target.account)}</button>` : `<button class="btn wide ghost" id="m-skip">Skip for now</button>`);
+          pendingRaid ? `<button class="btn wide busy" disabled>In flight</button>` : target ? `<button class="btn wide hot" id="m-go">Raid ${N(target.account)}</button>` : `<button class="btn wide ghost" id="m-skip">Skip for now</button>`);
         break;
       case "done":
         html = card("gold", `<span class="m-count">Missions complete</span>`, "Free play",
@@ -390,6 +490,8 @@ export function play(root: HTMLElement) {
     });
     if (m.k === "exposed" && go) go.onclick = () => { setProg({ wantVault: true }); missionKey = ""; renderMission(); };
     if ((m.k === "build" || m.k === "movein") && go) go.onclick = () => buildAndMove(msg);
+    const bk = missionEl.querySelector<HTMLButtonElement>("#m-backup");
+    if (bk && (m.k === "build" || m.k === "movein") && m.raid) bk.onclick = () => shareRaid(m.raid!);
     if (m.k === "safe" && go) go.onclick = () => { setProg({ vault: sess().vault!.accountId, stage: "strike" }); missionKey = ""; render(); };
     if (m.k === "strike") {
       if (go && target) go.onclick = () => openRaid(target.account);
@@ -416,6 +518,7 @@ export function play(root: HTMLElement) {
         const r = await chain.createVault(n, seed);
         keepReceipt("vault", r.hash);
         setProg({ vault: r.accountId, wantVault: false });
+        earn("native");
       }
       say("Moving your coins in…");
       const r = await chain.migrate();
@@ -437,11 +540,13 @@ export function play(root: HTMLElement) {
     try {
       const done = await fn(say);
       toast({ tone: "gold", title: done });
+      if (name === "grab") { sfx.play("coins"); fx.burst(field, { x: 50, y: 50 }, "red", 16); }
       busy = "";
       missionKey = "";
       await refresh();
     } catch (e) {
       console.warn(e);
+      sfx.play("deny");
       busy = "";
       missionKey = "";
       await refresh();
@@ -467,7 +572,14 @@ export function play(root: HTMLElement) {
     if (inVault()) {
       const list = vaultsRanked();
       const i = list.findIndex((h) => h.account === s.vault!.accountId);
-      rank.innerHTML = i >= 0 ? `#${i + 1}<small> of ${list.length}</small>` : "·";
+      if (i >= 0 && prevRank && i + 1 !== prevRank) {
+        rankArrow = i + 1 < prevRank ? "up" : "down";
+        rankArrowT = Date.now();
+        if (rankArrow === "up") sfx.play("chime");
+      }
+      if (i >= 0) prevRank = i + 1;
+      const arrow = rankArrow && Date.now() - rankArrowT < 6000 ? `<i class="rk-arrow ${rankArrow}">${rankArrow === "up" ? "▲" : "▼"}</i>` : "";
+      rank.innerHTML = i >= 0 ? `#${i + 1}${arrow}<small> of ${list.length}</small>` : "··";
     } else rank.innerHTML = `<small>Vaults only</small>`;
     root.querySelector<HTMLElement>(".rdot")!.hidden = !(s.vault && prog().backedUp !== s.vault.accountId);
   }
@@ -563,18 +675,38 @@ export function play(root: HTMLElement) {
     radar.set(blips);
     const lines: RaidLine[] = [];
     for (const r of w.myRaids) if (r.status === "open") lines.push({ id: `o${r.id}`, to: r.target, dir: "out", until: r.deadline });
+    if (pendingRaid && !lines.some((l) => l.to === pendingRaid)) lines.push({ id: "pending", to: pendingRaid, dir: "out", until: 0, pending: true });
     if (w.incoming) lines.push({ id: `i${w.incoming.id}`, to: w.incoming.attacker, dir: threat() ? "in" : "miss", until: w.incoming.deadline });
     radar.lines(lines);
     radar.tickLabels(chainNow());
+
+    // under raid: the arena edge flashes red and the siren blips once
+    const th = threat();
+    field.classList.toggle("alarm", th);
+    if (th && !prevThreat) { sfx.play("alarm"); sfx.vibrate([60, 60, 60]); }
+    prevThreat = th;
 
     // centre: your bag
     const bag = myBag();
     const state = inVault() && w.vaultBal > 0n ? "vault" : s.wallet && w.walletBal > 0n ? "exposed" : inVault() ? "vault" : "none";
     const fill = bag > 0n ? Math.min(1, Math.max(0.25, Math.log10(Math.max(1, whole(bag))) / 6.4)) : 0.5;
     bleed.setBag(state as any, fill);
-    core.className = `core st-${state}${threat() ? " shake" : ""}`;
+    const shieldBps = inVault() ? w.vault?.shield_bps || 0 : 0;
+    const rings = shieldBps > 0 ? Math.min(3, Math.max(1, Math.ceil(shieldBps / 1000))) : 0;
+    core.className = `core st-${state}${th ? " shake" : ""}${rings ? ` dome dome-${rings}` : ""}`;
+    if (prevState === "exposed" && state === "vault") {
+      // the door slams over the pile, red turns gold
+      core.classList.add("slam");
+      sfx.play("powerup");
+      sfx.vibrate([20, 30, 60]);
+      fx.burst(field, { x: 50, y: 50 }, "gold", 18);
+      setTimeout(() => core.classList.remove("slam"), 1600);
+    }
+    if (prevShield >= 0 && shieldBps > prevShield) { core.classList.add("dome-pop"); sfx.play("clang"); setTimeout(() => core.classList.remove("dome-pop"), 900); }
+    prevShield = shieldBps;
+    prevState = state;
     const lab = core.querySelector<HTMLElement>("#core-lab")!;
-    lab.textContent = state === "none" ? "No bag yet" : "You";
+    lab.textContent = state === "none" ? "No bag yet" : shieldBps ? `You · ${pct(shieldBps)} shield` : "You";
     if (lastBag >= 0n && bag > lastBag && lastBag > 0n) { core.classList.remove("win"); void core.offsetWidth; core.classList.add("win"); }
     lastBag = bag;
     const fm = root.querySelector<HTMLElement>("#field-msg")!;
@@ -634,13 +766,70 @@ export function play(root: HTMLElement) {
     const fresh = w.feed.filter((f) => Number(f.n) > lastFeed).sort((a, b) => Number(a.n) - Number(b.n));
     lastFeed = top;
     const me = mine();
+    const at = (id: string | null) => { const p = id ? radar.where(id) : null; return p ? discToField(p) : { x: 50, y: 50 }; };
     for (const f of fresh) {
       const amt = full(f.amount);
+      const won = BigInt(f.amount) > 0n;
       if (f.kind === "harvest") toast({ tone: "ink", title: `Harvest: exposed bags bled ${amt}. Half went to vaults.` });
-      else if (f.kind === "resolve" && me.includes(f.actor)) toast({ tone: "gold", who: f.target || undefined, title: BigInt(f.amount) > 0n ? `Your raid on ${N(f.target)} landed: took ${amt}` : `Your raid on ${N(f.target)} took nothing` });
-      else if (f.kind === "resolve" && me.includes(f.target || "")) toast({ tone: BigInt(f.amount) > 0n ? "hot" : "gold", who: f.actor, title: BigInt(f.amount) > 0n ? `${N(f.actor)}'s raid took ${amt} from you` : `Escaped. ${N(f.actor)}'s raid took 0` });
-      else if (f.kind === "defend" && me.includes(f.target || "")) toast({ tone: "hot", who: f.actor, title: `${N(f.actor)} defended and won ${amt} of your stake` });
+      else if (f.kind === "raid" && me.includes(f.target || "")) radar.say(f.actor, line(f.actor, "raids"));
+      else if (f.kind === "resolve" && me.includes(f.actor)) {
+        toast({ tone: "gold", who: f.target || undefined, title: won ? `Your raid on ${N(f.target)} landed: took ${amt}` : `Your raid on ${N(f.target)} took nothing` });
+        if (won) {
+          fx.fly(field, at(f.target), { x: 50, y: 50 }, "gold", 12, () => { fx.pop(field, `+${amt}`, "gold", { x: 50, y: 38 }); sfx.play("coins"); core.classList.add("win"); setTimeout(() => core.classList.remove("win"), 900); });
+          if (f.target) radar.say(f.target, line(f.target, "defended"));
+          earn("raider");
+        } else fx.pop(field, "took nothing", "ink", at(f.target));
+      } else if (f.kind === "resolve" && me.includes(f.target || "")) {
+        if (won) {
+          toast({ tone: "hot", who: f.actor, title: `${N(f.actor)}'s raid took ${amt} from you` });
+          fx.shake(game, true); fx.freeze(game); sfx.play("crunch"); sfx.vibrate([80, 40, 80]);
+          fx.fly(field, { x: 50, y: 50 }, at(f.actor), "red", 12);
+          fx.pop(field, `−${amt}`, "red", { x: 50, y: 38 });
+          radar.say(f.actor, line(f.actor, "won"));
+        } else {
+          toast({ tone: "gold", who: f.actor, title: `Escaped. ${N(f.actor)}'s raid took 0` });
+          fx.banner(field, "ESCAPED", `${nameOf(f.actor, me)}'s raid took 0`, "gold");
+          sfx.play("fanfare"); sfx.vibrate([30, 30, 30]);
+          radar.say(f.actor, line(f.actor, "escaped"));
+          earn("escape");
+        }
+      } else if (f.kind === "defend" && me.includes(f.target || "")) {
+        toast({ tone: "hot", who: f.actor, title: `${N(f.actor)} defended and won ${amt} of your stake` });
+        fx.pop(field, "blocked", "red", at(f.actor)); sfx.play("deny");
+        radar.say(f.actor, line(f.actor, "defends"));
+      } else if (f.kind === "defend" && me.includes(f.actor)) {
+        fx.fly(field, at(f.target), { x: 50, y: 50 }, "gold", 10, () => { fx.pop(field, `+${amt}`, "gold", { x: 50, y: 38 }); sfx.play("coins"); });
+        if (f.target) radar.say(f.target, line(f.target, "defended"));
+        earn("wall");
+      }
     }
+  }
+  /** Radar disc percent to field percent (the disc is centred in the field). */
+  function discToField(p: { x: number; y: number }) {
+    const d = radar.discEl.getBoundingClientRect(), f = field.getBoundingClientRect();
+    if (!f.width || !f.height) return { x: 50, y: 50 };
+    return { x: ((d.left - f.left + (p.x / 100) * d.width) / f.width) * 100, y: ((d.top - f.top + (p.y / 100) * d.height) / f.height) * 100 };
+  }
+
+  // Rivals talk: an idle taunt now and then from a visible NPC.
+  const tauntT = window.setInterval(() => {
+    if (document.hidden || !w.ok) return;
+    const npcs = rivals().filter((h) => isNpc(h.account) && radar.node(h.account));
+    if (!npcs.length) return;
+    const h = npcs[Math.floor(Math.random() * npcs.length)];
+    radar.say(h.account, line(h.account, "idle", String(Math.random())));
+  }, 38_000);
+
+  /** CALL FOR BACKUP: share the defend link. */
+  async function shareRaid(r: Raid) {
+    const url = `${location.origin}/d/${r.id}`;
+    const who = nameOf(r.attacker, mine());
+    const left = Math.max(1, Math.round((r.deadline - chainNow()) / 60000));
+    const text = `${who} is raiding my ${r.target_kind === "vault" ? "vault" : "bag"} in Q-DAY. ${left} minute${left === 1 ? "" : "s"} left.`;
+    try {
+      if (navigator.share) { await navigator.share({ title: "Q-DAY", text, url }); return; }
+    } catch { return; }
+    window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, "_blank", "noopener");
   }
 
   // ---------------------------------------------------------------- activity
@@ -703,14 +892,15 @@ export function play(root: HTMLElement) {
     return s;
   }
   /** A button that sends one move, with its own busy state and message line. */
-  function move(btn: HTMLButtonElement, out: HTMLElement, fn: () => Promise<{ hash?: string; value?: unknown }>, ok: (v: any) => string, kind: string, after?: () => void) {
+  function move(btn: HTMLButtonElement, out: HTMLElement, fn: () => Promise<{ hash?: string; value?: unknown }>, ok: (v: any) => string, kind: string, after?: (v: any) => void, fin?: () => void) {
     btn.onclick = async () => {
       if (btn.classList.contains("busy")) return;
       const label = btn.innerHTML;
       btn.classList.add("busy");
       btn.disabled = true;
+      btn.textContent = "In flight";
       out.className = "s-msg";
-      out.textContent = "Sending…";
+      out.textContent = "Waiting for the chain to confirm…";
       try {
         const r = await fn();
         keepReceipt(kind, r.hash);
@@ -718,13 +908,15 @@ export function play(root: HTMLElement) {
         out.className = "s-msg ok";
         out.textContent = text;
         toast({ tone: "gold", title: esc(text) });
-        after?.();
+        after?.(r.value);
         await refresh();
       } catch (e) {
         console.warn(e);
+        sfx.play("deny");
         out.className = "s-msg bad";
         out.textContent = plainError(e);
       } finally {
+        fin?.();
         btn.classList.remove("busy");
         btn.disabled = false;
         btn.innerHTML = label;
@@ -786,13 +978,18 @@ export function play(root: HTMLElement) {
     const go = sheet!.body.querySelector<HTMLButtonElement>("#rs-go")!;
     move(go, sheet!.body.querySelector("#rs-msg")!, () => {
       const stake = BigInt(range.value) * 10n ** 18n;
+      pendingRaid = id;
+      sfx.play("zap");
+      renderRadar();
+      sheet?.close();
       return chain.raid(id, stake.toString());
     }, (v) => {
       const rid = String(v ?? "");
       if (rid) setProg({ raids: [...(prog().raids || []), rid].slice(-20) });
       if (prog().stage === "strike") setProg({ stage: "done" });
+      radar.say(id, line(id, "raided"));
       return `Raid on ${nameOf(id, mine())} is on. They have ${minutes(P(c(), "defend_window_ms"))}.`;
-    }, "raid", () => setTimeout(() => sheet?.close(), 1400));
+    }, "raid", undefined, () => { pendingRaid = ""; missionKey = ""; render(); });
     updateRaidSheet();
   }
 
@@ -800,7 +997,7 @@ export function play(root: HTMLElement) {
     const id = sheetArg;
     const h = w.holders.find((x) => x.account === id);
     const B = sheet!.body;
-    if (!h) return;
+    if (!h || !B.isConnected) return;
     const b = blocker(h);
     const vault = h.kind === "vault";
     const share = vault ? P(c(), "vault_take_bps") : P(c(), "take_bps");
@@ -883,12 +1080,20 @@ export function play(root: HTMLElement) {
       act.innerHTML = `<p class="s-text">Time is up. The raid settles in a moment.</p><button class="btn wide ghost" id="ur-go">Settle it now</button>`;
       move(act.querySelector("#ur-go")!, out, () => chain.resolve(r.id), (v) => `Settled. The raid took ${full(String(v ?? "0"))}.`, "resolve");
     } else if (!exposed) {
-      act.innerHTML = `<p class="s-text">Defend now and their stake of ${full(r.stake)} is yours, less a ${pct(P(c(), "raid_burn_bps"))} burn.</p><button class="btn wide" id="ur-go">Defend</button>`;
-      move(act.querySelector("#ur-go")!, out, () => chain.defend(r.id), () => `You defended! Their stake is yours.`, "defend");
+      act.innerHTML = `<p class="s-text">Defend now and their stake of ${full(r.stake)} is yours, less a ${pct(P(c(), "raid_burn_bps"))} burn.</p><button class="btn wide" id="ur-go">Defend</button><button type="button" class="btn ghost wide small" id="ur-share">${I.share} Call for backup</button>`;
+      act.querySelector<HTMLButtonElement>("#ur-share")!.onclick = () => shareRaid(r);
+      move(act.querySelector("#ur-go")!, out, () => chain.defend(r.id), () => `You defended! Their stake is yours.`, "defend", () => {
+        core.classList.add("dome-pop"); setTimeout(() => core.classList.remove("dome-pop"), 900);
+        sfx.play("clang"); sfx.vibrate([40, 30, 40]);
+        fx.banner(field, "DEFENDED", `${nameOf(r.attacker, mine())}'s stake is yours`, "gold");
+        radar.say(r.attacker, line(r.attacker, "defended"));
+        earn("wall");
+      });
     } else if (w.walletBal === 0n) {
       act.innerHTML = `<p class="s-text">Your coins are already in your vault. Watch the clock.</p>`;
     } else {
-      act.innerHTML = `<p class="s-text">Exposed coins can't defend. They can run: ${sess().vault ? "move them into your vault" : "build a vault and move in"} before the clock runs out and the raid gets nothing.</p><button class="btn wide hot" id="ur-go">${sess().vault ? "Move in now" : "Build vault & escape"}</button>`;
+      act.innerHTML = `<p class="s-text">Exposed coins can't defend. They can run: ${sess().vault ? "move them into your vault" : "build a vault and move in"} before the clock runs out and the raid gets nothing.</p><button class="btn wide hot" id="ur-go">${sess().vault ? "Move in now" : "Build vault & escape"}</button><button type="button" class="btn ghost wide small" id="ur-share">${I.share} Call for backup</button>`;
+      act.querySelector<HTMLButtonElement>("#ur-share")!.onclick = () => shareRaid(r);
       act.querySelector<HTMLButtonElement>("#ur-go")!.onclick = () => {
         sheet?.close();
         setProg({ wantVault: true });
@@ -915,7 +1120,7 @@ export function play(root: HTMLElement) {
       <p class="s-msg" id="sh-msg" role="status"></p>`, "gold");
     const r = sheet!.body.querySelector<HTMLInputElement>("#sh-r")!;
     r.addEventListener("input", updateShield);
-    move(sheet!.body.querySelector("#sh-go")!, sheet!.body.querySelector("#sh-msg")!, () => chain.chargeShield(bps(w.vaultBal, Number(r.value)).toString()), (v) => `Shield up: ${pct(Number(v ?? 0))} until the next harvest.`, "shield");
+    move(sheet!.body.querySelector("#sh-go")!, sheet!.body.querySelector("#sh-msg")!, () => chain.chargeShield(bps(w.vaultBal, Number(r.value)).toString()), (v) => `Shield up: ${pct(Number(v ?? 0))} until the next harvest.`, "shield", () => { sfx.vibrate(40); earn("shield"); setTimeout(() => sheet?.close(), 900); });
     updateShield();
   }
   function updateShield() {
@@ -937,28 +1142,58 @@ export function play(root: HTMLElement) {
   // ----- satoshi
 
   function openSatoshi() {
-    show("satoshi", "", "Satoshi", `
-      <div class="who"><span class="av big">${satoshiAvatar()}</span><div><h2 class="s-title">Satoshi</h2><p class="who-sub">An old exposed stash that can never move or defend.</p></div></div>
-      <div class="stash"><span>Stash</span><b id="bs-stash"></b></div>
-      <p class="s-text" id="bs-rule"></p>
-      <p class="s-calc" id="bs-next"></p>
-      <button class="btn wide" id="bs-go">Hit Satoshi</button>
-      <p class="s-msg" id="bs-msg" role="status"></p>`, "gold");
-    move(sheet!.body.querySelector("#bs-go")!, sheet!.body.querySelector("#bs-msg")!, () => chain.bossRaid(), (v) => `You hit Satoshi: +${full(String(v ?? "0"))}.`, "boss");
+    show("satoshi", "", "Satoshi boss fight", `
+      <div class="boss">
+        <p class="kick gold">Boss fight</p>
+        <div class="boss-art" id="bs-art">${ART_SATOSHI}<span class="bp-say boss-say" id="bs-say" hidden></span></div>
+        <h2 class="s-title center">Satoshi</h2>
+        <div class="hp"><div class="hp-bar"><i id="bs-hp"></i></div><div class="hp-nums"><b id="bs-stash">··</b><span id="bs-of"></span></div></div>
+        <p class="s-text center" id="bs-rule"></p>
+        <p class="s-calc center" id="bs-next"></p>
+        <button class="btn wide hot big" id="bs-go">HIT</button>
+        <p class="s-msg center" id="bs-msg" role="status"></p>
+        <div class="boss-log"><span class="label">Last hits</span><ul id="bs-log"></ul></div>
+      </div>`, "gold");
+    sheet!.el.classList.add("boss-sheet");
+    move(sheet!.body.querySelector("#bs-go")!, sheet!.body.querySelector("#bs-msg")!, () => chain.bossRaid(), (v) => {
+      const kept = BigInt(String(v ?? "0"));
+      const burn = BigInt(P(c(), "boss_burn_bps"));
+      const dealt = burn > 0n ? (kept * 10000n + (10000n - burn) - 1n) / (10000n - burn) : kept;
+      return `You dealt ${full(dealt)} · kept ${full(kept)}`;
+    }, "boss", (v) => {
+      const B = sheet?.body;
+      if (B?.isConnected) {
+        const art = B.querySelector<HTMLElement>("#bs-art")!;
+        art.classList.add("hit"); setTimeout(() => art.classList.remove("hit"), 700);
+        fx.pop(B.querySelector<HTMLElement>(".boss")!, `−${full(String(v ?? "0"))}`, "red", { x: 50, y: 22 });
+        const say = B.querySelector<HTMLElement>("#bs-say")!;
+        say.textContent = line("satoshi", "hit", String(Math.random())); say.hidden = false;
+        setTimeout(() => { say.hidden = true; }, 3800);
+      }
+      fx.shake(game, true); fx.freeze(game, 120); sfx.play("thud"); sfx.vibrate([90, 30, 50]);
+      earn("slayer");
+    });
     updateSatoshi();
   }
   function updateSatoshi() {
     const B = sheet!.body, v = w.vault, st = w.stats;
-    if (!v || !st) return;
+    if (!v || !st || !B.isConnected) return;
     const stash = BigInt(st.satoshi_tokens);
+    const supply = PB(c(), "satoshi_supply");
     const hit = minB(bps(stash, P(c(), "boss_bps")), PB(c(), "boss_cap"));
     const keep = hit - bps(hit, P(c(), "boss_burn_bps"));
     B.querySelector<HTMLElement>("#bs-stash")!.textContent = full(stash);
-    B.querySelector<HTMLElement>("#bs-rule")!.textContent = `Hit once ${every(P(c(), "epoch_ms"))} for ${pct(P(c(), "boss_bps"))} of the stash (up to ${full(PB(c(), "boss_cap"))}). You keep ${full(keep)} of a hit now; ${pct(P(c(), "boss_burn_bps"))} burns.`;
+    B.querySelector<HTMLElement>("#bs-of")!.textContent = supply > 0n ? `of ${full(supply)}` : "";
+    B.querySelector<HTMLElement>("#bs-hp")!.style.width = `${supply > 0n ? Number((stash * 10000n) / supply) / 100 : 0}%`;
+    B.querySelector<HTMLElement>("#bs-rule")!.textContent = `Every player can hit once ${every(P(c(), "epoch_ms"))}. A hit takes ${pct(P(c(), "boss_bps"))} of the stash, up to ${full(PB(c(), "boss_cap"))}. ${pct(P(c(), "boss_burn_bps"))} burns.`;
     const enough = w.vaultBal >= PB(c(), "boss_min_balance");
-    B.querySelector<HTMLElement>("#bs-next")!.innerHTML = !enough ? `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to hit Satoshi.` : v.boss_ready ? `<b class="yel">Ready now.</b>` : `Next hit ready in <b>${span(Number(st.epoch_ends_ms) - chainNow())}</b>.`;
+    B.querySelector<HTMLElement>("#bs-next")!.innerHTML = !enough ? `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to hit Satoshi.` : v.boss_ready ? `A hit now takes <b class="yel">${full(hit)}</b>. You keep <b class="yel">${full(keep)}</b>.` : `Next hit ready in <b data-until="${st.epoch_ends_ms}">${span(Number(st.epoch_ends_ms) - chainNow())}</b>.`;
     const go = B.querySelector<HTMLButtonElement>("#bs-go")!;
-    if (!go.classList.contains("busy")) go.disabled = !(enough && v.boss_ready);
+    if (!go.classList.contains("busy")) { go.disabled = !(enough && v.boss_ready); go.textContent = v.boss_ready ? "HIT" : "HIT · on cooldown"; }
+    const me = mine();
+    const hits = w.feed.filter((f) => f.kind === "boss").slice(0, 5);
+    B.querySelector<HTMLElement>("#bs-log")!.innerHTML = hits.map((f) => `<li><span class="av">${avatar(f.actor)}</span><span>${N(f.actor)} hit for <b>${full(f.amount)}</b></span><small>${ago(Number(f.at))}</small></li>`).join("") || `<li class="empty">Nobody has hit Satoshi yet.</li>`;
+    void me;
   }
 
   // ----- market
@@ -1070,6 +1305,8 @@ export function play(root: HTMLElement) {
         <p class="s-text">Your vault key lives sealed in this browser. The recovery code opens your vault on any device. Keep it somewhere safe and never share it.</p>
         <div id="bk"><button type="button" class="btn wide ghost" id="bk-show">Show recovery code</button></div>
       </div>` : ""}
+      <div class="titles"><span class="set-k">Your titles</span><div class="title-row">${(Object.keys(TITLES) as TitleKey[]).map((k) => `<span class="ttl ${titles().includes(k) ? "on" : ""}" title="${TITLES[k][1]}">${TITLES[k][0]}</span>`).join("")}</div>
+        ${titles().length ? `<button type="button" class="btn ghost wide small" id="st-share">${I.share} Share your titles</button>` : `<p class="m-hint">Earn titles by playing: build a vault, escape a raid, shield, defend, raid, hit Satoshi.</p>`}</div>
       <div class="set-list">
         <button type="button" class="set-item" id="st-act"><span>Activity</span><span>›</span></button>
         <button type="button" class="set-item" id="st-theme"><span>Theme</span><span>${theme === "dark" ? "Dark" : "Light"}</span></button>
@@ -1084,6 +1321,14 @@ export function play(root: HTMLElement) {
     const B = sheet!.body;
     const out = B.querySelector<HTMLElement>("#st-msg")!;
     B.querySelector<HTMLButtonElement>("#st-act")!.onclick = () => openActivity();
+    const shareT = B.querySelector<HTMLButtonElement>("#st-share");
+    if (shareT) shareT.onclick = async () => {
+      const names = titles().map((k) => TITLES[k][0]).join(", ");
+      const text = `I'm ${names} in Q-DAY. Get your coins into a quantum vault before Q-Day.`;
+      const url = location.origin;
+      try { if (navigator.share) { await navigator.share({ title: "Q-DAY", text, url }); return; } } catch { return; }
+      window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, "_blank", "noopener");
+    };
     B.querySelector<HTMLButtonElement>("#st-theme")!.onclick = (e) => {
       const next = (document.documentElement.getAttribute("data-theme") || theme) === "dark" ? "light" : "dark";
       document.documentElement.setAttribute("data-theme", next);
@@ -1140,8 +1385,20 @@ export function play(root: HTMLElement) {
 
   // ---------------------------------------------------------------- render
 
+  function renderPeek() {
+    const t = root.querySelector<HTMLElement>("#peek-t");
+    if (!t || !w.feed.length) return;
+    const f = w.feed[0];
+    const tmp = document.createElement("span");
+    tmp.innerHTML = say(f, mine());
+    const s = tmp.textContent || "Activity";
+    if (t.textContent !== s) t.textContent = s;
+  }
+  root.querySelector("#feed-peek")!.addEventListener("click", () => openActivity());
+
   function render() {
     if (!w.ok && !loaded) { renderMission(); renderRadar(); return; }
+    renderPeek();
     renderHud();
     renderMission();
     renderRadar();
@@ -1184,6 +1441,7 @@ export function play(root: HTMLElement) {
   })();
   vaultName = suggestVaultName(sess().wallet?.accountId || String(Date.now()));
   render();
+  if (!introDone) { introDone = true; coldOpen(); }
   tick(false);
   // While the game is open, wake the NPCs once a minute: they settle closed raids,
   // run the harvest when it is due, and answer raids on their own vaults.
@@ -1194,6 +1452,8 @@ export function play(root: HTMLElement) {
     pollT();
     clearInterval(clockT);
     clearInterval(npcBeat);
+    clearInterval(tauntT);
+    offMute();
     bleed.destroy();
     sheet?.close();
     document.body.classList.remove("in-game");
