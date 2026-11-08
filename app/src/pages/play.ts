@@ -580,7 +580,7 @@ export function play(root: HTMLElement) {
       if (i >= 0) prevRank = i + 1;
       const arrow = rankArrow && Date.now() - rankArrowT < 6000 ? `<i class="rk-arrow ${rankArrow}">${rankArrow === "up" ? "▲" : "▼"}</i>` : "";
       rank.innerHTML = i >= 0 ? `#${i + 1}${arrow}<small> of ${list.length}</small>` : "··";
-    } else rank.innerHTML = `<small>Vaults only</small>`;
+    } else rank.innerHTML = `<small>No vault</small>`;
     root.querySelector<HTMLElement>(".rdot")!.hidden = !(s.vault && prog().backedUp !== s.vault.accountId);
   }
 
