@@ -184,7 +184,7 @@ export class Radar {
       .map((l) => {
         const p = this.pos.get(l.to)!;
         // two raids on one line (yours out, theirs in): the labels sit at different points
-        const k = l.dir === "out" ? 0.62 : 0.38;
+        const k = l.dir === "out" ? 0.7 : 0.52;
         return `<span class="rd-lab ${l.dir}${l.pending ? " pend" : ""}" data-id="${esc(l.id)}" data-until="${l.pending ? "" : l.until}" style="left:${50 + (p.x - 50) * k}%;top:${50 + (p.y - 50) * k}%">${l.pending ? "in flight" : ""}</span>`;
       })
       .join("");

@@ -1,0 +1,21 @@
+// v3: the cold open panels on a fresh device (no wallet is made: nothing is clicked after the intro).
+import puppeteer from "puppeteer-core";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const OUT = "C:/Users/LENOVO/qday-launch/v3shots";
+const b = await puppeteer.launch({ userDataDir: mkdtempSync(join(tmpdir(), "qd3i-")), executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true, args: ["--no-sandbox"] });
+const p = await b.newPage();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await p.evaluateOnNewDocument(() => localStorage.setItem("qday.theme", "dark"));
+await p.goto("http://localhost:5181/play", { waitUntil: "domcontentloaded" });
+await sleep(2600);
+await p.screenshot({ path: `${OUT}/s-00-cold-open-1.png` });
+await p.tap(".intro-text"); await sleep(300); await p.tap(".intro-text"); await sleep(2600);
+await p.screenshot({ path: `${OUT}/s-00-cold-open-2.png` });
+await p.tap(".intro-text"); await sleep(300); await p.tap(".intro-text"); await sleep(2600);
+await p.screenshot({ path: `${OUT}/s-00-cold-open-3.png` });
+await p.tap(".intro-text"); await sleep(300); await p.tap(".intro-text"); await sleep(700);
+await p.screenshot({ path: `${OUT}/s-00-power-on.png` });
+await b.close();

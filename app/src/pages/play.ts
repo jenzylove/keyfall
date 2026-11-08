@@ -96,6 +96,7 @@ type Mission =
   | { k: "exposed" }
   | { k: "build"; raid: Raid | null }
   | { k: "movein"; raid: Raid | null }
+  | { k: "defend"; raid: Raid }
   | { k: "safe" }
   | { k: "strike" }
   | { k: "done" }
@@ -240,11 +241,13 @@ export function play(root: HTMLElement) {
   async function load() {
     const s = sess();
     const safe = async <T,>(p: Promise<T>): Promise<T | null> => { try { return await p; } catch { return null; } };
+    // a failed holder read keeps the previous holder, so a slow node never resets the mission
+    const keep = async <T,>(p: Promise<T>, prev: T): Promise<T> => { try { return await p; } catch { return prev; } };
     const [stats, config, wallet, vault, walletNear, vaultNear, feed, open, count] = await Promise.all([
       safe(chain.getStats()),
       w.config ? Promise.resolve(w.config) : safe(chain.getConfig()),
-      s.wallet ? safe(chain.getHolder(s.wallet.accountId)) : Promise.resolve(null),
-      s.vault ? safe(chain.getHolder(s.vault.accountId)) : Promise.resolve(null),
+      s.wallet ? keep(chain.getHolder(s.wallet.accountId), w.wallet) : Promise.resolve(null),
+      s.vault ? keep(chain.getHolder(s.vault.accountId), w.vault) : Promise.resolve(null),
       s.wallet ? safe(chain.nearBalance(s.wallet.accountId)) : Promise.resolve(null),
       s.vault ? safe(chain.nearBalance(s.vault.accountId)) : Promise.resolve(null),
       safe(chain.getFeed(30)),
@@ -351,6 +354,7 @@ export function play(root: HTMLElement) {
     if (w.stats?.after_q_day) return { k: "over" };
     const pr = prog();
     const raid = w.incoming && w.incoming.target === s.wallet?.accountId ? w.incoming : null;
+    if (s.vault && w.incoming && w.incoming.target === s.vault.accountId && w.incoming.status === "open" && w.incoming.deadline > chainNow()) return { k: "defend", raid: w.incoming };
     if (!s.vault) {
       if (!s.wallet || w.walletBal === 0n) return { k: "grab", buyOnly: !!s.wallet };
       if (raid || pr.wantVault) return { k: "build", raid };
@@ -367,13 +371,13 @@ export function play(root: HTMLElement) {
 
   const STEPS = ["grab", "exposed", "build", "safe", "strike"];
   function pips(k: string) {
-    const i = k === "movein" ? 2 : STEPS.indexOf(k);
+    const i = k === "movein" ? 2 : k === "defend" ? 3 : STEPS.indexOf(k);
     return `<span class="pips" aria-label="Mission ${i + 1} of 5">${STEPS.map((_, j) => `<i class="${j < i ? "d" : j === i ? "n" : ""}"></i>`).join("")}</span><span class="m-count">Mission ${i + 1} of 5</span>`;
   }
 
   function renderMission() {
     const m = mission();
-    const raid = (m.k === "build" || m.k === "movein") && m.raid ? m.raid : null;
+    const raid = (m.k === "build" || m.k === "movein" || m.k === "defend") && m.raid ? m.raid : null;
     const target = m.k === "strike" ? bestTarget() : null;
     const esc2 = w.escape;
     const key = [m.k, raid?.id ?? "", busy, target?.account ?? "", esc2 ? `${esc2.id}:${esc2.status}` : "", m.k === "grab" && m.buyOnly, pendingRaid].join("|");
@@ -415,6 +419,14 @@ export function play(root: HTMLElement) {
               ? `<p class="m-text">Your vault is ready. Move your coins in and they stop bleeding.</p>`
               : `<p class="m-text">A vault is a new account that only a quantum safe key can open. It uses 0.3 of the testnet NEAR in your wallet.</p>${field}`,
             btn);
+        break;
+      }
+      case "defend": {
+        const r = m.raid!;
+        html = card("alarm", `<span class="m-count">Incoming raid</span><span class="m-clock" data-until="${r.deadline}">${clock(r.deadline - chainNow())}</span>`,
+          `${N(r.attacker)} is raiding you`,
+          `<p class="m-text">Defend before the clock runs out and their stake of <b>${full(r.stake)}</b> is yours. Do nothing and they take a slice of your vault.</p>`,
+          `<button class="btn wide hot" id="m-go">Defend</button>` + backup);
         break;
       }
       case "safe": {
@@ -492,6 +504,8 @@ export function play(root: HTMLElement) {
     if ((m.k === "build" || m.k === "movein") && go) go.onclick = () => buildAndMove(msg);
     const bk = missionEl.querySelector<HTMLButtonElement>("#m-backup");
     if (bk && (m.k === "build" || m.k === "movein") && m.raid) bk.onclick = () => shareRaid(m.raid!);
+    if (m.k === "defend" && go) go.onclick = () => openUnderRaid();
+    if (bk && m.k === "defend") bk.onclick = () => shareRaid(m.raid);
     if (m.k === "safe" && go) go.onclick = () => { setProg({ vault: sess().vault!.accountId, stage: "strike" }); missionKey = ""; render(); };
     if (m.k === "strike") {
       if (go && target) go.onclick = () => openRaid(target.account);
@@ -706,7 +720,7 @@ export function play(root: HTMLElement) {
     prevShield = shieldBps;
     prevState = state;
     const lab = core.querySelector<HTMLElement>("#core-lab")!;
-    lab.textContent = state === "none" ? "No bag yet" : shieldBps ? `You · ${pct(shieldBps)} shield` : "You";
+    lab.textContent = state === "none" ? "No bag yet" : "You";
     if (lastBag >= 0n && bag > lastBag && lastBag > 0n) { core.classList.remove("win"); void core.offsetWidth; core.classList.add("win"); }
     lastBag = bag;
     const fm = root.querySelector<HTMLElement>("#field-msg")!;
@@ -909,6 +923,9 @@ export function play(root: HTMLElement) {
         out.textContent = text;
         toast({ tone: "gold", title: esc(text) });
         after?.(r.value);
+        btn.classList.remove("busy");
+        btn.disabled = false;
+        btn.innerHTML = label;
         await refresh();
       } catch (e) {
         console.warn(e);
@@ -981,7 +998,6 @@ export function play(root: HTMLElement) {
       pendingRaid = id;
       sfx.play("zap");
       renderRadar();
-      sheet?.close();
       return chain.raid(id, stake.toString());
     }, (v) => {
       const rid = String(v ?? "");
@@ -989,7 +1005,7 @@ export function play(root: HTMLElement) {
       if (prog().stage === "strike") setProg({ stage: "done" });
       radar.say(id, line(id, "raided"));
       return `Raid on ${nameOf(id, mine())} is on. They have ${minutes(P(c(), "defend_window_ms"))}.`;
-    }, "raid", undefined, () => { pendingRaid = ""; missionKey = ""; render(); });
+    }, "raid", () => setTimeout(() => sheet?.close(), 1200), () => { pendingRaid = ""; missionKey = ""; render(); });
     updateRaidSheet();
   }
 
@@ -1009,6 +1025,7 @@ export function play(root: HTMLElement) {
     const why = B.querySelector<HTMLElement>("#rs-why")!;
     let reason = "";
     if (!inVault()) reason = "Vaults only. Build your vault first: exposed coins can't fight.";
+    else if (w.vault?.under_raid) reason = "You are under raid. Defend first, then strike.";
     else if (b.why) reason = b.why;
     else if (w.vault!.raids_left <= 0) reason = `You've used your ${P(c(), "max_raids_per_epoch")} raids. They come back in ${span(Number(w.stats!.epoch_ends_ms) - chainNow())}.`;
     const go = B.querySelector<HTMLButtonElement>("#rs-go")!;

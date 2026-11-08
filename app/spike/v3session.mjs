@@ -22,9 +22,15 @@ await p.evaluateOnNewDocument(() => { if (!localStorage.getItem("qday.theme")) l
 await p.goto(`${BASE}/play`, { waitUntil: "networkidle2" });
 await sleep(1200);
 await shot("00-cold-open-1");
-await p.tap(".intro-text"); await sleep(1500); await shot("00-cold-open-2");
-await p.tap(".intro-text"); await sleep(1500); await shot("00-cold-open-3");
-await p.tap(".intro-text"); await sleep(900); await shot("00-power-on");
+// each tap finishes the typewriter, the next tap advances; keep tapping until the intro is gone
+let panel = 1;
+for (let i = 0; i < 12 && (await p.$(".intro")); i++) {
+  const before = await p.evaluate(() => document.querySelector("#in-text")?.textContent || "");
+  await p.tap(".intro-text"); await sleep(1400);
+  const after = await p.evaluate(() => document.querySelector("#in-text")?.textContent || "");
+  if (after && after !== before && !before.startsWith(after.slice(0, 8))) { panel++; await shot(`00-cold-open-${panel}`); }
+}
+await sleep(300); await shot("00-power-on");
 await waitFor(() => document.querySelector(".mission")?.getAttribute("data-k"), 30000);
 await sleep(1500);
 log("start mission", await k(), JSON.stringify(await scrollCheck()));
