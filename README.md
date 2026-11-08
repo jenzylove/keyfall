@@ -38,16 +38,15 @@ On NEAR an ML-DSA-65 (FIPS 204) key is an ordinary account key since protocol 85
 
 No wallet, no sign up, no popups. Testnet only, free.
 
-1. Open **https://qday-one.vercel.app/play** on a phone or desktop and press **Join the game**. You get a funded testnet wallet made in your browser.
-2. Press **Buy for 1 NEAR**. Your bag shows red and dripping: it is exposed.
-3. Wait about 30 seconds. A game NPC (a Qubit) raids your exposed bag. The screen turns into a raid alert with a 10 minute countdown.
-4. Escape: name your vault, save the recovery code, press **Escape: migrate now**. Your bag moves into an account whose only key is quantum safe.
-5. When the window closes, the raid settles. Because you escaped, **the raid takes nothing**. Had you stayed, it would have taken 10% of your bag.
-6. Now you are a vault: raid someone back, charge a shield, hit Satoshi's stash. Every move is signed in your browser with ML-DSA-65.
+1. Open **https://qday-one.vercel.app** on a phone or desktop and press **PLAY**. Missions walk you through the first session.
+2. **Grab my bag.** You get a funded testnet wallet made in your browser and your first bag of coins. Your bag sits in the middle of the radar, red and dripping: it is exposed.
+3. Wait about 30 seconds. A rival on the radar (a Qubit) raids your exposed bag and the mission card turns red with a 10 minute clock.
+4. **Build vault & move in.** Your coins move into an account whose only key is quantum safe. When the clock runs out the raid settles, and because you escaped, **it takes nothing**. Had you stayed, it would have taken 10%.
+5. **Strike back.** Tap the raider on the radar and raid it. Then shield, hit Satoshi and climb the board from the action bar. Every move is signed in your browser with ML-DSA-65.
 
 <p align="center"><img src="docs/img/raid-alert.png" alt="The raid alert on a phone: hazard stripes frame the screen while the exposed bag drips" width="320" /></p>
 
-Prefer to check without playing? Open **https://qday-one.vercel.app/proof**: every check there reads the chain from your browser.
+Prefer to check without playing? Open **Under the hood** (https://qday-one.vercel.app/proof): every check there reads the chain from your browser.
 
 ## Check every claim yourself
 
