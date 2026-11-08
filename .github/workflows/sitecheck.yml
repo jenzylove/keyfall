@@ -1,0 +1,26 @@
+name: sitecheck
+
+# Load every route of the live site in headless Chrome from a clean runner and
+# report read failures, console errors and any bot challenge.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        default: "https://qday-one.vercel.app"
+  schedule:
+    - cron: "41 */3 * * *"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - working-directory: app
+        run: npm ci
+      - working-directory: app
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: node spike/smoke.mjs "${{ inputs.url || 'https://qday-one.vercel.app' }}" | tee -a "$GITHUB_STEP_SUMMARY"
