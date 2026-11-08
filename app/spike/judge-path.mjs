@@ -27,14 +27,11 @@ await shot("03-bought"); log("after buy", t ? "ok" : "timeout");
 t = await waitText((s) => /being raided|Escape/i.test(s), 150000);
 log("raid alert", t ? "YES" : "no raid within 150s");
 await shot("04-alert");
-if (t) {
-  await click("#al-go"); log("escape clicked");
-  await new Promise((r) => setTimeout(r, 1500)); await shot("05-escape-form");
-}
-// vault form (onboarding or escape flow)
-await p.waitForSelector("#vf-saved", { visible: true, timeout: 60000 });
-await p.$eval("#vf-saved", (e) => e.scrollIntoView({ block: "center" }));
-await p.click("#vf-saved"); await click("#vf-go"); log("create vault clicked");
+// Escape (or plain onboarding): use whichever vault form is visible.
+const visible = async (sel) => { for (const h of await p.$$(sel)) { if (await h.isVisible()) return h; } return null; };
+let saved = null; for (let i = 0; i < 30 && !(saved = await visible("#vf-saved")); i++) await new Promise((r) => setTimeout(r, 1000));
+await saved.scrollIntoView(); await saved.click();
+const go = await visible("#vf-go"); await go.click(); log("create vault (escape) clicked");
 t = await waitText((s) => /STEP 4 OF 4/i.test(s) || /Hit Satoshi/i.test(s), 90000);
 await shot("06-vault"); log("after vault", t ? "ok" : "timeout");
 if (await p.$("#ob-go")) { const label = await text("#ob-go"); if (/Move my bag/i.test(label)) { await click("#ob-go"); log("migrate clicked"); } }

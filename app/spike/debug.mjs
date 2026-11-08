@@ -1,0 +1,13 @@
+import puppeteer, { KnownDevices } from "puppeteer-core";
+const b = await puppeteer.launch({ userDataDir: process.env.PROFILE, executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
+const p = await b.newPage(); await p.emulate(KnownDevices["Pixel 5"]);
+p.on("console", (m) => (m.type() === "error" || m.type() === "warn") && console.log("console", m.type(), m.text().slice(0, 300)));
+p.on("pageerror", (e) => console.log("pageerror", String(e).slice(0, 400)));
+p.on("response", async (r) => { if (r.url().includes("/api/rpc") && r.status() !== 200) console.log("rpc", r.status(), (await r.text().catch(() => "")).slice(0, 200)); });
+p.on("requestfailed", (r) => console.log("failed", r.url().slice(0, 80), r.failure()?.errorText));
+await p.goto("https://qday-one.vercel.app/play", { waitUntil: "networkidle2" });
+await new Promise((r) => setTimeout(r, 12000));
+const t = await p.evaluate(() => document.body.innerText);
+console.log("cantReach", (t.match(/can't reach NEAR/g) || []).length);
+console.log("ls", await p.evaluate(() => Object.keys(localStorage)));
+await b.close();

@@ -13,10 +13,36 @@ import {
 } from "@fastnear/utils";
 
 export const NETWORK = "testnet" as const;
-// Reads and transactions go through the app's own RPC proxy (/api/rpc), which
-// falls back across public testnet nodes. Off Vercel (vite dev) use a public node.
-const RPC_URL = typeof location !== "undefined" && /localhost|127\.0\.0\.1/.test(location.hostname) ? "https://rpc.testnet.fastnear.com" : `${location.origin}/api/rpc`;
-near.config({ networkId: NETWORK, nodeUrl: RPC_URL } as any);
+// Reads and transactions go straight from the browser to public testnet nodes,
+// moving to the next one when a node fails or rate limits. The app's own proxy
+// (/api/rpc) is the last resort, so the site never depends on one node.
+const RPCS = [
+  "https://rpc.testnet.fastnear.com",
+  "https://rpc.testnet.near.org",
+  "https://test.rpc.fastnear.com",
+  ...(typeof location !== "undefined" && !/localhost|127\.0\.0\.1/.test(location.hostname) ? [`${location.origin}/api/rpc`] : []),
+];
+let rpcIndex = 0;
+near.config({ networkId: NETWORK, nodeUrl: RPCS[0] } as any);
+function nextRpc() {
+  rpcIndex = (rpcIndex + 1) % RPCS.length;
+  near.config({ networkId: NETWORK, nodeUrl: RPCS[rpcIndex] } as any);
+}
+const transient = (e: unknown) => /fetch|network|transport|timeout|429|50[234]|CORS|Failed to/i.test(String((e as any)?.message || e));
+/** Run an RPC call, moving across nodes on transport errors. */
+async function withRpc<T>(fn: () => Promise<T>): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < RPCS.length; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (!transient(e)) throw e;
+      nextRpc();
+    }
+  }
+  throw last;
+}
 export const CONTRACT: string = import.meta.env.VITE_CONTRACT || "";
 export const EXPLORER = "https://testnet.nearblocks.io";
 export const txLink = (h: string) => `${EXPLORER}/txns/${h}`;
@@ -86,7 +112,7 @@ function friendly(raw: string): string {
 // ------------------------------------------------------------------ reads
 
 export async function view<T = unknown>(methodName: string, args: object = {}): Promise<T> {
-  return (await near.view({ contractId: CONTRACT, methodName, args, network: NETWORK })) as T;
+  return (await withRpc(() => near.view({ contractId: CONTRACT, methodName, args, network: NETWORK }))) as T;
 }
 
 export const getStats = () => view<Stats>("stats");
@@ -104,14 +130,14 @@ export const quoteSell = (amount: string) => view<string | null>("quote_sell", {
 export const balanceOf = (account_id: string) => view<string>("ft_balance_of", { account_id });
 
 export async function keyList(accountId: string): Promise<{ public_key: string; permission: unknown }[]> {
-  const r: any = await near.queryAccessKeyList({ accountId, blockId: "final", network: NETWORK });
+  const r: any = await withRpc(() => near.queryAccessKeyList({ accountId, blockId: "final", network: NETWORK }));
   const res = r?.result ?? r;
   return (res?.keys || []).map((k: any) => ({ public_key: k.public_key, permission: k.access_key?.permission }));
 }
 
 export async function nearBalance(accountId: string): Promise<bigint> {
   try {
-    const r: any = await near.queryAccount({ accountId, network: NETWORK });
+    const r: any = await withRpc(() => near.queryAccount({ accountId, network: NETWORK }));
     const a = r?.result ?? r;
     return BigInt(a?.amount || 0);
   } catch {
@@ -268,6 +294,7 @@ async function send(who: { accountId: string; signer: any }, receiverId: string,
       lastErr = e;
       const msg = String(e?.message || e);
       if (/fetch|network|timeout|503|502|429/i.test(msg)) {
+        nextRpc();
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         continue;
       }

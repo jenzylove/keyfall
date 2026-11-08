@@ -1,6 +1,6 @@
 import puppeteer, { KnownDevices } from "puppeteer-core";
-const BASE = "https://qday-one.vercel.app", OUT = "C:/Users/LENOVO/qday-launch/live";
-const b = await puppeteer.launch({ userDataDir: "C:/Users/LENOVO/qday-launch/chrome-judge", executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
+const BASE = "https://qday-one.vercel.app", OUT = process.env.OUT || "C:/Users/LENOVO/qday-launch/live";
+const b = await puppeteer.launch({ userDataDir: process.env.PROFILE || "C:/Users/LENOVO/qday-launch/chrome-judge", executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
 const p = await b.newPage(); await p.emulate(KnownDevices["Pixel 5"]);
 const errors = []; p.on("pageerror", (e) => errors.push(String(e))); p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 const t0 = Date.now(); const log = (s) => console.log(`[${((Date.now() - t0) / 1000).toFixed(0)}s] ${s}`);
@@ -14,8 +14,8 @@ const form = (await p.$("#al-form #vf-saved")) ? "#al-form" : "#ob-form";
 log("using form " + form);
 await p.$eval(`${form} #vf-saved`, (e) => e.scrollIntoView({ block: "center" })); await p.click(`${form} #vf-saved`);
 await p.click(`${form} #vf-go`); log("vault + migrate started");
-let r = await waitText(/Hit Satoshi/i, 120000); log("in game: " + Boolean(r));
-if (!r && (await p.$("#ob-go"))) { await p.click("#ob-go"); log("clicked migrate"); r = await waitText(/Hit Satoshi/i, 90000); log("in game: " + Boolean(r)); }
+let r = await p.waitForSelector("#bs-go", { timeout: 120000 }).catch(() => null); log("in game: " + Boolean(r));
+if (!r && (await p.$("#ob-go"))) { await p.click("#ob-go"); log("clicked migrate"); r = await p.waitForSelector("#bs-go", { timeout: 90000 }).catch(() => null); log("in game: " + Boolean(r)); }
 await p.screenshot({ path: `${OUT}/12-vault.png` });
 log("raid deadline wait…");
 const settled = await waitText(/took nothing|escaped|Escaped/i, 720000);
