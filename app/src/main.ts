@@ -3,19 +3,19 @@ import { landing } from "./pages/landing";
 import { play } from "./pages/play";
 import { defendPage } from "./pages/defend";
 import { proof } from "./pages/proof";
+import { MARK } from "./ui/pixels";
+import * as sfx from "./ui/sound";
 
 export type Page = (root: HTMLElement, params: Record<string, string>) => () => void;
 
 const routes: [RegExp, Page, string][] = [
-  [/^\/$/, landing, "Q-DAY · Move into a quantum vault before Q-Day"],
+  [/^\/$/, landing, "Q-DAY · Get into a quantum vault before Q-Day"],
   [/^\/play\/?$/, play, "Play · Q-DAY"],
   [/^\/d\/(?<id>\d+)\/?$/, defendPage, "Defend · Q-DAY"],
   [/^\/proof\/?$/, proof, "Under the hood · Q-DAY"],
 ];
 
 const app = document.getElementById("app")!;
-
-const LOGO = `<svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="21" fill="none" stroke="#FFD60A" stroke-width="8"/><path d="M13 51L51 13" stroke="#FF3D2E" stroke-width="8" stroke-linecap="round"/></svg>`;
 
 function effectiveTheme(): "light" | "dark" {
   const t = document.documentElement.getAttribute("data-theme");
@@ -25,28 +25,35 @@ function effectiveTheme(): "light" | "dark" {
 
 function chrome() {
   app.innerHTML = `
-    <div class="alert-edge" aria-hidden="true"></div>
+    <div class="crt" aria-hidden="true"></div>
     <header class="wrap top">
-      <a class="brand" href="/" data-link>${LOGO}Q-DAY</a>
+      <a class="brand" href="/" data-link><span class="mark">${MARK}</span>Q-DAY</a>
       <nav class="nav">
         <a href="/play" data-link class="play-link">Play</a>
         <a href="/proof" data-link>Under the hood</a>
+        <button class="snd ico" type="button" aria-label="Sound"></button>
         <button class="theme ico" type="button" aria-label="Switch colour theme"></button>
       </nav>
     </header>
     <main id="page"></main>`;
   const tb = app.querySelector<HTMLButtonElement>(".theme")!;
-  const SUN = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1" stroke="currentColor" stroke-width="2"/></svg>`;
-  const MOON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 2.5A9.5 9.5 0 1 0 21.5 16 8 8 0 0 1 15.5 2.5Z" fill="currentColor"/></svg>`;
+  const SUN = `<svg viewBox="0 0 24 24" aria-hidden="true" shape-rendering="crispEdges"><rect x="9" y="9" width="6" height="6" fill="currentColor"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M6 6l2 2M16 16l2 2M6 18l2-2M16 8l2-2" stroke="currentColor" stroke-width="2"/></svg>`;
+  const MOON = `<svg viewBox="0 0 24 24" aria-hidden="true" shape-rendering="crispEdges"><path d="M9 3h5v2h-3v2H9v2H7v6h2v2h2v2h3v2H9v-2H7v-2H5v-2H3V9h2V7h2V5h2z" fill="currentColor"/></svg>`;
   const label = () => { const dark = effectiveTheme() === "dark"; tb.innerHTML = dark ? SUN : MOON; tb.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme"); };
   label();
   tb.addEventListener("click", () => {
     const next = effectiveTheme() === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
     try { localStorage.setItem("qday.theme", next); } catch {}
+    sfx.play("blip");
     label();
   });
   matchMedia("(prefers-color-scheme: light)").addEventListener("change", label);
+  const sb = app.querySelector<HTMLButtonElement>(".snd")!;
+  const slabel = (m: boolean) => { sb.innerHTML = m ? sfx.SPEAKER_OFF : sfx.SPEAKER; sb.setAttribute("aria-label", m ? "Sound off. Turn on" : "Sound on. Mute"); sb.classList.toggle("off", m); };
+  slabel(sfx.isMuted());
+  sfx.onMute(slabel);
+  sb.addEventListener("click", () => { sfx.unlock(); sfx.toggleMute(); if (!sfx.isMuted()) sfx.play("blip"); });
 }
 
 let cleanup: (() => void) | null = null;
@@ -73,7 +80,7 @@ function render() {
     }
   }
   document.title = "Not found · Q-DAY";
-  page.innerHTML = `<section class="wrap page-title"><p class="eyebrow"><span class="dot"></span>Signal lost</p><h1 class="display h2">No such page.</h1><p><a class="btn" href="/" data-link>Back to the title</a></p></section>`;
+  page.innerHTML = `<section class="wrap page-title"><p class="eyebrow"><span class="dot"></span>Signal lost</p><h1 class="display h2">No such page</h1><p><a class="btn" href="/" data-link>Back to the title</a></p></section>`;
 }
 
 export function go(href: string) {
@@ -90,6 +97,11 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   go(url.pathname + url.search + url.hash);
 });
+// Every button and link blips, once sound is unlocked.
+document.addEventListener("pointerdown", (e) => {
+  const t = (e.target as HTMLElement).closest?.("button, a.btn, .blip");
+  if (t && !t.classList.contains("snd") && !(t as HTMLButtonElement).disabled) sfx.play("blip");
+}, { passive: true });
 window.addEventListener("popstate", render);
 
 chrome();

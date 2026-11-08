@@ -17,7 +17,7 @@ export interface Blip {
   npc: boolean;
   hot?: boolean; // highlighted by a mission or a raid on you
 }
-export interface RaidLine { id: string; to: string; dir: "out" | "in" | "miss"; until: number }
+export interface RaidLine { id: string; to: string; dir: "out" | "in" | "miss"; until: number; pending?: boolean }
 
 const SWEEP_MS = 8000;
 const RINGS = [0.5, 0.7, 0.9];
@@ -56,6 +56,7 @@ export class Radar {
             return `<path d="M${50 + Math.sin(a) * 49.5} ${50 - Math.cos(a) * 49.5}L${50 + Math.sin(a) * (49.5 - l)} ${50 - Math.cos(a) * (49.5 - l)}" class="tk"/>`;
           }).join("")}
         </svg>
+        <div class="rd-grid" aria-hidden="true"></div>
         <div class="rd-sweep" aria-hidden="true"></div>
         <svg class="rd-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
         <div class="rd-center"></div>
@@ -141,6 +142,7 @@ export class Radar {
         node.dataset.id = b.id;
         node.dataset.t0 = String(now());
         node.innerHTML = `<span class="bp-av">${avatar(b.id)}</span><span class="bp-ic"></span><span class="bp-tx"><span class="bp-nm"></span><span class="bp-bal"></span></span>`;
+        node.style.setProperty("--bob", `${-(hash32(b.id) % 2400)}ms`);
         if (!this.opts.interactive) node.tabIndex = -1;
         this.layer.appendChild(node);
         this.nodes.set(b.id, node);
@@ -162,7 +164,7 @@ export class Radar {
   /** Raid lines between you (the centre) and a blip, with a countdown. */
   lines(list: RaidLine[]) {
     this.lineData = list.filter((l) => this.pos.has(l.to));
-    const sig = this.lineData.map((l) => `${l.id}:${l.to}:${l.dir}`).join("|");
+    const sig = this.lineData.map((l) => `${l.id}:${l.to}:${l.dir}:${!!l.pending}`).join("|");
     if (sig !== this.lineSig) { this.lineSig = sig; this.drawLines(); }
     this.tickLabels();
   }
@@ -172,17 +174,18 @@ export class Radar {
     this.svg.innerHTML = list
       .map((l) => {
         const p = this.pos.get(l.to)!;
+        const pend = l.pending ? " pend" : "";
         return l.dir === "out"
-          ? `<line x1="50" y1="50" x2="${p.x}" y2="${p.y}" class="ln out"/>`
-          : `<line x1="${p.x}" y1="${p.y}" x2="50" y2="50" class="ln ${l.dir}"/>`;
+          ? `<line x1="50" y1="50" x2="${p.x}" y2="${p.y}" class="ln out${pend}"/>`
+          : `<line x1="${p.x}" y1="${p.y}" x2="50" y2="50" class="ln ${l.dir}${pend}"/>`;
       })
       .join("");
     this.labels.innerHTML = list
       .map((l) => {
         const p = this.pos.get(l.to)!;
         // two raids on one line (yours out, theirs in): the labels sit at different points
-        const k = l.dir === "out" ? 0.62 : 0.38;
-        return `<span class="rd-lab ${l.dir}" data-id="${esc(l.id)}" data-until="${l.until}" style="left:${50 + (p.x - 50) * k}%;top:${50 + (p.y - 50) * k}%"></span>`;
+        const k = l.dir === "out" ? 0.7 : 0.52;
+        return `<span class="rd-lab ${l.dir}${l.pending ? " pend" : ""}" data-id="${esc(l.id)}" data-until="${l.pending ? "" : l.until}" style="left:${50 + (p.x - 50) * k}%;top:${50 + (p.y - 50) * k}%">${l.pending ? "in flight" : ""}</span>`;
       })
       .join("");
     this.tickLabels();
@@ -190,10 +193,26 @@ export class Radar {
 
   tickLabels(chainNow = Date.now()) {
     for (const el of this.labels.querySelectorAll<HTMLElement>(".rd-lab")) {
+      if (!el.dataset.until) continue;
       const left = Number(el.dataset.until) - chainNow;
       const s = Math.max(0, Math.ceil(left / 1000));
       el.textContent = left > 0 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "settling";
     }
+  }
+
+  /** A speech bubble over a blip, in character. */
+  say(id: string, text: string, ms = 3800) {
+    const n = this.nodes.get(id);
+    if (!n || !text) return;
+    n.querySelector(".bp-say")?.remove();
+    const b = document.createElement("span");
+    b.className = "bp-say";
+    b.textContent = text;
+    const p = this.pos.get(id);
+    if (p && p.x > 62) b.classList.add("left");
+    if (p && p.y < 22) b.classList.add("below");
+    n.appendChild(b);
+    setTimeout(() => { b.classList.add("out"); setTimeout(() => b.remove(), 220); }, ms);
   }
 
   pulse(id: string, cls: string) {
