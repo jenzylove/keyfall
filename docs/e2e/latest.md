@@ -1,34 +1,39 @@
 # End-to-end run (testnet, fast season)
 
-Contract `qday-fast-mw6v53dy3fp.testnet` Â· 2026-11-07T20:44:08.218Z Â· **ALL PASS**
+Contract `qday-fast-mw726yhglx.testnet` · 2026-11-08T00:53:59.145Z · **ALL PASS** · [Actions run](https://github.com/jenzylove/qday/actions/runs/42427087363)
 
 | Check | Result | Transaction |
 |---|---|---|
-| alice buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/728SJ7bXVq6oT92xapzovvqwCbpeRZ49fZbhyAX3QfQN) |
-| bob buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/8LSyw5cmb4fQVXbSS6Awak8f3nnNXmHSotvjTHva9cS5) |
-| carol buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/H8USKhrzRa6RsH2LotszHadtFsAsEmQfKSsPSJ8FwA64) |
-| dave buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/52KpoMrEznTc1DW2eAgBzaWa7ez7JvgKPDo8f5DGDP3L) |
+| alice buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/3dwvg9wPrMBGis6pQGt31thsoke6wFqi1FpKBbAsP7JW) |
+| bob buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/EiTnWqAM6J7BZPjnSUV2Ai8PtWjnCWrw1W6bCqjwjqGe) |
+| carol buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/2L6c4MHUX9XkrvWUknFPTyW5MmdSRiC7psQaa5q2MsGc) |
+| dave buys from the market | Pass | [view](https://testnet.nearblocks.io/txns/Ai1WMbC2RAgyCskwPePZEY1NqLxava5YKuEtryzLUTH3) |
 | a normal wallet is an exposed holder | Pass |  |
-| exposed wallet cannot raid (E_NOT_VAULT) | Pass | [view](https://testnet.nearblocks.io/txns/23KhKPBfYMvLgFDtuSJzEnaC899QMiREcBcKzKZpYYys) |
-| alice's vault is born quantum-only and registered | Pass | [view](https://testnet.nearblocks.io/txns/CCwubXdDJuUCTu8w1Pc5ieB38gYdVcYDtN3ooQFRgRmE) |
-| bob's vault is born quantum-only and registered | Pass | [view](https://testnet.nearblocks.io/txns/5bHSCfkhzk7ncEM7Uxp1PA392UCneSxZwYY5FpfW81xu) |
-| dave's vault is born quantum-only and registered | Pass | [view](https://testnet.nearblocks.io/txns/FUbEsQJ2iyfNQpBu4CsWPJNczUPLTxq3kwcgQ34GHqm1) |
-| alice migrates the whole bag into the vault | Pass | [view](https://testnet.nearblocks.io/txns/7K3m45uHFbvifW2NHsPJ3EonHXhsEgadpuSPRjVtecg9) |
-| bob migrates the whole bag into the vault | Pass | [view](https://testnet.nearblocks.io/txns/9DBzp5TRy6YS6Jbd4EEBS9oxQr9Hese8HvfKcpzCZSvA) |
-| vault raids an exposed wallet (signed with ML-DSA-65) | Pass | [view](https://testnet.nearblocks.io/txns/BGKWPjDDkm1N4ZDjUYQBw2oZFJQZHudENy6UtgBmPEuK) |
-| anyone resolves it after the window; take = take_bps of the bag | Pass | [view](https://testnet.nearblocks.io/txns/7fwUAPDemgcyHTZwyS3Y4WHLXRSe8BzVNYQL5Sa6GMzv) |
-| vault raids another vault | Pass | [view](https://testnet.nearblocks.io/txns/4ktEDFiPrfKRHMELF3zUC9cR5NiDNGjqibtPioU7qFYn) |
-| target defends in time and takes the stake (minus burn) | Pass | [view](https://testnet.nearblocks.io/txns/sR47ipT3CUj3oDRQxjoqqx8bCFmMiDgXjNMksaqkiSh) |
-| vault raids a second exposed wallet | Pass | [view](https://testnet.nearblocks.io/txns/CNr1VBvDnAf71NqwxcET5vRwFqscHjZqu9fg9PXSyKKX) |
-| the target escapes by migrating during the window | Pass | [view](https://testnet.nearblocks.io/txns/BNUAHEL6hVDs14jint7ubgSbKRTgtVdBenWQv7hAzJy5) |
-| the escaped raid takes nothing | Pass | [view](https://testnet.nearblocks.io/txns/BpeEpzNA97QxZu6LrjGfkYXwq2fWD6oQnKfNUZj31mJS) |
-| burning 4% of the bag buys a 20% shield | Pass | [view](https://testnet.nearblocks.io/txns/HMDot6xLm6F7ci2DFc4uy6nLXyNMwDuEdoUXim35t14t) |
-| boss raid takes from Satoshi's stash | Pass | [view](https://testnet.nearblocks.io/txns/2MycF314VWBfUvMTtctvWK6sg3Avrkhg9v13Srq52mni) |
-| only once per epoch (E_BOSS_DONE) | Pass | [view](https://testnet.nearblocks.io/txns/3HrgFurpNe6RsEwZVGx3ZwqHhydmJ11nSa1wM8fbTviN) |
-| a vault move signed with a classical key is refused (E_NOT_QUANTUM) | Pass | [view](https://testnet.nearblocks.io/txns/8BR2aEvVKXYn9AWy4VsYoZVXb4sjQNRoPM4KBuwaevqP) |
-| tokens cannot leave a vault with a classical signature | Pass | [view](https://testnet.nearblocks.io/txns/HdX3DVoZGfdh9YTPTDfRMHzmNBLadeaV32TEXY1gt6eX) |
-| the classical key is removed again; vault is quantum-only | Pass | [view](https://testnet.nearblocks.io/txns/3Z559mRYfXuADKKKb9PZzsceYMysp7f1QjZVyphMkKSC) |
-| harvest moves tokens from exposed wallets to vaults | Pass | [view](https://testnet.nearblocks.io/txns/4NQd9smKMBmTRFJREaoXzxTqMTJaFWXTA4mxWotV86ec) |
-| harvest gas is the same at 6 and 46 exposed holders | Pass | [view](https://testnet.nearblocks.io/txns/AcS9R7nnvRyxXSEFwtCcoYmyLKopFuLQbnA3sEZPJcK1) |
-| a vault sells to the market for NEAR (signed with ML-DSA-65) | Pass | [view](https://testnet.nearblocks.io/txns/2KJmuUJCZVVGBd1wXex6M2Q1ZjjT5Uh31FsUMTxLDW1G) |
+| exposed wallet cannot raid (E_NOT_VAULT) | Pass | [view](https://testnet.nearblocks.io/txns/3HPj3wPunqkoCiuVCze3qckL5iFANBzoxyUxJ8YcQSUA) |
+| alice's vault is born quantum-only and registered | Pass | [view](https://testnet.nearblocks.io/txns/HpmY6xWq5NjgFE1b8rrfiQVULs9jR7ndq8E3VgSoaSnw) |
+| bob's vault is born quantum-only and registered | Pass | [view](https://testnet.nearblocks.io/txns/Ghc8f2obRohwZr18prYrhBJfroacJBkzq7RScthL2atG) |
+| dave's vault is born quantum-only and registered | Pass | [view](https://testnet.nearblocks.io/txns/DkyyBnm59GRtWoGWyeEkS2bjkz5i5fwkLV43WbXSap8P) |
+| alice migrates the whole bag into the vault | Pass | [view](https://testnet.nearblocks.io/txns/8536vy7g8sTdYbnoGv9EXuEwffxRoVcGJwScoVJyzte1) |
+| bob migrates the whole bag into the vault | Pass | [view](https://testnet.nearblocks.io/txns/5nwKvG1Wo86jRAP7Ero1xwXiz3PipZmqon7mARPYuS9H) |
+| vault raids an exposed wallet (signed with ML-DSA-65) | Pass | [view](https://testnet.nearblocks.io/txns/6HDqBCEVRZPs8wVDJLmBiYTgE7CTDJAQptzp5NhC4hJd) |
+| anyone resolves it after the window; take = take_bps of the bag, capped at stake_mult x stake | Pass | [view](https://testnet.nearblocks.io/txns/jJtNptyRZqo8zma7VVZuobdV5ziEmHrE1XAX4K6ZFa3) |
+| vault raids another vault | Pass | [view](https://testnet.nearblocks.io/txns/CTZinMkqG69aH1UcBxswNiZUnydeY4vKX3smwFReVj6c) |
+| target defends in time and takes the stake (minus burn) | Pass | [view](https://testnet.nearblocks.io/txns/GN5Db7jcjWGqWqNgb7kvfykvNAn6muHUJ86zCssy3vgY) |
+| vault raids a second exposed wallet | Pass | [view](https://testnet.nearblocks.io/txns/9H3PVaJZ6WeGgHLXxZ3wqGiGgRgYnBnejfjmvj9xAio2) |
+| the target escapes by migrating during the window | Pass | [view](https://testnet.nearblocks.io/txns/GZ9FfK4hZ6v49CvhApq1aEkoHteX5CxKPGD6AKy7AFVo) |
+| the escaped raid takes nothing | Pass | [view](https://testnet.nearblocks.io/txns/GvuBg4qgbMZBUQTCE6pKVKLqMrhdrM8M2SrzZCCraheh) |
+| burning 4% of the bag buys a 20% shield | Pass | [view](https://testnet.nearblocks.io/txns/7JDx6xmdAJ2W9aWg5xhyXdczQ8pcVETPrREwxgL1MrNC) |
+| boss raid takes from Satoshi's stash | Pass | [view](https://testnet.nearblocks.io/txns/AXKkzmZfoSMWEyv4GbTJKGvsF6cAn1jhPxpFJQSU6W6R) |
+| only once per epoch (E_BOSS_DONE) | Pass | [view](https://testnet.nearblocks.io/txns/FXBj1kHwvJxcSLmsi5Ux5ZpqCdBEaLw9UhKir1pReS64) |
+| a vault move signed with a classical key is refused (E_NOT_QUANTUM) | Pass | [view](https://testnet.nearblocks.io/txns/BNZcaHJDZgc6PKeskHtX6685a8Ke3r8rg44NiwHMEfrz) |
+| tokens cannot leave a vault with a classical signature | Pass | [view](https://testnet.nearblocks.io/txns/Dp1vwW5LahwT1E8L9eoBofbWXwVm3oPKCFMddd8U4BXz) |
+| the classical key is removed again; vault is quantum-only | Pass | [view](https://testnet.nearblocks.io/txns/Eb2FLNbTRufsfP1yrgQZ8Qc7WfLBXwAnWA2yfiVGSDMz) |
+| harvest moves tokens from exposed wallets to vaults | Pass | [view](https://testnet.nearblocks.io/txns/6r9LseLgR7o9aQbmdibWnP5xmpkkfFpTTyFgxiNmA3co) |
+| harvest gas is the same at 4 and 44 exposed holders | Pass | [view](https://testnet.nearblocks.io/txns/46WagqjuAEdXjK6FbbVd3myCw7gCySHJ39Fmf4boDxgb) |
+| a vault sells to the market for NEAR (signed with ML-DSA-65) | Pass | [view](https://testnet.nearblocks.io/txns/FW1omnxhFVizNP8NtYtGdWQS8qKFxDEBUHTykxcDjDUP) |
 | on-chain feed records the moves | Pass |  |
+| after Q-Day an exposed bag cannot move (E_FROZEN) | Pass | [view](https://testnet.nearblocks.io/txns/8dKCWatTQQvTgwmdR5UWrSS2Qx7zyyRpToksGENJJFgM) |
+| after Q-Day an exposed bag cannot sell (E_FROZEN) | Pass | [view](https://testnet.nearblocks.io/txns/BiTqrb7HSWuF2SXShPsZ1y8efhJi7ra9MTkG4PpQjzgd) |
+| after Q-Day raids stop (E_QDAY_PASSED) | Pass | [view](https://testnet.nearblocks.io/txns/HqNPKVzch5sCiVc9BogBgXrkAuLfotFZv2T1kqRJssJ) |
+| after Q-Day a vault still transfers (signed with ML-DSA-65) | Pass | [view](https://testnet.nearblocks.io/txns/7UApVnaL13SsxCtL6zb5muFCtdQmV36o9dVn5RQLiHvT) |
+| finalize writes the season result on chain | Pass | [view](https://testnet.nearblocks.io/txns/ETYS1BRT5uuXTGweWRuNbT6uYpLbyNyX4Jok9EE7GrFP) |

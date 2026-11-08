@@ -74,4 +74,4 @@ jobs:
           git config user.email "jennifereze12@gmail.com"
           git add deployments docs/e2e 2>/dev/null || true
           git diff --cached --quiet || git commit -m "Testnet ${{ inputs.season }} season: deployment record$( [ -f docs/e2e/latest.json ] && echo ' and end-to-end run')"
-          git pull --rebase -q && git push -q || true
+          git pull --rebase -X theirs -q && git push -q || true
