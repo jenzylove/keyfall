@@ -1,3 +1,5 @@
+/* Display font: Jersey 10 (SIL OFL), self hosted, scaled to match the layout's sizes. */
+@font-face { font-family: "QDAY Display"; src: url("/fonts/jersey10-latin.woff2") format("woff2"); font-weight: 400 900; font-display: swap; size-adjust: 128%; }
 /* Q-DAY v3: arcade pixel. Neon on deep space black, CRT scanlines, chunky
    buttons with press depth, one pixel display font and one mono. Dark is the
    hero; light is finished too. Mobile first (390 wide), desktop gets room. */
@@ -31,7 +33,7 @@
   --alarm-bg: #1b0705;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
   --press: #000;
-  --display: "Pixelify Sans", "Press Start 2P", monospace;
+  --display: "QDAY Display", monospace;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --gutter: 16px;
   --max: 1100px;
@@ -76,7 +78,7 @@
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
-  font: 400 14px/1.5 var(--mono); overflow-x: hidden; -webkit-font-smoothing: antialiased;
+  font: 400 14px/1.5 var(--mono); font-synthesis: none; overflow-x: hidden; -webkit-font-smoothing: antialiased;
 }
 a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 a:hover { color: var(--gold-ink); }
