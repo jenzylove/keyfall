@@ -34,7 +34,7 @@ async function sendCall({ network, signerId, signer, contract, methodName, args 
         signer,
         receiverId: contract,
         actions: [near.actions.functionCall({ methodName, args, gas: TGAS(100), deposit: "0" })],
-        waitUntil: "FINAL",
+        waitUntil: "EXECUTED_OPTIMISTIC",
         network,
       });
       return { hash: txHash(res), error: failure(res) };

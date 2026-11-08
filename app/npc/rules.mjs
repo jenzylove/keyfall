@@ -104,17 +104,7 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     }
   }
 
-  // 3. Boss: NPCs with boss_ready and enough balance, at most MAX_BOSS per tick.
-  let boss = 0;
-  for (const n of npcs) {
-    if (boss >= MAX_BOSS) break;
-    if (n.boss_ready && big(n.balance) >= big(config.boss_min_balance)) {
-      boss += 1;
-      push({ npc: npcName(n.account), action: "boss", reason: "Satoshi is ready this epoch." });
-    }
-  }
-
-  // 4. Raids, only for NPCs that have raids left and are not under raid.
+  // 3. Raids, only for NPCs that have raids left and are not under raid.
   const attackers = npcs.map(view).filter((n) => n.raids_left > 0 && n.under_raid == null && !busyNpc.has(n.account));
   const spent = new Set(); // an NPC raids at most once per tick
   const targeted = new Set(); // a target is raided at most once per tick
@@ -165,6 +155,16 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
       .filter((x) => x.kind === "vault" && eligible(grover, x))
       .sort((a, b) => (a.shield_bps || 0) - (b.shield_bps || 0) || cmpDesc(a.balance, b.balance))[0];
     if (t) launch(grover, t, `Least shielded vault in range: ${(t.shield_bps || 0) / 100}% shield, ${fmt(t.balance)} $QDAY.`);
+  }
+
+  // 4. Boss (after raids, so a greeting is never delayed): NPCs with boss_ready and enough balance, at most MAX_BOSS per tick.
+  let boss = 0;
+  for (const n of npcs) {
+    if (boss >= MAX_BOSS) break;
+    if (n.boss_ready && big(n.balance) >= big(config.boss_min_balance)) {
+      boss += 1;
+      push({ npc: npcName(n.account), action: "boss", reason: "Satoshi is ready this epoch." });
+    }
   }
 
   return moves;
