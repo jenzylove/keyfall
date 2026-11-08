@@ -2,7 +2,7 @@
 import puppeteer, { KnownDevices } from "puppeteer-core";
 const BASE = process.argv[2] || "https://qday-one.vercel.app";
 const OUT = process.argv[3] || "shots";
-const b = await puppeteer.launch({ userDataDir: process.env.PROFILE, executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
+const b = await puppeteer.launch({ userDataDir: process.env.PROFILE, executablePath: process.env.CHROME || "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true, args: ["--no-sandbox"] });
 const p = await b.newPage();
 await p.emulate(KnownDevices["Pixel 5"]);
 const errors = [];
@@ -35,7 +35,7 @@ const go = await visible("#vf-go"); await go.click(); log("create vault (escape)
 t = await waitText((s) => /STEP 4 OF 4/i.test(s) || /Hit Satoshi/i.test(s), 90000);
 await shot("06-vault"); log("after vault", t ? "ok" : "timeout");
 if (await p.$("#ob-go")) { const label = await text("#ob-go"); if (/Move my bag/i.test(label)) { await click("#ob-go"); log("migrate clicked"); } }
-t = await waitText((s) => /Hit Satoshi|Charge shield/i.test(s), 90000);
+t = await p.waitForSelector("#bs-go", { visible: true, timeout: 150000 }).catch(() => null);
 await shot("07-in-game"); log("in game", t ? "ok" : "timeout");
 const after = await p.evaluate(() => document.body.innerText);
 log("escape result", (after.match(/(took nothing|escaped[^\n]*|Escaped[^\n]*)/) || ["(not shown)"])[0]);
@@ -46,4 +46,34 @@ const fullText = await p.evaluate(() => document.body.innerText);
 console.log("--- explorer links seen:", (fullText.match(/view on explorer/gi) || []).length);
 await p.screenshot({ path: `${OUT}/10-full.png`, fullPage: true });
 console.log("--- console errors:", JSON.stringify(errors.slice(0, 10)));
+
+// Outcome of the greeting raid, read from the chain (not the page).
+const RPC = "https://rpc.testnet.near.org";
+const CONTRACT = "qday-live-mw6vii9l47s.testnet";
+const callView = async (method, args) => {
+  const r = await fetch(RPC, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { request_type: "call_function", finality: "final", account_id: CONTRACT, method_name: method, args_base64: Buffer.from(JSON.stringify(args)).toString("base64") } }) });
+  const j = await r.json();
+  return JSON.parse(Buffer.from(j.result.result).toString());
+};
+const wallet = JSON.parse(await p.evaluate(() => localStorage.getItem("qday.wallet.v1")) || "{}").accountId;
+const vault = JSON.parse(await p.evaluate(() => localStorage.getItem("qday.vault.v1")) || "{}").accountId;
+log("wallet", wallet); log("vault", vault);
+const stats = await callView("stats", {});
+let raid = null;
+for (let id = Number(stats.raids); id > 0 && id > Number(stats.raids) - 40; id--) {
+  const r = await callView("get_raid", { raid_id: String(id) });
+  if (r && r.target === wallet) { raid = r; break; }
+}
+log("greeting raid", raid ? `#${raid.id} by ${raid.attacker.split(".")[0]}, status ${raid.status}` : "none found");
+if (raid) {
+  const end = Date.now() + 15 * 60 * 1000;
+  while (raid.status === "open" && Date.now() < end) {
+    await new Promise((r) => setTimeout(r, 20000));
+    raid = await callView("get_raid", { raid_id: String(raid.id) });
+  }
+  await p.screenshot({ path: `${OUT}/11-after-raid.png`, fullPage: false });
+  log("raid outcome", `status ${raid.status}, take ${raid.take} (0 means the escape worked)`);
+}
+const vh = vault ? await callView("holder", { account_id: vault }) : null;
+log("vault balance", vh ? vh.balance : "none");
 await b.close();

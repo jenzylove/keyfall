@@ -1,0 +1,34 @@
+name: judgepath
+
+# Play the real judge path on the live site from a clean runner, at phone size:
+# join, buy, get greeted by an NPC raid, escape into a quantum vault, hit
+# Satoshi, charge a shield, then read the raid outcome from the chain.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        default: "https://qday-one.vercel.app"
+
+jobs:
+  play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - working-directory: app
+        run: npm ci
+      - working-directory: app
+        env:
+          CHROME: /usr/bin/google-chrome
+          PROFILE: /tmp/judge-profile
+        run: |
+          mkdir -p shots
+          node spike/judge-path.mjs "${{ inputs.url }}" shots | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: judgepath-shots
+          path: app/shots
