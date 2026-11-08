@@ -3,7 +3,7 @@
 // as "can't reach NEAR". This forwards the JSON-RPC body unchanged and falls
 // back to the next node on a network error, 429 or 5xx. No keys, no state.
 
-import { originOk } from "./_origin.js";
+import { cors, originOk } from "./_origin.js";
 
 // Only the calls the app makes: reads, account and key lookups, sending a transaction.
 const METHODS = new Set(["query", "status", "block", "send_tx", "broadcast_tx_commit", "broadcast_tx_async", "tx", "EXPERIMENTAL_tx_status", "gas_price", "validators", "EXPERIMENTAL_protocol_config"]);
@@ -12,6 +12,7 @@ const UPSTREAMS = ["https://rpc.testnet.fastnear.com", "https://rpc.testnet.near
 
 export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
+  if (cors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "use POST" });
   if (!originOk(req)) return res.status(403).json({ error: "this RPC serves the Q-DAY site only" });
   const parsed = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {};

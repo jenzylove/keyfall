@@ -45,6 +45,9 @@ async function withRpc<T>(fn: () => Promise<T>): Promise<T> {
 }
 export const CONTRACT: string = import.meta.env.VITE_CONTRACT || "";
 export const EXPLORER = "https://testnet.nearblocks.io";
+/** The game's API. On a local dev server it is the live site (CORS allows localhost). */
+export const API_BASE = typeof location !== "undefined" && /localhost|127\.0\.0\.1/.test(location.hostname) ? "https://qday-one.vercel.app" : "";
+export const apiUrl = (path: string) => `${API_BASE}${path}`;
 export const txLink = (h: string) => `${EXPLORER}/txns/${h}`;
 export const accountLink = (a: string) => `${EXPLORER}/address/${a}`;
 
@@ -329,7 +332,7 @@ export async function join(): Promise<{ accountId: string; via: "sponsor" | "fau
   let via: "sponsor" | "faucet" = "sponsor";
   let sponsorError = "";
   try {
-    const r = await fetch("/api/join", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId }) });
+    const r = await fetch(apiUrl("/api/join"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId }) });
     if (!r.ok) sponsorError = (await r.json().catch(() => ({})))?.error || `sponsor answered ${r.status}`;
   } catch (e: any) {
     sponsorError = String(e?.message || e);
