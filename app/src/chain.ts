@@ -397,6 +397,18 @@ export async function createVault(name: string, seed: Uint8Array): Promise<TxRes
   return { ...r, accountId };
 }
 
+/** The recovery code of the vault sealed on this device, for the player's own
+ * backup. Read only: opens the sealed seed in this browser and nothing else. */
+export async function vaultRecoveryCode(): Promise<string | null> {
+  const v = lsGet<VaultRecord>(LS_VAULT);
+  if (!v || v.contract !== CONTRACT) return null;
+  try {
+    return seedToCode(await openSeed(v));
+  } catch {
+    return null;
+  }
+}
+
 /** Restore a vault on this device from its recovery code. */
 export async function restoreVault(name: string, code: string) {
   const seed = codeToSeed(code);

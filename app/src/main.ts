@@ -7,10 +7,10 @@ import { proof } from "./pages/proof";
 export type Page = (root: HTMLElement, params: Record<string, string>) => () => void;
 
 const routes: [RegExp, Page, string][] = [
-  [/^\/$/, landing, "Q-DAY · Migrate before Q-Day or freeze"],
+  [/^\/$/, landing, "Q-DAY · Move into a quantum vault before Q-Day"],
   [/^\/play\/?$/, play, "Play · Q-DAY"],
   [/^\/d\/(?<id>\d+)\/?$/, defendPage, "Defend · Q-DAY"],
-  [/^\/proof\/?$/, proof, "Proof · Q-DAY"],
+  [/^\/proof\/?$/, proof, "Under the hood · Q-DAY"],
 ];
 
 const app = document.getElementById("app")!;
@@ -29,14 +29,16 @@ function chrome() {
     <header class="wrap top">
       <a class="brand" href="/" data-link>${LOGO}Q-DAY</a>
       <nav class="nav">
-        <a href="/play" data-link>Play</a>
-        <a href="/proof" data-link>Proof</a>
-        <button class="theme" type="button" aria-label="Switch colour theme"></button>
+        <a href="/play" data-link class="play-link">Play</a>
+        <a href="/proof" data-link>Under the hood</a>
+        <button class="theme ico" type="button" aria-label="Switch colour theme"></button>
       </nav>
     </header>
     <main id="page"></main>`;
   const tb = app.querySelector<HTMLButtonElement>(".theme")!;
-  const label = () => (tb.textContent = effectiveTheme() === "dark" ? "Light" : "Dark");
+  const SUN = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1" stroke="currentColor" stroke-width="2"/></svg>`;
+  const MOON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 2.5A9.5 9.5 0 1 0 21.5 16 8 8 0 0 1 15.5 2.5Z" fill="currentColor"/></svg>`;
+  const label = () => { const dark = effectiveTheme() === "dark"; tb.innerHTML = dark ? SUN : MOON; tb.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme"); };
   label();
   tb.addEventListener("click", () => {
     const next = effectiveTheme() === "dark" ? "light" : "dark";
@@ -54,7 +56,7 @@ function render() {
   const page = document.getElementById("page")!;
   cleanup?.();
   cleanup = null;
-  document.body.classList.remove("alert");
+  document.body.classList.remove("alert", "in-game", "on-title");
   page.innerHTML = "";
   for (const a of app.querySelectorAll<HTMLAnchorElement>(".nav a")) {
     if (a.getAttribute("href") === path || (path.startsWith("/d/") && a.getAttribute("href") === "/play")) a.setAttribute("aria-current", "page");
@@ -71,7 +73,7 @@ function render() {
     }
   }
   document.title = "Not found · Q-DAY";
-  page.innerHTML = `<section class="wrap page-title"><p class="eyebrow"><span class="dot"></span>Signal lost</p><h1 class="display h2">No such page.</h1><p><a class="btn" href="/" data-link>Back to the alert</a></p></section>`;
+  page.innerHTML = `<section class="wrap page-title"><p class="eyebrow"><span class="dot"></span>Signal lost</p><h1 class="display h2">No such page.</h1><p><a class="btn" href="/" data-link>Back to the title</a></p></section>`;
 }
 
 export function go(href: string) {

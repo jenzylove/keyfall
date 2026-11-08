@@ -1,92 +1,112 @@
+// /d/:id: the defend link. Works opened cold from a DM or a post.
+
 import * as chain from "../chain";
-import { fmtTokens, type Raid, type Params } from "../chain";
-import { $, act, chainNow, esc, failIn, isNpc, maybe, poll, short, syncClock, text } from "../ui/dom";
-import { countdown } from "../ui/widgets";
-import { restoreForm } from "../ui/vaultform";
-import { numParam, pct } from "../ui/params";
+import { type Raid, type Params } from "../chain";
+import { chainNow, esc, poll, syncClock } from "../ui/dom";
+import { avatar } from "../ui/avatars";
+import { isNpc, nameOf } from "../ui/names";
+import { P, clock, full, minutes, pct, plainError } from "../ui/plain";
 
 export function defendPage(root: HTMLElement, params: Record<string, string>) {
   const id = params.id;
   root.innerHTML = `
-    <section class="wrap page-title">
-      <p class="eyebrow"><span class="dot"></span>Defend link · raid ${esc(id)}</p>
-      <h1 class="display h2" id="d-title">Raid ${esc(id)}</h1>
-      <div class="calc" id="d-facts"><div><span class="dim">reading the chain…</span></div></div>
-    </section>
-    <section class="wrap" style="padding-bottom:28px"><span class="label" id="d-cd-label">Defend window</span><div id="d-cd" style="margin-top:10px"></div></section>
-    <section class="band" style="padding-top:36px"><div class="wrap cold" id="d-act"></div></section>`;
+    <section class="defend">
+      <div class="d-card" id="d-card">
+        <p class="kick red" id="d-kick">Defend link</p>
+        <h1 class="s-title" id="d-title">Reading the raid…</h1>
+        <div class="d-vs" id="d-vs"></div>
+        <div class="big-clock" id="d-clock" hidden></div>
+        <div class="d-facts" id="d-facts"></div>
+        <div class="d-act" id="d-act"></div>
+        <p class="s-msg" id="d-msg" role="status"></p>
+      </div>
+    </section>`;
 
-  const cd = countdown($("#d-cd", root), { compact: true, onZero: () => refresh() });
   let config: Params | null = null;
+  let raid: Raid | null = null;
   let key = "";
+  const $ = <T extends HTMLElement = HTMLElement>(s: string) => root.querySelector<T>(s)!;
 
   async function refresh() {
-    let r: Raid | null;
     try {
-      const [s, raid] = await Promise.all([chain.getStats(), chain.getRaid(id)]);
+      const [s, r] = await Promise.all([chain.getStats(), chain.getRaid(id)]);
       syncClock(s.now_ms);
-      r = raid;
+      raid = r;
       config = config || (await chain.getConfig().catch(() => null));
     } catch {
-      failIn(maybe("#d-facts", root));
+      if (!raid) $("#d-title").textContent = "Can't reach NEAR right now";
       return;
     }
+    const r = raid;
     if (!r) {
-      text($("#d-title", root), "No such raid");
-      $("#d-cd-label", root).hidden = true;
-      $("#d-facts", root).innerHTML = `<div><span>There is no raid ${esc(id)} on this contract.</span></div>`;
-      $("#d-act", root).innerHTML = `<div><a class="btn" href="/play" data-link>Play Q-DAY <span class="arrow">→</span></a></div>`;
+      $("#d-title").textContent = "No such raid";
+      $("#d-kick").textContent = "Defend link";
+      $("#d-act").innerHTML = `<a class="btn wide" href="/play" data-link>Play Q-DAY</a>`;
       return;
     }
     await chain.loadSession();
     const s = chain.session();
-    const mine = s.vault?.accountId === r.target;
-    const mineWallet = s.wallet?.accountId === r.target;
+    const mine = [s.wallet?.accountId, s.vault?.accountId].filter(Boolean) as string[];
+    const myVault = s.vault?.accountId === r.target;
+    const myWallet = s.wallet?.accountId === r.target;
     const open = r.status === "open";
-    const closed = Number(r.deadline) < chainNow();
-    const tName = (a: string) => `${esc(short(a, 26))}${isNpc(a) ? '<span class="tag npc">NPC</span>' : ""}`;
-    text($("#d-title", root), open ? (closed ? "Window closed" : mine || mineWallet ? "You are under raid" : "Raid in progress") : r.status === "defended" ? "Defended" : "Settled");
-    const take = r.target_kind === "vault" ? numParam(config || {}, "vault_take_bps") : numParam(config || {}, "take_bps");
-    $("#d-facts", root).innerHTML = `
-      <div><span>Raider</span><b>${tName(r.attacker)}</b></div>
-      <div><span>Target</span><b>${tName(r.target)} <span class="tag ${r.target_kind === "vault" ? "qv" : "ex"}">${r.target_kind}</span></b></div>
-      <div><span>Stake</span><b>${fmtTokens(r.stake)} $QDAY</b></div>
-      <div><span>Status</span><b>${open ? (closed ? "window closed, waiting to settle" : "open") : r.status === "defended" ? `defended, the stake went to the target` : `settled, took ${fmtTokens(r.take)} $QDAY`}</b></div>
-      ${open && config ? `<div><span>At stake for the target</span><b>${pct(take)} of the bag, capped at ${numParam(config, "stake_mult")}× stake</b></div>` : ""}`;
-    if (open && !closed) { cd.set(Number(r.deadline)); text($("#d-cd-label", root), "Defend window"); }
-    else { cd.set(Number(r.deadline)); text($("#d-cd-label", root), open ? "Window closed" : "Over"); }
-    document.body.classList.toggle("alert", open && !closed && (mine || mineWallet));
+    const closed = r.deadline < chainNow();
+    const N = (a: string) => esc(nameOf(a, mine));
+    $("#d-card").className = `d-card ${open && !closed ? "hot" : r.status === "defended" ? "gold" : ""}`;
+    $("#d-kick").textContent = open ? (closed ? "Time is up" : "Raid in progress") : "Raid over";
+    $("#d-title").innerHTML = open
+      ? closed ? "The window has closed" : myVault || myWallet ? "You are being raided" : `${N(r.attacker)} is raiding ${N(r.target)}`
+      : r.status === "defended" ? `${N(r.target)} defended` : BigInt(r.take) > 0n ? `The raid took ${full(r.take)}` : "The raid took nothing";
+    $("#d-vs").innerHTML = `<div><span class="av">${avatar(r.attacker)}</span><b>${N(r.attacker)}${isNpc(r.attacker) ? `<span class="tag">NPC</span>` : ""}</b></div><span class="vs">vs</span><div><span class="av">${avatar(r.target)}</span><b>${N(r.target)}</b><span class="chip ${r.target_kind}">${r.target_kind === "vault" ? "Vault" : "Exposed"}</span></div>`;
+    const ck = $("#d-clock");
+    ck.hidden = !(open && !closed);
+    ck.dataset.until = String(r.deadline);
+    ck.textContent = clock(r.deadline - chainNow());
+    const share = r.target_kind === "vault" ? P(config, "vault_take_bps") : P(config, "take_bps");
+    $("#d-facts").innerHTML = `
+      <div><span>Raider's stake</span><span>${full(r.stake)}</span></div>
+      ${open ? `<div><span>At risk</span><span>${pct(share)} of the bag, up to ${P(config, "stake_mult")} times the stake</span></div>` : ""}
+      ${open ? `<div><span>Defend window</span><span>${minutes(P(config, "defend_window_ms"))}</span></div>` : ""}`;
 
-    const k = `${r.status}:${closed}:${mine}:${mineWallet}:${!!s.vault}:${!!s.wallet}`;
+    const k = `${r.status}:${closed}:${myVault}:${myWallet}:${!!s.vault}:${!!s.wallet}`;
     if (k === key) return;
     key = k;
-    const host = $("#d-act", root);
+    const host = $("#d-act");
+    const msg = $("#d-msg");
+    const run = (btn: HTMLButtonElement, fn: () => Promise<unknown>, ok: (v: any) => string) => {
+      btn.onclick = async () => {
+        if (btn.classList.contains("busy")) return;
+        btn.classList.add("busy"); btn.disabled = true; msg.className = "s-msg"; msg.textContent = "Sending…";
+        try { const v: any = await fn(); msg.className = "s-msg ok"; msg.textContent = ok(v?.value); key = ""; await refresh(); }
+        catch (e) { msg.className = "s-msg bad"; msg.textContent = plainError(e); }
+        finally { btn.classList.remove("busy"); btn.disabled = false; }
+      };
+    };
     if (!open) {
-      host.innerHTML = `<p>This raid is over.</p><div><a class="btn" href="/play" data-link>Play Q-DAY <span class="arrow">→</span></a></div>`;
+      host.innerHTML = `<a class="btn wide" href="/play" data-link>Play Q-DAY</a>`;
     } else if (closed) {
-      host.innerHTML = `<p>The window has closed. Anyone can settle the raid now${s.wallet || s.vault ? "" : ". This makes you a free testnet wallet first"}.</p><div><button class="btn hot" id="d-go">Settle <span class="arrow">→</span></button></div><p class="msg" id="d-msg"></p>`;
-      const b = $<HTMLButtonElement>("#d-go", host);
-      b.onclick = () => act(b, $("#d-msg", host), async () => {
-        if (!chain.session().wallet && !chain.session().vault) await chain.join();
-        return chain.resolve(r!.id);
-      }, (x: any) => `Settled. Take: ${fmtTokens(String(x?.value ?? "0"))}.`).then(() => { key = ""; refresh(); });
-    } else if (mine) {
-      host.innerHTML = `<p>This device holds the target vault. Defend now and the raider's stake is yours, minus a burn.</p><div><button class="btn wide" id="d-go">Defend <span class="arrow">→</span></button></div><p class="msg" id="d-msg"></p>`;
-      const b = $<HTMLButtonElement>("#d-go", host);
-      b.onclick = () => act(b, $("#d-msg", host), () => chain.defend(r!.id), () => "Defended. The stake is yours.").then(() => { key = ""; refresh(); });
-    } else if (mineWallet) {
-      host.innerHTML = `<p>This is your exposed wallet. It cannot defend, but it can escape into a vault before the clock runs out.</p><div><a class="btn" href="/play" data-link>Escape on the game screen <span class="arrow">→</span></a></div>`;
+      host.innerHTML = `<p class="s-text">Anyone can settle the raid now${s.wallet || s.vault ? "" : ". We'll make you a free testnet wallet first"}.</p><button class="btn wide hot" id="d-go">Settle it</button>`;
+      run($<HTMLButtonElement>("#d-go"), async () => { if (!chain.session().wallet && !chain.session().vault) await chain.join(); return chain.resolve(r.id); }, (v) => `Settled. The raid took ${full(String(v ?? "0"))}.`);
+    } else if (myVault) {
+      host.innerHTML = `<p class="s-text">Defend now and their stake is yours, less a ${pct(P(config, "raid_burn_bps"))} burn.</p><button class="btn wide" id="d-go">Defend</button>`;
+      run($<HTMLButtonElement>("#d-go"), () => chain.defend(r.id), () => "You defended! Their stake is yours.");
+    } else if (myWallet) {
+      host.innerHTML = `<p class="s-text">Exposed coins can't defend, but they can escape into a vault before the clock runs out.</p><a class="btn wide hot" href="/play" data-link>Escape in the game</a>`;
     } else {
       host.innerHTML = `
-        <h2 class="display h3">Is this your vault?</h2>
-        <p>Restore it on this device with your recovery code, then defend.</p>
-        <div id="d-restore" style="display:grid;gap:14px"></div>
-        <div class="or">or</div>
-        <div><a class="btn" href="/play" data-link>Play Q-DAY <span class="arrow">→</span></a></div>`;
-      restoreForm($("#d-restore", host), { name: r.target_kind === "vault" ? r.target : "", onDone: () => { key = ""; refresh(); } });
+        <p class="s-text">Is this your vault? Restore it on this device with your recovery code, then defend.</p>
+        <label class="m-field"><span>Vault name</span><input id="d-n" autocomplete="off" autocapitalize="off" spellcheck="false" value="${r.target_kind === "vault" ? esc(nameOf(r.target)) : ""}"/></label>
+        <label class="m-field"><span>Recovery code</span><input id="d-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
+        <button class="btn wide ghost" id="d-rs">Restore vault</button>
+        <a class="btn wide" href="/play" data-link>Play Q-DAY</a>`;
+      run($<HTMLButtonElement>("#d-rs"), () => chain.restoreVault($<HTMLInputElement>("#d-n").value.trim(), $<HTMLInputElement>("#d-c").value.trim()), () => "Vault restored on this device.");
     }
   }
 
   const stop = poll(refresh, 5000);
-  return () => { stop(); cd.stop(); document.body.classList.remove("alert"); };
+  const t = window.setInterval(() => {
+    const ck = root.querySelector<HTMLElement>("#d-clock");
+    if (ck && !ck.hidden) { const left = Number(ck.dataset.until) - chainNow(); ck.textContent = clock(left); if (left <= 0 && left > -1200) { key = ""; refresh(); } }
+  }, 1000);
+  return () => { stop(); clearInterval(t); };
 }
