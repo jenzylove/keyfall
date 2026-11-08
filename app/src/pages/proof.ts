@@ -25,7 +25,7 @@ export function proof(root: HTMLElement) {
       ${item(4, "p-guard", "The quantum guard", "Recorded run: the same kind of vault move, refused with a classical key and accepted with ML-DSA-65.")}
       ${item(5, "p-gas", "Harvest gas stays flat", "Recorded run: gas of harvest() at a small and a large number of exposed holders.")}
       ${item(6, "p-e2e", "End to end on testnet", `Recorded run on ${esc(e2e?.contract || "")}, ${esc(ran)}.`)}
-      ${item(7, "p-sim", "A season in 60 seconds", "The rules crate the contract runs, simulated over 60 days. Pick a scenario and play it.")}
+      ${item(7, "p-sim", "A season in 60 seconds", "The rules crate the contract runs, simulated over a 14 day season and replayed in 60 seconds. Pick a scenario and play it.")}
       ${item(8, "p-deploy", "Deployment record", "From deployments/testnet-live.json, bundled with this page.")}
     </ol></section>`;
 

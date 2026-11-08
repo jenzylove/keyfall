@@ -1,6 +1,6 @@
 # End-to-end run (testnet, fast season)
 
-Contract `qday-fast-mw726yhglx.testnet` · 2026-11-08T00:53:59.145Z · **ALL PASS** · [Actions run](https://github.com/jenzylove/qday/actions/runs/42427087363)
+Contract `qday-fast-mw726yhglx.testnet` Â· 2026-11-08T00:53:59.145Z Â· **ALL PASS** Â· [Actions run](https://github.com/jenzylove/qday/actions/runs/42427087363)
 
 | Check | Result | Transaction |
 |---|---|---|

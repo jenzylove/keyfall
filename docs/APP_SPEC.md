@@ -92,7 +92,7 @@ Each check runs live on page load, shows pass or fail, and links to its evidence
 4. Quantum guard: the refused and accepted transactions from `docs/e2e/latest.json` (bundled), with links.
 5. Harvest gas at small and large holder counts from `docs/e2e/latest.json`.
 6. End-to-end run: the whole `docs/e2e/latest.json` table.
-7. **Fast forward: a season in 60 seconds.** Replay `sim/out/report.json` `series` per scenario (selector of the 6 scenarios): animated lines over 56 epochs for share in vaults, Satoshi's stash, burned, and raids, with play/pause. Explain: "The rules crate the contract runs, simulated over 60 days."
+7. **Fast forward: a season in 60 seconds.** Replay `sim/out/report.json` `series` per scenario (selector of the 6 scenarios): animated lines over 56 epochs for share in vaults, Satoshi's stash, burned, and raids, with play/pause. Explain: "The rules crate the contract runs, simulated over a 14 day season, replayed in 60 seconds."
 8. Deployment record from `deployments/testnet-live.json` (bundled): deploy transaction, wasm sha256, and how to rebuild.
 
 ## Files

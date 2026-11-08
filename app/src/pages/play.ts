@@ -151,12 +151,17 @@ export function play(root: HTMLElement) {
     renderStatus();
     renderBag();
     renderAlert();
+    const over = Boolean(w.stats?.after_q_day);
     const st = step();
-    const m = st ? `onb${st}` : "game";
+    const m = over ? (st ? "over" : "over-game") : st ? `onb${st}` : "game";
     if (m !== mode) {
       mode = m;
       $("#onb", root).innerHTML = "";
       $("#game", root).innerHTML = "";
+      if (over) $("#onb", root).innerHTML = `<div class="wrap onb-grid"><div class="step fadein"><span class="count">Season 1 is over</span><h2 class="display h2">Q-Day has come.</h2>
+        <p class="lede">Every exposed bag is frozen for good. Raids, the harvest and Satoshi have stopped. Vaults keep their tokens and can still trade and transfer.</p>
+        <p class="lede"><a href="/proof" data-link>See the season result and every check →</a></p></div></div>`;
+      if (st && over) return;
       if (st) buildOnboarding(st);
       else buildGame();
     }
@@ -294,7 +299,7 @@ export function play(root: HTMLElement) {
     } else if (st === 2) {
       body = `${head("Buy a bag")}
         <p class="lede">You are in as <b class="break">${esc(sess().wallet?.accountId || "")}</b>. Pick how much testnet NEAR to spend.</p>
-        <div class="choice" role="group" aria-label="NEAR to spend">${[0.5, 1, 2].map((n) => `<button type="button" data-n="${n}" aria-pressed="${n === buyNear}">${n} NEAR</button>`).join("")}</div>
+        <div class="choice" role="group" aria-label="NEAR to spend">${[0.5, 0.8, 1].map((n) => `<button type="button" data-n="${n}" aria-pressed="${n === buyNear}">${n} NEAR</button>`).join("")}</div>
         <p>You get about <b id="ob-quote">·</b> $QDAY.</p>
         <div><button class="btn" id="ob-go">Buy for <span id="ob-n">${buyNear}</span> NEAR <span class="arrow">→</span></button></div>
         <p class="msg" id="ob-msg"></p>`;

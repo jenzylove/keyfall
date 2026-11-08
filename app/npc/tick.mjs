@@ -26,14 +26,14 @@ function failure(res) {
   return null;
 }
 
-async function sendCall({ network, signerId, signer, contract, methodName, args }) {
+async function sendCall({ network, signerId, signer, contract, methodName, args, gas = 100 }) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const res = await near.sendTx({
         signerId,
         signer,
         receiverId: contract,
-        actions: [near.actions.functionCall({ methodName, args, gas: TGAS(100), deposit: "0" })],
+        actions: [near.actions.functionCall({ methodName, args, gas: TGAS(gas), deposit: "0" })],
         waitUntil: "EXECUTED_OPTIMISTIC",
         network,
       });
@@ -91,7 +91,11 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
     }),
   );
 
-  const planned = decide({ now: Number(stats.now_ms), config, stats, npcs: npcViews, holders, openRaids, firstSeen, contract, fuel });
+  // After Q-Day, write the season result on chain once (permissionless finalize).
+  const season = stats.after_q_day ? await view("season").catch(() => null) : null;
+  const plannedExtra = stats.after_q_day && !season ? [{ npc: "*", action: "finalize", reason: "Q-Day has passed and the season result is not written yet." }] : [];
+
+  const planned = [...plannedExtra, ...decide({ now: Number(stats.now_ms), config, stats, npcs: npcViews, holders, openRaids, firstSeen, contract, fuel })];
 
   const signers = {};
   const signerFor = (name) => (signers[name] ||= signerFromSeed(hexToBytes(seeds[name])));
@@ -116,7 +120,7 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
           m.action === "defend" || m.action === "resolve" ? { raid_id: m.raidId } :
           m.action === "sell" ? { amount: m.amount } : {};
         const methodName = m.action === "boss" ? "boss_raid" : m.action;
-        const r = await sendCall({ network, signerId: `${who}.${contract}`, signer: signerFor(who), contract, methodName, args });
+        const r = await sendCall({ network, signerId: `${who}.${contract}`, signer: signerFor(who), contract, methodName, args, gas: m.action === "finalize" ? 250 : 100 });
         if (r.hash) out.hash = r.hash;
         if (r.error) out.error = r.error;
       }

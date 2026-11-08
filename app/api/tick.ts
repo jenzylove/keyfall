@@ -5,6 +5,7 @@
 
 // @ts-ignore plain ES module
 import { tick } from "../npc/tick.mjs";
+import { originOk } from "./_origin.js";
 
 const THROTTLE_MS = 20_000;
 let last: { at: string; moves: unknown[] } | null = null;
@@ -15,6 +16,7 @@ export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method === "GET") return res.status(200).json(last ?? { at: null, moves: [] });
   if (req.method !== "POST") return res.status(405).json({ error: "use GET or POST" });
+  if (!originOk(req)) return res.status(403).json({ error: "ticks come from the Q-DAY site or the crank" });
 
   const contract = process.env.VITE_CONTRACT;
   let seeds: Record<string, string> = {};

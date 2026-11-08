@@ -8,6 +8,7 @@
 
 import * as near from "@fastnear/api";
 import { signerFromPrivateKey } from "@fastnear/utils";
+import { originOk } from "./_origin.js";
 
 const GRANT = (15n * 10n ** 23n).toString(); // 1.5 NEAR: a 1 NEAR buy, a 0.3 NEAR vault, gas
 const PER_IP_PER_HOUR = 3;
@@ -34,6 +35,7 @@ async function exists(accountId: string): Promise<boolean> {
 export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method !== "POST") return res.status(405).json({ error: "use POST" });
+  if (!originOk(req)) return res.status(403).json({ error: "new wallets are made from the Q-DAY site only" });
   const sponsor = process.env.SPONSOR_ACCOUNT;
   const key = process.env.SPONSOR_KEY;
   if (!sponsor || !key) return res.status(503).json({ error: "sponsor not configured" });

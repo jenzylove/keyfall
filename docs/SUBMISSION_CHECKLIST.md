@@ -32,4 +32,4 @@ Ticked only from the live app and the public repo, never from intent.
 - [ ] A non-quantum move is refused on chain (transaction link)
 - [ ] Every vault is quantum-only (live census on `/proof`)
 - [ ] Contract equals simulation (golden tests in CI)
-- [ ] Harvest gas is constant (CI measurement)
+- [ ] Harvest gas is constant (recorded testnet run, docs/e2e)

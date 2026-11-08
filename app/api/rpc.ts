@@ -3,12 +3,20 @@
 // as "can't reach NEAR". This forwards the JSON-RPC body unchanged and falls
 // back to the next node on a network error, 429 or 5xx. No keys, no state.
 
+import { originOk } from "./_origin.js";
+
+// Only the calls the app makes: reads, account and key lookups, sending a transaction.
+const METHODS = new Set(["query", "status", "block", "send_tx", "broadcast_tx_commit", "broadcast_tx_async", "tx", "EXPERIMENTAL_tx_status", "gas_price", "validators", "EXPERIMENTAL_protocol_config"]);
+
 const UPSTREAMS = ["https://rpc.testnet.fastnear.com", "https://rpc.testnet.near.org", "https://test.rpc.fastnear.com"];
 
 export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
   if (req.method !== "POST") return res.status(405).json({ error: "use POST" });
-  const body = typeof req.body === "string" ? req.body : JSON.stringify(req.body ?? {});
+  if (!originOk(req)) return res.status(403).json({ error: "this RPC serves the Q-DAY site only" });
+  const parsed = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {};
+  if (!METHODS.has(String(parsed?.method))) return res.status(400).json({ jsonrpc: "2.0", id: parsed?.id ?? null, error: { code: -32601, message: "method not allowed" } });
+  const body = JSON.stringify(parsed);
   let last = "";
   for (const url of UPSTREAMS) {
     try {

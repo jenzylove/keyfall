@@ -38,7 +38,7 @@ export function landing(root: HTMLElement) {
     </div>
     <div class="wrap" style="display:grid;gap:30px;margin-top:30px">
       <div class="vitals">
-        <div class="vital"><span class="label">Held in quantum vaults</span><span class="val" id="v-share">·</span></div>
+        <div class="vital"><span class="label">Held in quantum vaults</span><span class="stack"><span class="val" id="v-share">·</span><span class="label" id="v-share-npc"></span></span></div>
         <div class="vital"><span class="label">Satoshi's stash</span><span class="stack"><span class="val" id="v-sat">·</span><span class="meter" aria-hidden="true"><i id="v-sat-bar" style="width:0%"></i></span></span></div>
         <div class="vital"><span class="label">Raids so far</span><span class="val" id="v-raids">·</span></div>
       </div>
@@ -64,7 +64,7 @@ export function landing(root: HTMLElement) {
           </li>
           <li style="display:grid;gap:8px">
             <span class="display h3">Classical keys have an end date.</span>
-            <span>NIST's draft plan disallows RSA, ECDSA and EdDSA keys after 2035. EdDSA is the ed25519 key most NEAR wallets use today.</span>
+            <span>NIST's draft plan disallows RSA, ECDSA and EdDSA keys after 2035. NEAR's default ed25519 keys are EdDSA keys.</span>
             <span class="tx">${ext(SOURCES.nist8547, "NIST IR 8547 draft, November 2024")}</span>
           </li>
         </ul>
@@ -84,7 +84,7 @@ export function landing(root: HTMLElement) {
         ${[
           ["What it is", "Any normal NEAR wallet holding $QDAY", "A new account, <i>name</i>.contract, born with only an ML-DSA-65 key"],
           ["Every epoch", "Bleeds a share to the harvest", "Gets half of what the harvest took"],
-          ["When raided", "Cannot defend. It can only run", "Defends, and wins the raider's stake"],
+          ["When raided", "Cannot defend. It can only run", "Defends, and wins the raider's stake, minus a burn"],
           ["Its moves", "None. It cannot raid, shield or hit Satoshi", "Raids, shields, hits Satoshi. Every move signed with the quantum key"],
           ["At Q-Day", "Frozen for good", "Keeps playing and trading"],
         ]
@@ -197,6 +197,19 @@ export function landing(root: HTMLElement) {
         const s = await getStats();
         syncClock(s.now_ms);
         cd.set(Number(s.q_day_ms));
+        if (s.after_q_day && !root.dataset.over) {
+          root.dataset.over = "1";
+          const h1 = root.querySelector(".hero h1");
+          if (h1) h1.innerHTML = `<span>Q-Day</span><span>has</span><span class="strike">come.</span>`;
+          const lede = root.querySelector(".hero .lede");
+          if (lede) lede.textContent = "Season 1 is over. Every exposed bag is frozen for good; vaults keep theirs. The result is written on chain.";
+          const cta = root.querySelector(".hero .cta .btn") as HTMLAnchorElement | null;
+          if (cta) { cta.href = "/proof"; cta.innerHTML = `See the season result <span class="arrow">→</span>`; }
+          const lbl = root.querySelector(".hero .label");
+          if (lbl) lbl.textContent = `Q-Day was ${new Date(Number(s.q_day_ms)).toUTCString().replace(/:\d\d GMT$/, " UTC")}`;
+          const cdEl = root.querySelector("#qday-cd") as HTMLElement | null;
+          if (cdEl) cdEl.style.display = "none";
+        }
         countTo(maybe("#v-share", root), s.vault_share_bps / 100, (n) => `${n.toFixed(2)}%`);
         countTo(maybe("#v-sat", root), Number(BigInt(s.satoshi_tokens) / 10n ** 18n), (n) => Math.round(n).toLocaleString("en-US"));
         countTo(maybe("#v-raids", root), Number(s.raids), (n) => Math.round(n).toLocaleString("en-US"));
@@ -254,7 +267,11 @@ export function landing(root: HTMLElement) {
       const el = maybe("#board-list", root);
       if (!el) return;
       try {
-        const vs = (await getVaults(0, 200)).sort((a, b) => (BigInt(b.balance) > BigInt(a.balance) ? 1 : BigInt(b.balance) < BigInt(a.balance) ? -1 : 0)).slice(0, 10);
+        const all = await getVaults(0, 200);
+        const vaultTotal = all.reduce((a, v) => a + BigInt(v.balance), 0n);
+        const npcTotal = all.filter((v) => isNpc(v.account)).reduce((a, v) => a + BigInt(v.balance), 0n);
+        text(maybe("#v-share-npc", root), vaultTotal > 0n ? `${(Number((npcTotal * 10000n) / vaultTotal) / 100).toFixed(0)}% of that is the game's NPC bots` : "");
+        const vs = [...all].sort((a, b) => (BigInt(b.balance) > BigInt(a.balance) ? 1 : BigInt(b.balance) < BigInt(a.balance) ? -1 : 0)).slice(0, 10);
         el.innerHTML = vs.length
           ? vs.map((v, i) => `<li><span class="rank">${i + 1}</span><span class="who">${esc(short(v.account, 28))}${isNpc(v.account) ? '<span class="tag npc">NPC</span>' : ""}</span><span class="amt">${fmtTokens(v.balance)}</span></li>`).join("")
           : `<li><span></span><span class="dim">No vaults yet. The first one tops the board.</span><span></span></li>`;
