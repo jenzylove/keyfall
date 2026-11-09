@@ -10,7 +10,7 @@ const OUT = "C:/Users/LENOVO/qday-launch/v4shots";
 const FR = `${OUT}/calm-frames`;
 const FFMPEG = "C:/Users/LENOVO/tools/ffmpeg-9.0-essentials_build/bin/ffmpeg";
 const FFPROBE = "C:/Users/LENOVO/tools/ffmpeg-9.0-essentials_build/bin/ffprobe";
-const PROFILE = process.argv[2] || "C:/Users/LENOVO/qday-launch/chrome-v4rec5";
+const PROFILE = process.argv[2] || "C:/Users/LENOVO/qday-launch/chrome-v4rec6";
 fs.rmSync(FR, { recursive: true, force: true }); fs.mkdirSync(FR, { recursive: true });
 const b = await puppeteer.launch({ userDataDir: PROFILE, executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: false, args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required", "--use-gl=angle", "--use-angle=d3d11", "--window-size=420,900", "--window-position=20,20"] });
 const p = await b.newPage();
@@ -44,7 +44,8 @@ async function steerTo(target, ms = 25000, near = 30, onTick) {
 await p.evaluateOnNewDocument(() => { localStorage.setItem("qday.theme", "dark"); localStorage.setItem("qday.intro.v2", "1"); });
 await p.goto(`${BASE}/play`, { waitUntil: "domcontentloaded" });
 await waitFor(() => document.querySelector("#field")?.__arena?.ready, 30000);
-await sleep(1500);
+await waitFor(() => { const k2 = document.querySelector(".strip, .strip-chip")?.getAttribute("data-k"); return (k2 && k2 !== "load") || (document.querySelector("#start") && !document.querySelector("#start").hidden) ? "ready" : null; }, 30000, 500);
+await sleep(800);
 log("state", await k());
 if ((await k()) === "grab") {
   await p.click("#m-go");
@@ -54,7 +55,6 @@ if ((await k()) === "grab") {
 }
 if ((await k()) === "grab" || !(await A((ar) => ar.meInfo.kind !== "none"))) { log("no bag: not recording"); await b.close(); process.exit(1); }
 await sleep(1500);
-await shot("calm-00-spawn");
 
 // ---- screencast on
 const cdp = await p.createCDPSession();
@@ -76,7 +76,7 @@ await waitFor(() => { const ar = document.querySelector("#field").__arena; retur
 const caught = await waitFor(() => /tone-alarm|alarm/.test(document.querySelector(".strip, .strip-chip")?.className || "") ? "caught" : null, 45000, 500);
 log("caught:", caught);
 await sleep(1500);
-await shot("after-raid-open");
+const caughtFrame = frames.length;
 // run for the gate, dash twice
 await steerTo("gate", 40000, 46, async (n) => { if (n === 12 || n === 60) await p.keyboard.press(" "); });
 await sleep(600);
@@ -89,7 +89,7 @@ if (await waitFor(() => document.querySelector("#n-go") ? "yes" : null, 6000, 30
 await cdp.send("Page.stopScreencast");
 const recMs = Date.now() - rec0;
 log("recorded", frames.length, "frames in", (recMs / 1000).toFixed(1), "s");
-await shot("calm-99-vault");
+const endFrame = frames.length - 1;
 await b.close();
 
 // ---- encode from timestamps (variable rate -> constant 30 fps)
@@ -102,6 +102,9 @@ list += `file 'f${String(frames.length - 1).padStart(4, "0")}.jpg'\n`;
 fs.writeFileSync(`${FR}/list.txt`, list);
 execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", `${FR}/list.txt`, "-vf", "fps=30,scale=780:1688:flags=neighbor,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "19", `${OUT}/calm-chase.tmp.mp4`]);
 fs.renameSync(`${OUT}/calm-chase.tmp.mp4`, `${OUT}/calm-chase.mp4`);
+// stills from the recording itself: spawn, raid open, vault
+const still = (i, name) => execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-i", `${FR}/f${String(Math.min(i, frames.length - 1)).padStart(4, "0")}.jpg`, "-vf", "scale=780:1688:flags=neighbor", `${OUT}/${name}.png`]);
+still(10, "calm-00-spawn"); still(caughtFrame, "after-raid-open"); still(endFrame, "calm-99-vault");
 const probe = execFileSync(FFPROBE, ["-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries", "stream=nb_read_frames,r_frame_rate,duration", "-of", "default=nw=1", `${OUT}/calm-chase.mp4`]).toString();
 console.log(probe);
 console.log("source frame rate:", (frames.length / ((frames[frames.length - 1] - frames[0]) || 1)).toFixed(1), "fps captured");
