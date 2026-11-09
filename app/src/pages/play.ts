@@ -171,6 +171,7 @@ export function play(root: HTMLElement) {
     onPulse: () => { sfx.play("deny"); sfx.vibrate(30); arena.say("me", "oof"); },
     chainNow,
   });
+  arena.quiet = () => stripOpen() || !!showing;
   arena.setGateArt(ART_VAULT);
   arena.setBossArt(ART_SATOSHI);
   field.insertBefore(arena.el, field.firstChild);
@@ -256,6 +257,8 @@ export function play(root: HTMLElement) {
   let huntAt = 0;
   let huntBusy = false;
   let stripT = 0;
+  let tutorialSaid = false;
+  const stripOpen = () => !!root.querySelector(".strip");
 
   // ---------------------------------------------------------------- titles
   function earn(k: TitleKey) {
@@ -353,7 +356,7 @@ export function play(root: HTMLElement) {
     const now = chainNow();
     if (w.stats?.after_q_day) return { state: h.kind === "exposed" ? "frozen" : "idle", why: "Q-Day has passed. Raids are over." };
     if (h.under_raid) return { state: "busy", why: "Already under raid. Wait for it to settle." };
-    if (Number(h.immune_until) > now) return { state: "rest", why: `Resting after a raid for ${span(Number(h.immune_until) - now)}.` };
+    if (Number(h.immune_until) > now) return { state: "rest", why: `Safe for ${span(Number(h.immune_until) - now)} after a raid.` };
     if (BigInt(h.balance) < PB(c(), "min_target_balance")) return { state: "small", why: `Too small to raid: bags under ${full(PB(c(), "min_target_balance"))} are left alone.` };
     if (!inVault()) return { state: "idle", why: "" };
     if (BigInt(h.balance) * BigInt(P(c(), "punch_down_band")) < w.vaultBal) return { state: "down", why: "Too small for your bag: no punching down." };
@@ -391,7 +394,7 @@ export function play(root: HTMLElement) {
       const qs = npcs.filter((n) => npcName(n.account).startsWith("qubit-") && can(n)).sort((a, b) => hash32(me.account + a.account) - hash32(me.account + b.account));
       if (qs[0]) out.add(qs[0].account);
       const shor = npcs.find((n) => npcName(n.account) === "shor");
-      if (shor && can(shor)) {
+      if (!qs[0] && shor && can(shor)) { // one hunter at a time: Shor only steps in when no Qubit is free
         const top = w.holders.filter((h) => h.kind === "exposed" && eligible(h, shor)).sort(desc)[0];
         if (top?.account === me.account) out.add(shor.account);
       }
@@ -519,6 +522,7 @@ export function play(root: HTMLElement) {
         html = "";
     }
     missionEl.innerHTML = prog().stripHidden === m.k && html ? chipHide : html;
+    if (html && prog().stripHidden !== m.k && showing) { showing.remove(); showing = null; } // the strip speaks alone
     wireMission(m);
   }
 
@@ -622,7 +626,7 @@ export function play(root: HTMLElement) {
     if (b.raidingMe) { arena.say(id, line(id, "idle", String(Math.random())), 1800); return; } // the one who has you, bumping along
     if (!inVault()) {
       sfx.play("blip");
-      arena.say("me", sess().wallet ? "Exposed coins can't fight. Run for the gate." : "Grab a bag first.", 2600);
+      if (!tutorialSaid) { tutorialSaid = true; arena.say("me", sess().wallet ? "Exposed coins can't fight. Run for the gate." : "Grab a bag first.", 2600); }
       return;
     }
     const bl = blocker(h);
@@ -1051,8 +1055,11 @@ export function play(root: HTMLElement) {
     // cap the drawn set: you, everyone tied to you, NPCs, then the largest bags
     const score = (h: Holder) => (h.account === raider || myOpen.has(h.account) || hunt.has(h.account) || h.account === pendingRaid ? 3e18 : isNpc(h.account) ? 2e18 : 0) + whole(h.balance);
     const picked = all.sort((a, b) => score(b) - score(a)).slice(0, 60);
+    const reach = arena.viewSpan * 1.5;
     const bodies: ArenaBody[] = picked.map((h) => {
       const b = blocker(h);
+      const tied = h.account === raider || myOpen.has(h.account) || hunt.has(h.account) || h.account === pendingRaid;
+      const focus = tied || (inVault() && b.state === "open" && arena.distTo(h.account) < reach);
       const npc = isNpc(h.account) ? (npcName(h.account) === "shor" ? "shor" : npcName(h.account) === "grover" ? "grover" : "qubit") : "";
       const mineRaid = myOpen.get(h.account) || (pendingRaid === h.account ? { deadline: 0 } as Raid : null);
       return {
@@ -1063,6 +1070,7 @@ export function play(root: HTMLElement) {
         raidedByMe: !!mineRaid,
         until: h.account === raider ? w.incoming!.deadline : mineRaid?.deadline || undefined,
         svg: avatar(h.account),
+        focus, showBag: tied,
       };
     });
     arena.setBodies(bodies);
@@ -1077,7 +1085,7 @@ export function play(root: HTMLElement) {
     const supply = PB(c(), "satoshi_supply");
     arena.setPlaces({
       gate: kind === "none" ? "hidden" : kind === "exposed" || (s.vault && w.walletBal > 0n) ? "open" : "home",
-      boss: { visible: true, ready: !!w.vault?.boss_ready && inVault() && w.vaultBal >= PB(c(), "boss_min_balance"), hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1 },
+      boss: { visible: inVault() || arena.bossDist < 420, hint: inVault() && arena.bossDist < 420, ready: !!w.vault?.boss_ready && inVault() && w.vaultBal >= PB(c(), "boss_min_balance"), hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1 },
     });
 
     // hunters: siren when a new one turns toward you
@@ -1120,6 +1128,7 @@ export function play(root: HTMLElement) {
     if (!showing) nextToast();
   }
   function nextToast() {
+    if (stripOpen() || arena.meSpeaking) { showing = null; setTimeout(() => { if (alive && !showing && queue.length) nextToast(); }, 1200); return; }
     const ev = queue.shift();
     if (!ev) { showing = null; return; }
     const el = document.createElement("button");
@@ -1185,7 +1194,8 @@ export function play(root: HTMLElement) {
   // Rivals talk: an idle taunt now and then from an NPC near you.
   const tauntT = window.setInterval(() => {
     if (document.hidden || !w.ok) return;
-    const npcs = rivals().filter((h) => isNpc(h.account) && arena.distTo(h.account) < 900);
+    if (stripOpen() || showing || arena.meSpeaking) return;
+    const npcs = rivals().filter((h) => isNpc(h.account) && arena.hunters.includes(h.account));
     if (!npcs.length) return;
     const h = npcs[Math.floor(Math.random() * npcs.length)];
     arena.say(h.account, line(h.account, "idle", String(Math.random())));
@@ -1653,7 +1663,7 @@ export function play(root: HTMLElement) {
     let pin = evHost.querySelector<HTMLButtonElement>(".ev.pin");
     const m = mission();
     const covered = ((m.k === "build" || m.k === "movein") && !!m.raid) || m.k === "defend"; // the strip already shows this raid
-    if (!r || covered) { pin?.remove(); return; }
+    if (!r || covered || stripOpen()) { pin?.remove(); return; }
     const live = threat();
     if (!pin || pin.dataset.id !== `${r.id}:${live}`) {
       pin?.remove();

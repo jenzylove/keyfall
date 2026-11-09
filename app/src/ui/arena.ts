@@ -23,6 +23,8 @@ export interface ArenaBody {
   raidedByMe: boolean; // your open raid on it
   until?: number; // deadline of that raid (chain ms)
   svg: string; // portrait
+  focus?: boolean; // part of what matters right now; everyone else is a bystander
+  showBag?: boolean; // bag number drawn (you, your target, your hunter)
 }
 export interface ArenaMe {
   kind: "none" | "exposed" | "vault";
@@ -36,7 +38,7 @@ export interface ArenaMe {
 }
 export interface ArenaPlaces {
   gate: "hidden" | "open" | "home";
-  boss: { visible: boolean; ready: boolean; hp: number };
+  boss: { visible: boolean; ready: boolean; hp: number; hint?: boolean };
 }
 export interface ArenaCallbacks {
   onTouch(id: string, body: ArenaBody): void;
@@ -215,8 +217,13 @@ export class Arena {
   }
 
   /** A speech bubble over a body ("me" for you, "satoshi" for the boss). */
+  /** Set by the page: true while another text (the strip, a toast) is on screen. */
+  quiet: () => boolean = () => false;
   say(id: string, text: string, ms = 3600) {
     if (!text) return;
+    if (this.quiet()) return; // one message at a time
+    if (id !== "me" && id !== "satoshi" && this.info.get(id) && !this.info.get(id)!.focus) return; // bystanders keep quiet
+    if (id !== "me" && id !== "satoshi" && !this.bodies.has(id)) return;
     const key = id === "me" ? ME : id;
     this.bubbles = this.bubbles.filter((b) => { if (b.id === key) { b.el.remove(); return false; } return true; });
     const el = document.createElement("span");
@@ -264,6 +271,12 @@ export class Arena {
     return true;
   }
   get dashReady() { return this.dashCool <= 0; }
+  /** The longer side of the view, in world px (one screen). */
+  get viewSpan() { return Math.max(this.w, this.h); }
+  /** Where Satoshi stands, relative to you. */
+  get bossDist() { return Math.hypot(this.boss.x - this.me.x, this.boss.y - this.me.y); }
+  /** Whether a bubble is showing on you right now. */
+  get meSpeaking() { return this.bubbles.some((b) => b.id === ME); }
   get hunters() { return this.order.filter((id) => this.info.get(id)?.hunting || this.info.get(id)?.raidingMe); }
   distTo(id: string) { const s = this.simOf(id); return s ? Math.hypot(s.x - this.me.x, s.y - this.me.y) : Infinity; }
   setGateArt(svg: string) { this.img("__gate__", svg); }
@@ -334,7 +347,7 @@ export class Arena {
         break;
       }
     }
-    this.motes = Array.from({ length: 36 }, (_, i) => ({ x: rnd(9, i) * this.W, y: rnd(10, i) * this.H, s: 1 + Math.round(rnd(11, i) * 2), p: rnd(12, i) * 6.28 }));
+    this.motes = Array.from({ length: 14 }, (_, i) => ({ x: rnd(9, i) * this.W, y: rnd(10, i) * this.H, s: 1 + Math.round(rnd(11, i) * 2), p: rnd(12, i) * 6.28 }));
   }
   private inBlock(x: number, y: number, pad: number) {
     return this.blocks.some((b) => x > b.x - pad && x < b.x + b.w + pad && y > b.y - pad && y < b.y + b.h + pad);
@@ -373,7 +386,7 @@ export class Arena {
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.imageSmoothingEnabled = false;
     const light = document.documentElement.getAttribute("data-theme") === "light" || (!document.documentElement.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: light)").matches);
-    const base = this.colors.field, seam = light ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.045)", trace = light ? "rgba(10,143,156,0.22)" : "rgba(39,240,255,0.13)", bolt = light ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.09)";
+    const base = this.colors.field, seam = light ? "rgba(0,0,0,0.055)" : "rgba(255,255,255,0.03)", trace = light ? "rgba(10,143,156,0.15)" : "rgba(39,240,255,0.09)", bolt = light ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.06)";
     for (let i = 0; i < n; i++) {
       const ox = i * TILE;
       g.fillStyle = base; g.fillRect(ox, 0, TILE, TILE);
@@ -521,7 +534,7 @@ export class Arena {
       if (s.lock > 0) s.lock -= dt;
       if ((b.hunting || b.raidingMe) && !reducedMotion() && Math.hypot(s.vx, s.vy) > 40) { s.trail.push({ x: s.x, y: s.y }); if (s.trail.length > 8) s.trail.shift(); } else if (s.trail.length) s.trail.shift();
       const bx = s.x - this.boss.x, by = s.y - this.boss.y, bd = Math.hypot(bx, by) || 1;
-      if (bd < 92 + s.r) { s.x = this.boss.x + (bx / bd) * (92 + s.r); s.y = this.boss.y + (by / bd) * (92 + s.r); }
+      if (bd < 80 + s.r) { s.x = this.boss.x + (bx / bd) * (80 + s.r); s.y = this.boss.y + (by / bd) * (80 + s.r); }
       if (playing) {
         const d2 = Math.hypot(me.x - s.x, me.y - s.y) || 1;
         const min = (me.r + s.r) * 0.9;
@@ -543,7 +556,7 @@ export class Arena {
     this.boss.angle += dt * (reducedMotion() ? 0.25 : 0.55);
     if (playing && this.places.boss.visible) {
       const bx = me.x - this.boss.x, by = me.y - this.boss.y, bd = Math.hypot(bx, by) || 1;
-      const R = 150, half = 0.95;
+      const R = 90, half = 0.95;
       const ang = Math.atan2(by, bx);
       const diff = Math.abs(((ang - this.boss.angle) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI);
       if (Math.abs(bd - R) < 14 + me.r && diff < half) {
@@ -699,7 +712,11 @@ export class Arena {
   private drawBody(c: CanvasRenderingContext2D, s: Sim, b: ArenaBody) {
     const { x, y, r } = s;
     if (x < this.cam.x - 90 || x > this.cam.x + this.w + 90 || y < this.cam.y - 90 || y > this.cam.y + this.h + 90) return;
-    const dimmed = b.state === "rest" || b.state === "busy" || b.state === "down" || b.state === "small" || b.state === "frozen" || b.immune;
+    const dimmed = b.state === "busy" || b.state === "down" || b.state === "small" || b.state === "frozen";
+    // bystanders are small, faint and quiet; they come up to full only right next to you
+    const near = Math.hypot(x - this.me.x, y - this.me.y);
+    const up = b.focus ? 1 : this.meInfo.kind === "none" ? 0.5 : clamp(1 - (near - 120) / 140, 0, 1);
+    const draw = { r: r * (0.6 + 0.4 * up), alpha: 0.35 + 0.65 * up };
     const color = b.kind === "vault" ? GOLD : RED;
     const moving = Math.hypot(s.vx, s.vy) > 20;
     const hot = b.hunting || b.raidingMe;
@@ -718,30 +735,36 @@ export class Arena {
       for (let i = -1; i <= 1; i++) { const px = x + ny * i * r * 0.6, py = y - nx * i * r * 0.6; const len = 10 + ((this.t * 40 + i * 7) % 12); c.beginPath(); c.moveTo(px + nx * (r + 4), py + ny * (r + 4)); c.lineTo(px + nx * (r + 4 + len), py + ny * (r + 4 + len)); c.stroke(); }
       c.globalAlpha = 1;
     }
-    if (dimmed) c.globalAlpha *= 0.5;
-    this.shadow(c, x, y + bob, r);
+    if (dimmed) c.globalAlpha *= 0.6;
+    c.globalAlpha *= draw.alpha;
+    if (up < 1 && !reducedMotion()) c.filter = `saturate(${Math.round(up * 100)}%)`;
+    const r0 = r; const rr = draw.r;
+    this.shadow(c, x, y + bob, rr);
     // exposed: dripping pixels
-    if (b.kind === "exposed" && !dimmed) {
+    if (b.kind === "exposed" && !dimmed && up > 0.5) {
       c.fillStyle = RED;
-      for (let i = 0; i < 3; i++) { const ph = (this.t * 0.9 + rnd(s.seed, 50 + i)) % 1; c.globalAlpha = (1 - ph) * 0.9; c.fillRect(Math.round(x - r + 4 + rnd(s.seed, 60 + i) * (r * 2 - 10)), Math.round(y + r + ph * 14), 3, 3); }
-      c.globalAlpha = dimmed ? 0.5 : 1;
+      const a0 = c.globalAlpha;
+      for (let i = 0; i < 3; i++) { const ph = (this.t * 0.9 + rnd(s.seed, 50 + i)) % 1; c.globalAlpha = a0 * (1 - ph) * 0.9; c.fillRect(Math.round(x - rr + 4 + rnd(s.seed, 60 + i) * (rr * 2 - 10)), Math.round(y + rr + ph * 14), 3, 3); }
+      c.globalAlpha = a0;
     }
-    this.outline(c, x, y + bob, r, color, hot ? 3 : 2);
-    this.sprite(c, b.id, x, y, r, s.face, bob, wobble);
+    this.outline(c, x, y + bob, rr, up < 1 ? this.colors.dim : color, hot ? 3 : 2);
+    this.sprite(c, b.id, x, y, rr, s.face, bob, wobble);
+    const r1 = rr; void r0; // the badges below use the drawn size
+    const rB = r1;
     // blink
-    if (this.blinkAt(s.seed)) { c.fillStyle = "#0c0c0b"; c.fillRect(Math.round(x - r * 0.7), Math.round(y + bob - r * 0.35), Math.round(r * 1.4), 3); }
+    if (this.blinkAt(s.seed)) { c.fillStyle = "#0c0c0b"; c.fillRect(Math.round(x - rB * 0.7), Math.round(y + bob - rB * 0.35), Math.round(rB * 1.4), 3); }
     // hunters: red eyes
-    if (hot) { c.fillStyle = RED; c.fillRect(Math.round(x - r * 0.42), Math.round(y + bob - r * 0.3), 4, 3); c.fillRect(Math.round(x + r * 0.18), Math.round(y + bob - r * 0.3), 4, 3); }
-    if (b.shieldBps > 0) {
+    if (hot) { c.fillStyle = RED; c.fillRect(Math.round(x - rB * 0.42), Math.round(y + bob - rB * 0.3), 4, 3); c.fillRect(Math.round(x + rB * 0.18), Math.round(y + bob - rB * 0.3), 4, 3); }
+    if (b.shieldBps > 0 && b.focus) {
       const n = Math.min(3, Math.ceil(b.shieldBps / 1000));
       c.strokeStyle = CYAN; c.lineWidth = 2; c.globalAlpha *= 0.8;
       for (let i = 0; i < n; i++) { c.beginPath(); c.arc(x, y + bob, r + 6 + i * 5, 0, Math.PI * 2); c.stroke(); }
     }
     c.restore();
+    if (!b.focus) return; // bystanders: no badges, no labels
     c.save();
-    const bx = x + r + 2, by = y + bob - r - 2;
-    if (b.immune || b.state === "rest") { c.fillStyle = this.colors.dim; this.moon(c, bx, by); }
-    else if (b.state === "down" || b.state === "small") this.lock(c, bx, by, this.colors.dim);
+    const bx = x + rB + 2, by = y + bob - rB - 2;
+    if (b.state === "down" || b.state === "small") this.lock(c, bx, by, this.colors.dim);
     else if (b.state === "busy") this.cross(c, bx, by, RED);
     if (b.kind === "vault") { c.fillStyle = GOLD; c.fillRect(Math.round(x - r - 1), Math.round(y + bob + r - 7), 7, 6); c.fillStyle = "#0b0b0b"; c.fillRect(Math.round(x - r + 3), Math.round(y + bob + r - 5), 1, 2); }
     // vault sparkle
@@ -756,8 +779,7 @@ export class Arena {
     c.fillStyle = hot ? RED : this.colors.ink;
     c.globalAlpha = dimmed ? 0.6 : 1;
     this.label(c, b.name, x, y + r + 7, hot ? 3 : 2);
-    c.font = this.font(10.5); c.fillStyle = this.colors.dim;
-    this.label(c, b.bag, x, y + r + 20, 1);
+    if (b.showBag) { c.font = this.font(10.5); c.fillStyle = this.colors.dim; this.label(c, b.bag, x, y + r + 20, 1); }
     c.restore();
   }
   /** Labels are queued and decluttered: a label that would sit in the top UI
@@ -787,10 +809,6 @@ export class Arena {
       c.globalAlpha = l.alpha; c.fillStyle = l.color; c.fillText(l.text, Math.round(l.x), Math.round(top + 1));
       c.restore();
     }
-  }
-  private moon(c: CanvasRenderingContext2D, x: number, y: number) {
-    c.beginPath(); c.arc(x, y, 5, 0, Math.PI * 2); c.fill();
-    c.fillStyle = this.colors.field; c.beginPath(); c.arc(x + 3, y - 2, 4.2, 0, Math.PI * 2); c.fill();
   }
   private lock(c: CanvasRenderingContext2D, x: number, y: number, col: string) {
     c.fillStyle = col; c.fillRect(x - 5, y - 2, 10, 8); c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.arc(x, y - 3, 3.5, Math.PI, 0); c.stroke();
@@ -891,9 +909,9 @@ export class Arena {
     if (!this.places.boss.visible) return;
     const { x, y, angle } = this.boss;
     c.save();
-    const R = 150;
-    c.strokeStyle = GOLD; c.globalAlpha = 0.1; c.lineWidth = 26; c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.stroke();
-    c.globalAlpha = 0.8; c.beginPath(); c.arc(x, y, R, angle - 0.95, angle + 0.95); c.stroke();
+    const R = 90;
+    c.strokeStyle = GOLD; c.globalAlpha = 0.06; c.lineWidth = 18; c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.stroke();
+    c.globalAlpha = 0.55; c.beginPath(); c.arc(x, y, R, angle - 0.95, angle + 0.95); c.stroke();
     c.globalAlpha = 1; c.lineWidth = 3; c.strokeStyle = GOLD3; c.beginPath(); c.arc(x, y, R, angle - 0.95, angle + 0.95); c.stroke();
     // boss sprite, about 3.5x a player
     const S = 160, bob = Math.sin(this.t * 1.6) * 3;
@@ -913,7 +931,7 @@ export class Arena {
     c.textAlign = "center"; c.textBaseline = "bottom"; c.font = this.font(15); c.fillStyle = GOLD;
     this.label(c, "SATOSHI", x, y - S / 2 - 26, 4);
     c.textBaseline = "top"; c.font = this.mono(10); c.fillStyle = this.places.boss.ready ? GOLD : this.colors.dim;
-    this.label(c, this.places.boss.ready ? "touch the core to hit" : "dodge the pulse", x, y + S / 2 + 8, 2);
+    if (this.places.boss.hint) this.label(c, this.places.boss.ready ? "touch the core to hit" : "dodge the pulse", x, y + S / 2 + 8, 2);
     c.restore();
   }
 

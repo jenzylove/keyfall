@@ -1,0 +1,20 @@
+// How many screencast frames per second does this machine deliver? Headful vs headless.
+import puppeteer from "puppeteer-core";
+const headless = process.argv[2] !== "headful";
+const b = await puppeteer.launch({ userDataDir: "C:/Users/LENOVO/qday-launch/chrome-v4", executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless, args: ["--no-sandbox", "--window-size=420,900", "--window-position=20,20", ...(headless ? ["--use-gl=swiftshader", "--enable-unsafe-swiftshader"] : ["--use-gl=angle", "--use-angle=d3d11"])] });
+const p = await b.newPage();
+await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await p.evaluateOnNewDocument(() => { localStorage.setItem("qday.theme", "dark"); localStorage.setItem("qday.intro.v2", "1"); });
+await p.goto("http://localhost:5188/play", { waitUntil: "domcontentloaded" });
+await new Promise((r) => setTimeout(r, 4000));
+const cdp = await p.createCDPSession();
+let n = 0;
+cdp.on("Page.screencastFrame", async (ev) => { n++; await cdp.send("Page.screencastFrameAck", { sessionId: ev.sessionId }).catch(() => {}); });
+const W = Number(process.argv[3] || 780); await cdp.send("Page.startScreencast", { format: "jpeg", quality: Number(process.argv[4] || 80), everyNthFrame: 1, maxWidth: W, maxHeight: Math.round(W * 844 / 390) });
+await p.keyboard.down("w");
+await new Promise((r) => setTimeout(r, 8000));
+await p.keyboard.up("w");
+await cdp.send("Page.stopScreencast");
+const fps = await p.evaluate(() => Math.round(document.querySelector("#field").__arena.fps));
+console.log(headless ? "headless" : "headful", "screencast", (n / 8).toFixed(1), "frames/s; game", fps, "fps");
+await b.close();
