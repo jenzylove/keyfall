@@ -309,7 +309,7 @@ export function play(root: HTMLElement) {
     try { localStorage.setItem(LS_T, JSON.stringify([...have, k])); } catch {}
     const [name, why] = TITLES[k];
     // one message channel: a slim gold pill that waits its turn (after the strip collapses)
-    toast({ tone: "gold", cls: "title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}`, open: () => openSettings(), onShow: () => { sfx.play("fanfare"); sfx.vibrate([30, 40, 30, 40, 80]); } });
+    toast({ tone: "gold", cls: "ev-title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}`, open: () => openSettings(), onShow: () => { sfx.play("fanfare"); sfx.vibrate([30, 40, 30, 40, 80]); } });
   }
 
   const sess = () => chain.session();
@@ -2025,6 +2025,7 @@ export function play(root: HTMLElement) {
 
   // debugging and acceptance: fps and world on the element
   (field as any).__arena = arena;
+  (field as any).__toastTitle = (k: TitleKey) => { const [name, why] = TITLES[k]; toast({ tone: "gold", cls: "ev-title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}` }); }; // styling check only: stores nothing
   (field as any).__guide = () => ({ step: gstep, on: guideOn(), holds: guideHolds(), target: gTarget, variant: gVariant });
   (field as any).__world = () => ({ incoming: w.incoming, myRaids: w.myRaids.length, walletBal: String(w.walletBal), vaultBal: String(w.vaultBal), vault: sess().vault?.accountId, wallet: sess().wallet?.accountId, holders: w.holders.length, raidsLeft: w.vault?.raids_left });
 
