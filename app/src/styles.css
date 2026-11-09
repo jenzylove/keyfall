@@ -853,3 +853,5 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
   .crt { display: none; }
 }
 @media (max-width: 430px) { .strip.tone-alarm .strip-text { display: none; } .strip.tone-alarm { grid-template-columns: auto minmax(0, 1fr) auto; } }
+.field > .events .ev.title { background: var(--gold); color: var(--on-safe); box-shadow: 0 3px 0 var(--gold-dark), 0 3px 0 2px var(--press); font-weight: 600; }
+.field > .events .ev.title b { font: 700 11px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; }
