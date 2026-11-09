@@ -343,6 +343,10 @@ export class Arena {
   }
   /** The target your next shot would snap to, or null. */
   aimTarget(dir = this.facing): string | null {
+    // the tight cone first; when nothing is in it, a wider one (a thumb is not a crosshair)
+    return this.aimIn(dir, AIM_HALF) ?? this.aimIn(dir, AIM_HALF * 2.6);
+  }
+  private aimIn(dir: { x: number; y: number }, half0: number): string | null {
     let best: string | null = null, bd = Infinity;
     const range = this.viewSpan;
     for (const id of this.targets) {
@@ -350,7 +354,7 @@ export class Arena {
       const dx = s.x - this.me.x, dy = s.y - this.me.y, dist = Math.hypot(dx, dy);
       if (dist > range || dist < 1) continue;
       const ang = Math.acos(clamp((dx * dir.x + dy * dir.y) / dist, -1, 1));
-      const half = id === "satoshi" ? AIM_HALF * 2.5 : AIM_HALF; // the boss is a big target
+      const half = id === "satoshi" ? half0 * 1.5 : half0; // the boss is a big target
       if (ang > half) continue;
       if (dist < bd) { bd = dist; best = id; }
     }

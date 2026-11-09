@@ -74,6 +74,28 @@ await waitFor(() => (document.querySelector("#field")?.__world?.().holders || 0)
 await sleep(1200);
 log("world", JSON.stringify(await W()), "fps", await fps(), "lowPower", await A((ar) => ar.lowPower));
 
+if (MODE === "--defend") {
+  // a raider is charging your vault: shoot it (the real defend)
+  const raider = await A((ar) => ar.order.find((id) => ar.info.get(id)?.raidingMe) || null);
+  log("raider:", raider, JSON.stringify((await W()).incoming));
+  if (raider) {
+    await steerTo(raider, 30000, 230);
+    await sleep(300);
+    await shot("14-raider-charging");
+    const aim = await aimAndShoot(raider);
+    log("aim ->", aim);
+    await sleep(350);
+    await shot("14b-defend-shot");
+    const r = await waitFor(() => document.querySelector(".fx-banner")?.textContent || document.querySelector(".bp-say")?.textContent || null, 20000, 200);
+    log("defend result:", r, "inFlight", await A((ar) => ar.meInfo.inFlight));
+    await sleep(900);
+    await shot("14c-defended");
+  }
+  log("errors:", JSON.stringify(errors.slice(0, 5)));
+  await b.close();
+  process.exit(0);
+}
+
 if (MODE === "--fps") {
   const cdp = await p.createCDPSession();
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
