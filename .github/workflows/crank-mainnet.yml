@@ -1,0 +1,38 @@
+name: crank-mainnet
+
+# The mainnet heartbeat for keyfall.near: harvest, resolve, NPC moves.
+# The bots pay their own gas by selling part of their bags.
+on:
+  schedule:
+    - cron: "5,25,45 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Decide but send nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: crank-mainnet
+  cancel-in-progress: false
+
+jobs:
+  crank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: app
+      - name: Crank
+        env:
+          NEAR_NETWORK: mainnet
+          NPC_SEEDS: ${{ secrets.NPC_SEEDS_MAINNET }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: node scripts/crank.mjs

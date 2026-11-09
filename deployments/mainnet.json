@@ -1,0 +1,14 @@
+{
+  "network": "mainnet",
+  "contract": "keyfall.near",
+  "deploy_tx": "CVAtSwnxxq1pxwkV22EtsUPDLQA3GFH4bA61nsS3Eeh7",
+  "deploy_link": "https://nearblocks.io/txns/CVAtSwnxxq1pxwkV22EtsUPDLQA3GFH4bA61nsS3Eeh7",
+  "deployed_at": "2026-11-09T04:55:34.286Z",
+  "start_ms": 1794200188685,
+  "q_day_ms": 1795409788685,
+  "params_file": "sim/params-mainnet.json",
+  "wasm_sha256": "9095039bd36c6f1646911b6aaa5a97371428441e05124a04dfd583e9a4ac2ccf",
+  "wasm_bytes": 276073,
+  "keyless": true,
+  "config_matches_params": true
+}

@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 import { tick } from "../app/npc/tick.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const live = JSON.parse(fs.readFileSync(path.join(here, "..", "deployments", "testnet-live.json"), "utf8"));
+const MAINNET = process.env.NEAR_NETWORK === "mainnet";
+const live = JSON.parse(fs.readFileSync(path.join(here, "..", "deployments", MAINNET ? "mainnet.json" : "testnet-live.json"), "utf8"));
 const contract = process.env.CONTRACT || live.contract;
 const dryRun = process.argv.includes("--dry") || process.env.DRY_RUN === "1";
 
@@ -22,7 +23,7 @@ try {
   process.exit(1);
 }
 
-const link = (h) => `https://testnet.nearblocks.io/txns/${h}`;
+const link = (h) => `https://${MAINNET ? "" : "testnet."}nearblocks.io/txns/${h}`;
 const result = await tick({ contract, seeds, network: live.network || "testnet", dryRun });
 
 const lines = result.moves.map((m) => {
@@ -30,7 +31,7 @@ const lines = result.moves.map((m) => {
   const status = m.error ? `FAILED ${m.error.slice(0, 160)}` : m.hash ? link(m.hash) : dryRun ? "dry run" : "";
   return `${m.npc}: ${what} | ${m.reason} | ${status}`;
 });
-console.log(`Q-DAY crank ${result.at} on ${contract}${dryRun ? " (dry run)" : ""}: ${result.moves.length} move(s)`);
+console.log(`KEYFALL crank ${result.at} on ${contract}${dryRun ? " (dry run)" : ""}: ${result.moves.length} move(s)`);
 for (const l of lines) console.log(l);
 console.log(JSON.stringify(result, null, 2));
 

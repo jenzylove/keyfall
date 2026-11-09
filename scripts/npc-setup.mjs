@@ -14,8 +14,12 @@ import { near, call, send, view, faucetAccount, rawMlDsaPublicKey, bytesToBase64
 import { ROSTER, BAGS_NEAR } from "../app/npc/rules.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const live = JSON.parse(fs.readFileSync(path.join(here, "..", "deployments", "testnet-live.json"), "utf8"));
+// Mainnet: NEAR_NETWORK=mainnet NPC_BANK=<deployer.json> NPC_ONLY=shor,grover,qubit-01 NPC_BAG=0.25
+const MAINNET = process.env.NEAR_NETWORK === "mainnet";
+const live = JSON.parse(fs.readFileSync(path.join(here, "..", "deployments", MAINNET ? "mainnet.json" : "testnet-live.json"), "utf8"));
 const contract = live.contract;
+const ONLY = process.env.NPC_ONLY ? process.env.NPC_ONLY.split(",") : null;
+const FIXED_BAG = process.env.NPC_BAG ? Number(process.env.NPC_BAG) : null;
 const seedsPath = path.resolve(process.argv[2] || path.join(here, "..", "..", "qday-launch", "npc-seeds.json"));
 const FAUCET_PAUSE_MS = 60_000;
 const BANKS = 2;
@@ -31,7 +35,7 @@ const saveSeeds = () => {
 };
 
 const todo = [];
-for (const r of ROSTER) {
+for (const r of ROSTER.filter((x) => !ONLY || ONLY.includes(x.name))) {
   const id = `${r.name}.${contract}`;
   const h = await view(contract, "holder", { account_id: id });
   if (h) console.log(`skip ${id}: vault already exists`);
@@ -41,7 +45,7 @@ if (!todo.length) {
   console.log("all NPC vaults exist");
   process.exit(0);
 }
-const bag = (r) => (r.name.startsWith("qubit") ? BAGS_NEAR.qubit : BAGS_NEAR[r.name]);
+const bag = (r) => FIXED_BAG ?? (r.name.startsWith("qubit") ? BAGS_NEAR.qubit : BAGS_NEAR[r.name]);
 const need = todo.reduce((s, r) => s + bag(r) + 0.3, 0) + 0.5;
 console.log(`creating ${todo.length} vault(s), about ${need.toFixed(1)} NEAR needed`);
 
@@ -60,7 +64,14 @@ async function makeBank(i) {
 }
 
 const banks = [];
-for (let i = 1; i <= BANKS && banks.length * 9.5 < need; i += 1) {
+if (process.env.NPC_BANK) {
+  const k = JSON.parse(fs.readFileSync(process.env.NPC_BANK, "utf8"));
+  const { signerFromPrivateKey } = await import("@fastnear/utils");
+  const have = Number(BigInt(unwrap(await near.queryAccount({ accountId: k.account_id, network: MAINNET ? "mainnet" : "testnet" })).amount) / 10n ** 21n) / 1000;
+  console.log(`bank: ${k.account_id.slice(0, 8)}… holds ${have} NEAR`);
+  banks.push({ accountId: k.account_id, signer: signerFromPrivateKey(k.private_key), spent: 9.9 - (have - 0.05) });
+}
+for (let i = 1; !process.env.NPC_BANK && i <= BANKS && banks.length * 9.5 < need; i += 1) {
   if (i > 1) await sleep(FAUCET_PAUSE_MS);
   banks.push({ ...(await makeBank(i)), spent: 0 });
 }
@@ -101,7 +112,7 @@ for (const r of todo) {
   });
   const have = await bal(accountId);
   created.push({ name: r.name, accountId, create: cv.hash, buy: buy.hash, migrate: mig.hash, bag: have.toString() });
-  console.log(`${accountId}: bag ${(have / 10n ** 18n).toString()} $QDAY`);
+  console.log(`${accountId}: bag ${(have / 10n ** 18n).toString()} tokens`);
   console.log(`  create  ${explorer(cv.hash)}`);
   console.log(`  buy     ${buy.error ? "FAILED " + buy.error.slice(0, 120) : explorer(buy.hash)}`);
   console.log(`  migrate ${mig.error ? "FAILED " + mig.error.slice(0, 120) : explorer(mig.hash)}`);
