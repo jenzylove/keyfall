@@ -46,12 +46,30 @@ const NAME_RE = /^[a-z0-9]+([_-][a-z0-9]+)*$/;
 const GAME = "KEYFALL";
 const NET_LABEL = (chain.NETWORK as string) === "mainnet" ? "Mainnet" : "Practice";
 
-/** Wake the NPCs now, and again after the function throttle so a fresh bag is seen. */
+/** Wake the NPCs now, and again after the function throttle so a fresh bag is seen.
+ * Held back while the first run guide is teaching: nobody hunts a new player then. */
+let holdTicks: () => boolean = () => false;
 function tick(twice = true) {
+  if (holdTicks()) return;
   const once = () => fetch(apiUrl("/api/tick"), { method: "POST" }).catch(() => {});
   once();
   if (twice) setTimeout(once, 25_000);
 }
+
+// ------------------------------------------------------------------ the first run guide (per network)
+
+const LS_G = `qday.guide.v1.${chain.NETWORK}`;
+interface GuideSave { step: number; done?: boolean }
+function guideSave(): GuideSave { try { return JSON.parse(localStorage.getItem(LS_G) || "null") || { step: 0 }; } catch { return { step: 0, done: true }; } }
+function setGuideSave(g: GuideSave) { try { localStorage.setItem(LS_G, JSON.stringify(g)); } catch {} }
+/** How long a card stays before it moves on by itself: never under 4 s, and long enough to read. */
+const readMs = (text: string) => Math.max(4000, text.split(/\s+/).length * 330);
+
+// ------------------------------------------------------------------ what you paid (mainnet money line)
+
+const LS_PAID = `qday.paid.v1.${chain.NETWORK}`;
+function paidNear(): number { try { return Number(localStorage.getItem(LS_PAID) || 0) || 0; } catch { return 0; } }
+function addPaid(near: number) { try { localStorage.setItem(LS_PAID, String(paidNear() + near)); } catch {} }
 
 // ------------------------------------------------------------------ local progress
 
@@ -110,6 +128,7 @@ interface World {
   myRaids: Raid[];
   incoming: Raid | null;
   escape: Raid | null;
+  sellQuote: bigint | null; // what the whole bag sells for now, in yocto (mainnet goal line)
 }
 
 type Mission =
@@ -132,17 +151,18 @@ export function play(root: HTMLElement) {
       <header class="hud">
         <button type="button" class="hud-net ${NET_LABEL.toLowerCase()}" id="h-net" aria-label="${NET_LABEL} arena. Switch arena">${MARK}<span>${NET_LABEL}</span></button>
         <div class="hud-cell"><span class="hud-k">Q-Day in</span><span class="hud-v" id="h-qday">··</span></div>
-        <div class="hud-cell bag"><span class="hud-k">Your bag</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span></div>
+        <div class="hud-cell bag"><span class="hud-k">Your bag</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span><span class="hud-pips" id="h-pips" hidden></span></div>
         <div class="hud-cell rank"><span class="hud-k">Rank</span><span class="hud-v" id="h-rank">··</span></div>
-        <p class="hud-goal"><b>Goal</b>Biggest vault at Q-Day</p>
         <button class="hud-snd" type="button" id="h-snd" aria-label="Sound"></button>
         <button class="hud-menu" type="button" id="h-menu" aria-label="Menu">${I.menu}<i class="rdot" hidden></i></button>
       </header>
+      <p class="goal" id="goal"><b>Goal</b><span class="goal-t">Richest vault at Q-Day wins</span><span class="goal-you" id="goal-you"></span></p>
       <aside class="side left">
         <section class="stats panel" id="stats" aria-label="Your stats"></section>
       </aside>
       <main class="field" id="field">
         <div class="strip-slot" id="mission"></div>
+        <div class="guide-slot" id="guide"></div>
         <div class="events" id="events" aria-live="polite"></div>
         <div class="field-msg" id="field-msg" hidden></div>
         <div class="start" id="start" hidden></div>
@@ -156,6 +176,7 @@ export function play(root: HTMLElement) {
       <aside class="side right">
         <section class="panel activity"><header><h2>Activity</h2><span class="live"><i></i>live</span></header><ul class="log" id="log"></ul></section>
       </aside>
+      <div class="g-arrow" id="g-arrow" hidden aria-hidden="true"><svg viewBox="0 0 24 24" shape-rendering="crispEdges"><path d="M3 4h18v4h-3v4h-3v4h-3v4h-3v-4H6v-4H3z" fill="#0c0c0b"/><path d="M5 6h14v3h-3v3h-3v3h-2v-3H8V9H5z" fill="currentColor"/></svg></div>
     </div>`;
 
   const field = root.querySelector<HTMLElement>("#field")!;
@@ -171,7 +192,9 @@ export function play(root: HTMLElement) {
     onPulse: () => { sfx.play("deny"); sfx.vibrate(30); arena.say("me", "oof"); },
     chainNow,
   });
-  arena.quiet = () => stripOpen() || !!showing;
+  arena.quiet = () => stripOpen() || !!showing || guideOn();
+  /** One message at a time: a line for you goes on the guide card while it teaches, else as a bubble. */
+  const tell = (text: string, ms = 3600) => { if (guideOn()) guideNote(text, ms); else arena.say("me", text, ms); };
   arena.setGateArt(ART_VAULT);
   arena.setBossArt(ART_SATOSHI);
   field.insertBefore(arena.el, field.firstChild);
@@ -235,7 +258,7 @@ export function play(root: HTMLElement) {
   }
 
   let alive = true;
-  let w: World = { ok: false, stats: null, config: null, wallet: null, vault: null, walletBal: 0n, vaultBal: 0n, walletNear: null, vaultNear: null, holders: [], open: [], feed: [], myRaids: [], incoming: null, escape: null };
+  let w: World = { ok: false, stats: null, config: null, wallet: null, vault: null, walletBal: 0n, vaultBal: 0n, walletNear: null, vaultNear: null, holders: [], open: [], feed: [], myRaids: [], incoming: null, escape: null, sellQuote: null };
   let loaded = false;
   let busy = ""; // a move in flight, by name
   let busyText = "";
@@ -312,6 +335,12 @@ export function play(root: HTMLElement) {
     const escape = escId ? (incoming && String(incoming.id) === escId ? incoming : await safe(chain.getRaid(escId))) : null;
     if (!stats) { w.ok = false; return; }
     syncClock(stats.now_ms);
+    // mainnet only: what the bag would sell for right now, from the contract's own quote
+    let sellQuote: bigint | null = null;
+    if (MAIN) {
+      const bag = vault ? BigInt(vault.balance) : wallet ? BigInt(wallet.balance) : 0n;
+      if (bag > 0n) { const q = await safe(chain.quoteSell(bag.toString())); sellQuote = q ? BigInt(q) : null; }
+    }
     w = {
       ok: true, stats, config, wallet, vault,
       walletBal: wallet ? BigInt(wallet.balance) : 0n,
@@ -323,6 +352,7 @@ export function play(root: HTMLElement) {
       myRaids,
       incoming: incoming && incoming.status === "open" ? incoming : null,
       escape,
+      sellQuote,
     };
     loaded = true;
   }
@@ -358,6 +388,27 @@ export function play(root: HTMLElement) {
     if (BigInt(h.balance) * BigInt(P(c(), "punch_down_band")) < w.vaultBal) return { state: "down", why: "Too small for your bag: no punching down." };
     return { state: w.vault && w.vault.raids_left > 0 ? "open" : "idle", why: "" };
   }
+  /** The same rule in three or four words, drawn under a body as you come close. */
+  function hintFor(h: Holder, state: ArenaBody["state"]): string {
+    if (!inVault()) return "";
+    switch (state) {
+      case "open": return "Touch to rob";
+      case "busy": return "Already being raided";
+      case "rest": return `Resting ${span(Number(h.immune_until) - chainNow())}`;
+      case "small": return "Too small to rob";
+      case "down": return "Too small for you";
+      case "frozen": return "Frozen";
+      default: return w.vault && w.vault.raids_left <= 0 ? "No raids left" : "";
+    }
+  }
+  /** Satoshi's line as you come close: why you cannot hit him yet, or that you can. */
+  function bossLine(): string {
+    const v = w.vault, st = w.stats;
+    if (!inVault() || !v || !st) return "Get gold first";
+    if (w.vaultBal < PB(c(), "boss_min_balance")) return `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins`;
+    if (!v.boss_ready) return `Ready in ${span(Number(st.epoch_ends_ms) - chainNow())}`;
+    return "Touch his core";
+  }
 
   function rivals(): Holder[] {
     const own = mine();
@@ -376,6 +427,7 @@ export function play(root: HTMLElement) {
     const out = new Set<string>();
     const cfg = c();
     if (!cfg || !w.stats || w.stats.after_q_day || !loaded) return out;
+    if (guideHolds()) return out; // nobody hunts you while the guide teaches
     const me = inVault() ? w.vault : w.wallet;
     if (!me) return out;
     const now = chainNow();
@@ -438,8 +490,15 @@ export function play(root: HTMLElement) {
     const m = mission();
     const raid = (m.k === "build" || m.k === "movein" || m.k === "defend") && m.raid ? m.raid : null;
     const esc2 = w.escape;
-    const key = [m.k, raid?.id ?? "", busy, esc2 ? `${esc2.id}:${esc2.status}` : "", m.k === "grab" && m.buyOnly, pendingRaid, prog().stripHidden].join("|");
+    const key = [m.k, raid?.id ?? "", busy, esc2 ? `${esc2.id}:${esc2.status}` : "", m.k === "grab" && m.buyOnly, pendingRaid, prog().stripHidden, guideOn()].join("|");
     root.classList.toggle("has-mission", m.k !== "none" && m.k !== "load");
+    if (guideOn() && m.k !== "grab" && m.k !== "load") { // the guide card speaks alone
+      missionKey = key;
+      clearTimeout(stripT);
+      missionEl.innerHTML = "";
+      startEl.hidden = true;
+      return;
+    }
     if (key === missionKey) { updateLive(); return; }
     missionKey = key;
     const strip = (tone: string, head: string, text: string, act = "") =>
@@ -539,7 +598,7 @@ export function play(root: HTMLElement) {
         say("Buying your bag…");
         const r = await chain.buy(1);
         keepReceipt("buy", r.hash);
-        tick();
+        if (guideSave().done) tick(); // a first run learns the arena before the NPCs wake
         return "Your bag landed. Run to the gate.";
       });
     };
@@ -586,7 +645,7 @@ export function play(root: HTMLElement) {
       await refresh();
       const m2 = root.querySelector<HTMLElement>("#m-msg");
       if (m2) { m2.textContent = plainError(e); m2.className = "m-msg bad"; }
-      else arena.say("me", plainError(e));
+      else tell(plainError(e));
     }
   }
 
@@ -606,10 +665,155 @@ export function play(root: HTMLElement) {
       console.warn(e);
       busy = "";
       sfx.play("deny");
-      arena.say("me", plainError(e), 4200);
+      tell(plainError(e), 4200);
       await refresh();
     }
     return true;
+  }
+
+  // ---------------------------------------------------------------- the guide: the first minute, one card at a time
+
+  let gstep = 0; // 0 = not running (not started yet, or done)
+  let gAt = 0; // when the current card came up
+  let gKey = "";
+  let gVariant = ""; // step 5: "body" | "boss"
+  let gTarget = ""; // step 5: the body the arrow points at
+  let gNote = ""; let gNoteT = 0;
+  let guideRaided = false;
+  let guideBossHit = false;
+  const guideEl = root.querySelector<HTMLElement>("#guide")!;
+  const gArrow = root.querySelector<HTMLElement>("#g-arrow")!;
+  const guideOn = () => gstep > 0;
+  /** Steps 1 to 5: nobody hunts you and the NPCs are not woken by this client. */
+  const guideHolds = () => gstep > 0 && gstep < 6;
+
+  const CARDS: Record<number, { title: string; text: string; tap?: boolean }> = {
+    1: { title: "This is you.", text: "Drag anywhere to move." },
+    2: { title: "You are red.", text: "Your coins sit behind an old key. A quantum computer can crack it, so anyone can rob you, and red bags leak coins over time.", tap: true },
+    3: { title: "Get to the gold door.", text: "It locks your coins behind a quantum key." },
+    4: { title: "You are gold now. Safe.", text: "Only gold players can attack.", tap: true },
+    5: { title: "Rob someone.", text: "Players with a red target mark are ones you can hit. Touch one." },
+    6: { title: "Now they hunt you too.", text: "If someone charges your vault, touch them to block. DASH to get away.", tap: true },
+    7: { title: "Your goal:", text: "Be the richest vault when Q-Day hits. Red bags freeze forever that day.", tap: true },
+  };
+
+  /** The nearest real body you can raid right now, or null. */
+  function guideRaidTarget(): string | null {
+    if (!inVault() || !w.vault || w.vault.raids_left <= 0) return null;
+    let best: string | null = null, bd = Infinity;
+    for (const h of rivals()) {
+      if (blocker(h).state !== "open") continue;
+      const d = arena.distTo(h.account);
+      if (d < bd) { bd = d; best = h.account; }
+    }
+    return best;
+  }
+  const bossReadyForMe = () => inVault() && !!w.vault?.boss_ready && w.vaultBal >= PB(c(), "boss_min_balance");
+
+  function guideGo(step: number) {
+    if (step === gstep) return;
+    gstep = step;
+    gAt = Date.now();
+    gNote = "";
+    setGuideSave({ step });
+    sfx.play("blip");
+    renderGuide();
+  }
+  function guideFinish() {
+    setGuideSave({ step: 7, done: true });
+    gstep = 0;
+    gKey = "";
+    guideEl.innerHTML = "";
+    gArrow.hidden = true;
+    arena.setGuide(null);
+    arena.cardOn = false;
+    arena.topInset = 0;
+    missionKey = "";
+    render();
+    tick(); // the NPCs may come now
+  }
+  function guideNote(text: string, ms = 3600) {
+    gNote = text; gNoteT = Date.now() + ms;
+    const n = guideEl.querySelector<HTMLElement>("#g-note");
+    if (n) n.textContent = text;
+    setTimeout(() => { if (Date.now() >= gNoteT) { gNote = ""; const n2 = guideEl.querySelector<HTMLElement>("#g-note"); if (n2) n2.textContent = ""; } }, ms + 20);
+  }
+
+  /** Advance on the real event. Runs every 300 ms and after each render. */
+  function guideTick() {
+    if (!alive || !loaded || !w.ok) return;
+    const save = guideSave();
+    if (save.done) { if (gstep) { gstep = 0; guideEl.innerHTML = ""; gArrow.hidden = true; arena.setGuide(null); arena.cardOn = false; arena.topInset = 0; } return; }
+    const s = sess();
+    const kind = inVault() ? "vault" : s.wallet && w.walletBal > 0n ? "exposed" : "none";
+    if (kind === "none") return; // the guide starts once you hold a bag
+    if (gstep === 0) {
+      gstep = Math.max(1, Math.min(7, save.step || 1));
+      if (kind === "vault" && gstep < 4) gstep = 4;
+      if (w.myRaids.length && gstep < 6) gstep = 6;
+      gAt = Date.now();
+      setGuideSave({ step: gstep });
+      renderGuide();
+    }
+    // the chain is the truth: a vault with coins moved in is past step 3; a vault still holding red coins is at step 3
+    if (kind === "vault" && gstep < 4) { if (w.walletBal === 0n) guideGo(4); else if (gstep < 3) guideGo(3); }
+    if (kind === "exposed" && gstep > 3) { guideGo(3); } // the vault vanished from this browser: back to the door
+    const card = CARDS[gstep];
+    switch (gstep) {
+      case 1: if (arena.travelled > 60) guideGo(2); break;
+      case 2: case 4: case 6: if (Date.now() - gAt > readMs(card.text) && !currentSheet()) guideGo(gstep + 1); break;
+      case 3: break; // the gate touch and its real transactions move this on (above)
+      case 5: {
+        if (guideRaided || guideBossHit) { guideGo(6); break; }
+        const t = guideRaidTarget();
+        if (t) { gVariant = "body"; gTarget = t; }
+        else if (bossReadyForMe()) { gVariant = "boss"; gTarget = ""; }
+        else { guideGo(6); break; }
+        break;
+      }
+      case 7: break; // tap only
+    }
+    renderGuide();
+  }
+
+  function renderGuide() {
+    if (!gstep) return;
+    const card = CARDS[gstep];
+    const variant = gstep === 5 ? gVariant : "";
+    const waiting = gstep === 3 && !!busy;
+    const key = `${gstep}|${variant}|${gTarget}|${waiting}|${gNote}`;
+    // the arrow in the world
+    arena.setGuide(gstep === 1 || gstep === 2 || gstep === 4 ? { kind: "me" } : gstep === 3 ? { kind: "gate" } : gstep === 5 ? (variant === "boss" ? { kind: "boss" } : gTarget ? { kind: "body", id: gTarget } : null) : null);
+    placeGuideArrow();
+    arena.cardOn = true;
+    if (key === gKey) return;
+    gKey = key;
+    guideEl.classList.toggle("low", gstep === 7); // room for the arrow under the goal bar
+    const tone = gstep === 2 || gstep === 5 ? "red" : gstep === 1 || gstep === 6 ? "cyan" : "gold";
+    const text = gstep === 5 && variant === "boss" ? "Nobody you can rob is near. Satoshi is always there: touch his core." : card.text;
+    const wait = gstep === 1 ? "Waiting for you to move" : gstep === 3 ? (waiting ? esc(busyText) : "Touch the door when you reach it") : gstep === 5 ? (variant === "boss" ? "Touch Satoshi's core" : "Touch the marked body") : "";
+    guideEl.innerHTML = `<section class="guide tone-${tone}" data-step="${gstep}" aria-live="polite">
+      <header class="g-head"><span class="g-step">Step ${gstep} of 7</span><button type="button" class="g-skip" id="g-skip">Skip guide</button></header>
+      <h2 class="g-title">${esc(card.title)}</h2>
+      <p class="g-text">${esc(text)}</p>
+      <div class="g-foot">${card.tap ? `<button type="button" class="btn small g-next" id="g-next">${gstep === 7 ? "Play" : "Got it"}</button>` : `<span class="g-wait">${wait}</span>`}<span class="g-note" id="g-note">${esc(gNote)}</span></div>
+    </section>`;
+    arena.topInset = Math.round(guideEl.getBoundingClientRect().height) + 16; // pointers and labels keep clear of the card
+    guideEl.querySelector<HTMLButtonElement>("#g-skip")!.onclick = () => guideFinish();
+    const next = guideEl.querySelector<HTMLButtonElement>("#g-next");
+    if (next) next.onclick = () => { if (gstep === 7) guideFinish(); else guideGo(gstep + 1); };
+  }
+
+  /** The arrow for things outside the world: the DASH button and the goal bar. */
+  function placeGuideArrow() {
+    const target = gstep === 6 ? dashBtn : gstep === 7 ? root.querySelector<HTMLElement>("#goal-you") : null;
+    if (!target) { gArrow.hidden = true; return; }
+    const gr = game.getBoundingClientRect(), tr = target.getBoundingClientRect();
+    const up = gstep === 7; // the goal bar sits at the top: point up from under it
+    gArrow.hidden = false;
+    gArrow.classList.toggle("up", up);
+    gArrow.style.left = `${Math.round(tr.left + tr.width / 2 - gr.left)}px`;
+    gArrow.style.top = `${Math.round(up ? tr.bottom - gr.top + 6 : tr.top - gr.top - 44)}px`;
   }
 
   // ---------------------------------------------------------------- contact
@@ -622,14 +826,14 @@ export function play(root: HTMLElement) {
     if (b.raidingMe) { arena.say(id, line(id, "idle", String(Math.random())), 1800); return; } // the one who has you, bumping along
     if (!inVault()) {
       sfx.play("blip");
-      if (!tutorialSaid) { tutorialSaid = true; arena.say("me", sess().wallet ? "Exposed coins can't fight. Run for the gate." : "Grab a bag first.", 2600); }
+      if (!tutorialSaid || guideOn()) { tutorialSaid = true; tell(sess().wallet ? "Get to the gold door first. Only gold can attack." : "Grab a bag first.", 3000); }
       return;
     }
     const bl = blocker(h);
     if (bl.state === "open") { raidByTouch(h); return; }
     sfx.play("deny");
     const why = bl.why || (w.vault?.under_raid ? "You are under raid. Intercept the raider first." : `No raids left. They come back in ${span(Number(w.stats!.epoch_ends_ms) - chainNow())}.`);
-    arena.say("me", why, 3200);
+    tell(why, 3200);
   }
 
   /** A hunter touched you: the server lets that NPC raid you only if the rules allow it. */
@@ -667,7 +871,7 @@ export function play(root: HTMLElement) {
     const min = PB(c(), "min_stake");
     const best = maxB(min, (raw + mult - 1n) / mult);
     const stake = minB(best, w.vaultBal);
-    if (stake < min) { arena.say("me", `You need at least ${full(min)} in your vault to raid.`); return; }
+    if (stake < min) { tell(`You need at least ${full(min)} in your vault to raid.`); return; }
     pendingRaid = h.account;
     sfx.play("zap"); sfx.vibrate(20);
     renderArena();
@@ -677,6 +881,7 @@ export function play(root: HTMLElement) {
       const rid = String(v ?? "");
       if (rid) setProg({ raids: [...(prog().raids || []), rid].slice(-20) });
       if (prog().stage === "strike") setProg({ stage: "done" });
+      guideRaided = true;
       arena.say(h.account, line(h.account, "raided"));
       toast({ tone: "gold", who: h.account, title: `Raid on ${N(h.account)} is on. ${h.kind === "vault" ? "It has" : "They have"} ${minutes(P(c(), "defend_window_ms"))} to ${h.kind === "vault" ? "defend" : "escape"}.` });
     });
@@ -704,7 +909,7 @@ export function play(root: HTMLElement) {
     if (!s.vault) { openNameSheet(); return; }
     if (w.walletBal > 0n && s.wallet) { moveIn(); return; }
     sfx.play("blip");
-    arena.say("me", "Your coins are already inside.", 2200);
+    tell("Your coins are already inside.", 2200);
   }
 
   async function moveIn() {
@@ -723,12 +928,13 @@ export function play(root: HTMLElement) {
 
   function bossTouched() {
     const v = w.vault, st = w.stats;
-    if (!inVault() || !v || !st) { sfx.play("deny"); arena.say("me", sess().wallet ? "Only a vault can hit Satoshi." : "Grab a bag first.", 2600); return; }
+    if (!inVault() || !v || !st) { sfx.play("deny"); tell(sess().wallet ? "Get gold first. Only a vault can hit Satoshi." : "Grab a bag first.", 2600); return; }
     if (busy) return;
     const enough = w.vaultBal >= PB(c(), "boss_min_balance");
-    if (!enough) { sfx.play("deny"); arena.say("satoshi", "Too small.", 2600); arena.say("me", `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to hit Satoshi.`, 3200); return; }
-    if (!v.boss_ready) { sfx.play("deny"); arena.say("satoshi", line("satoshi", "idle", String(Math.random())), 2600); arena.say("me", `Your next hit is ready in ${span(Number(st.epoch_ends_ms) - chainNow())}.`, 3200); return; }
+    if (!enough) { sfx.play("deny"); arena.say("satoshi", "Too small.", 2600); tell(`Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to hit Satoshi.`, 3200); return; }
+    if (!v.boss_ready) { sfx.play("deny"); arena.say("satoshi", line("satoshi", "idle", String(Math.random())), 2600); tell(`Your next hit is ready in ${span(Number(st.epoch_ends_ms) - chainNow())}.`, 3200); return; }
     act("boss", "signing with your quantum key…", () => chain.bossRaid(), (val) => {
+      guideBossHit = true;
       const kept = BigInt(String(val ?? "0"));
       const burn = BigInt(P(c(), "boss_burn_bps"));
       const dealt = burn > 0n ? (kept * 10000n + (10000n - burn) - 1n) / (10000n - burn) : kept;
@@ -812,6 +1018,43 @@ export function play(root: HTMLElement) {
       rank.innerHTML = i >= 0 ? `#${i + 1}${arrow}<small> of ${list.length}</small>` : "··";
     } else rank.innerHTML = `··<small> no vault</small>`;
     root.querySelector<HTMLElement>(".rdot")!.hidden = !(s.vault && prog().backedUp !== s.vault.accountId);
+    // raids left this epoch: pips by your bag, words when none are left
+    const pips = root.querySelector<HTMLElement>("#h-pips")!;
+    if (inVault() && w.vault) {
+      const max = P(c(), "max_raids_per_epoch"), left = w.vault.raids_left;
+      const html = left > 0
+        ? `<span class="hp-k">Raids</span>${Array.from({ length: max }, (_, i) => `<i class="${i < left ? "on" : ""}"></i>`).join("")}`
+        : `<span class="hp-k none">No raids left</span>`;
+      pips.hidden = false;
+      pips.setAttribute("aria-label", left > 0 ? `${left} of ${max} raids left` : "No raids left");
+      if (pips.innerHTML !== html) pips.innerHTML = html;
+    } else pips.hidden = true;
+    renderGoal();
+  }
+
+  /** The goal bar under the HUD: the win condition and where you stand, every number from the chain. */
+  let goalKey = "";
+  function renderGoal() {
+    const s = sess();
+    const you = root.querySelector<HTMLElement>("#goal-you")!;
+    let text: string;
+    if (w.stats?.after_q_day) text = "Q-Day has come";
+    else if (!s.wallet && !s.vault) text = "grab a bag to enter";
+    else if (!inVault()) text = w.walletBal > 0n ? "get gold to be ranked" : "grab a bag to enter";
+    else {
+      const list = vaultsRanked();
+      const i = list.findIndex((h) => h.account === s.vault!.accountId);
+      text = i >= 0 ? `you are #${i + 1} of ${list.length}` : `${list.length} vaults on the board`;
+    }
+    // mainnet: what you paid (your own confirmed buys in this browser) against what the bag sells for now (the contract's quote)
+    if (MAIN && (s.wallet || s.vault)) {
+      const paid = paidNear();
+      if (paid > 0 && w.sellQuote !== null) text += ` · paid ${paid.toFixed(2)} NEAR, sells for ${chain.fmtNear(w.sellQuote, 2)} NEAR now`;
+    }
+    if (text === goalKey) return;
+    goalKey = text;
+    you.textContent = text;
+    root.querySelector<HTMLElement>("#goal")!.classList.toggle("has-you", !!text);
   }
 
   function renderStats() {
@@ -999,7 +1242,7 @@ export function play(root: HTMLElement) {
       B.querySelector<HTMLButtonElement>("#by-go")!.textContent = `Buy for ${n.toFixed(2)} NEAR`;
     };
     r.addEventListener("input", () => { clearTimeout(t); t = window.setTimeout(update, 200); });
-    move(B.querySelector("#by-go")!, B.querySelector("#by-msg")!, async () => { const res = await chain.buy(Number(r.value)); tick(); return res; }, () => "Your bag landed. Run to the gate.", "buy", () => { sfx.play("coins"); setTimeout(() => sheet?.close(), 700); });
+    move(B.querySelector("#by-go")!, B.querySelector("#by-msg")!, async () => { const res = await chain.buy(Number(r.value)); addPaid(Number(r.value)); tick(); return res; }, () => "Your bag landed. Run to the gate.", "buy", () => { sfx.play("coins"); setTimeout(() => sheet?.close(), 700); });
     update();
   }
 
@@ -1048,12 +1291,13 @@ export function play(root: HTMLElement) {
     const me = mine();
     const myOpen = new Map(w.myRaids.filter((r) => r.status === "open").map((r) => [r.target, r] as const));
     const all = rivals();
-    // cap the drawn set: you, everyone tied to you, NPCs, then the largest bags
-    const score = (h: Holder) => (h.account === raider || myOpen.has(h.account) || hunt.has(h.account) || h.account === pendingRaid ? 3e18 : isNpc(h.account) ? 2e18 : 0) + whole(h.balance);
-    const picked = all.sort((a, b) => score(b) - score(a)).slice(0, 60);
+    const bl = new Map(all.map((h) => [h.account, blocker(h)] as const));
+    // cap the drawn set (fewer on a phone): you, everyone tied to you, what you can raid, NPCs, then the largest bags
+    const score = (h: Holder) => (h.account === raider || myOpen.has(h.account) || hunt.has(h.account) || h.account === pendingRaid ? 4e18 : bl.get(h.account)!.state === "open" ? 3e18 : isNpc(h.account) ? 2e18 : 0) + whole(h.balance);
+    const picked = all.sort((a, b) => score(b) - score(a)).slice(0, arena.bodyCap);
     const reach = arena.viewSpan * 1.5;
     const bodies: ArenaBody[] = picked.map((h) => {
-      const b = blocker(h);
+      const b = bl.get(h.account)!;
       const tied = h.account === raider || myOpen.has(h.account) || hunt.has(h.account) || h.account === pendingRaid;
       const focus = tied || (inVault() && b.state === "open" && arena.distTo(h.account) < reach);
       const npc = isNpc(h.account) ? (npcName(h.account) === "shor" ? "shor" : npcName(h.account) === "grover" ? "grover" : "qubit") : "";
@@ -1067,6 +1311,7 @@ export function play(root: HTMLElement) {
         until: h.account === raider ? w.incoming!.deadline : mineRaid?.deadline || undefined,
         svg: avatar(h.account),
         focus, showBag: tied,
+        hint: hintFor(h, b.state),
       };
     });
     arena.setBodies(bodies);
@@ -1081,8 +1326,9 @@ export function play(root: HTMLElement) {
     const supply = PB(c(), "satoshi_supply");
     arena.setPlaces({
       gate: kind === "none" ? "hidden" : kind === "exposed" || (s.vault && w.walletBal > 0n) ? "open" : "home",
-      boss: { visible: inVault() || arena.bossDist < 420, hint: inVault() && arena.bossDist < 420, ready: !!w.vault?.boss_ready && inVault() && w.vaultBal >= PB(c(), "boss_min_balance"), hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1 },
+      boss: { visible: inVault() || arena.bossDist < 420, hint: kind !== "none" && arena.bossDist < 420, line: bossLine(), ready: !!w.vault?.boss_ready && inVault() && w.vaultBal >= PB(c(), "boss_min_balance"), hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1 },
     });
+    guideTick();
 
     // hunters: siren when a new one turns toward you
     const hk = [...hunt].sort().join("|");
@@ -1124,7 +1370,7 @@ export function play(root: HTMLElement) {
     if (!showing) nextToast();
   }
   function nextToast() {
-    if (stripOpen() || arena.meSpeaking) { showing = null; setTimeout(() => { if (alive && !showing && queue.length) nextToast(); }, 1200); return; }
+    if (stripOpen() || arena.meSpeaking || guideOn()) { showing = null; setTimeout(() => { if (alive && !showing && queue.length) nextToast(); }, 1200); return; }
     const ev = queue.shift();
     if (!ev) { showing = null; return; }
     const el = document.createElement("button");
@@ -1191,7 +1437,7 @@ export function play(root: HTMLElement) {
   // Rivals talk: an idle taunt now and then from an NPC near you.
   const tauntT = window.setInterval(() => {
     if (document.hidden || !w.ok) return;
-    if (stripOpen() || showing || arena.meSpeaking) return;
+    if (stripOpen() || showing || arena.meSpeaking || guideOn()) return;
     const npcs = rivals().filter((h) => isNpc(h.account) && arena.hunters.includes(h.account));
     if (!npcs.length) return;
     const h = npcs[Math.floor(Math.random() * npcs.length)];
@@ -1488,9 +1734,10 @@ export function play(root: HTMLElement) {
     const out = B.querySelector<HTMLElement>("#mk-msg")!;
     move(B.querySelector("#mk-bgo")!, out, async () => {
       const payer = buyPayer();
-      if (payer === "vault") return chain.buy(mkNear, "vault");
+      if (payer === "vault") { const r = await chain.buy(mkNear, "vault"); if (MAIN) addPaid(mkNear); return r; }
       if (payer !== "wallet") throw new Error("balance");
       const r = await chain.buy(mkNear, "wallet");
+      if (MAIN) addPaid(mkNear);
       if (sess().vault) { keepReceipt("buy", r.hash); return chain.migrate(); }
       return r;
     }, () => (sess().vault ? "Bought, and it's in your vault." : "Bought."), sess().vault && buyPayer() === "wallet" ? "migrate" : "buy");
@@ -1660,7 +1907,7 @@ export function play(root: HTMLElement) {
     let pin = evHost.querySelector<HTMLButtonElement>(".ev.pin");
     const m = mission();
     const covered = ((m.k === "build" || m.k === "movein") && !!m.raid) || m.k === "defend"; // the strip already shows this raid
-    if (!r || covered || stripOpen()) { pin?.remove(); return; }
+    if (!r || covered || stripOpen() || guideOn()) { pin?.remove(); return; } // the guide card speaks alone
     const live = threat();
     if (!pin || pin.dataset.id !== `${r.id}:${live}`) {
       pin?.remove();
@@ -1725,8 +1972,13 @@ export function play(root: HTMLElement) {
   // run the harvest when it is due, and answer raids on their own vaults.
   const npcBeat = window.setInterval(() => tick(false), 60_000);
 
+  const guideT = window.setInterval(() => { if (alive) guideTick(); }, 300);
+  holdTicks = () => guideHolds() || (!guideSave().done && !!sess().wallet && !sess().vault); // a red first timer is never pointed at
+
   // debugging and acceptance: fps and world on the element
   (field as any).__arena = arena;
+  (field as any).__guide = () => ({ step: gstep, on: guideOn(), holds: guideHolds(), target: gTarget, variant: gVariant });
+  (field as any).__world = () => ({ incoming: w.incoming, myRaids: w.myRaids.length, walletBal: String(w.walletBal), vaultBal: String(w.vaultBal), vault: sess().vault?.accountId, wallet: sess().wallet?.accountId, holders: w.holders.length, raidsLeft: w.vault?.raids_left });
 
   return () => {
     alive = false;
@@ -1734,6 +1986,8 @@ export function play(root: HTMLElement) {
     clearInterval(clockT);
     clearInterval(npcBeat);
     clearInterval(tauntT);
+    clearInterval(guideT);
+    holdTicks = () => false;
     offMute();
     arena.destroy();
     sheet?.close();

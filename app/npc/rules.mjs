@@ -10,6 +10,7 @@ export const MAX_MOVES = 6; // per tick
 export const MAX_BOSS = 2; // boss raids per tick
 export const DEFEND_CHANCE = 2 / 3; // an NPC defends 2 raids in 3
 export const GREET_WINDOW_MS = 30 * 60 * 1000; // qubits greet holders newer than this
+export const GREET_DELAY_MS = 3 * 60 * 1000; // ...but never in a holder's first minutes: the arena guide runs then
 export const GREET_TAIL = 10; // with no registration times, "newest" = last N holders
 export const STAKE_BALANCE_CAP_BPS = 2000n; // never stake more than 20% of the NPC's bag
 export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC pays for its gas
@@ -136,6 +137,7 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
   for (const t of targets.slice(-GREET_TAIL).reverse()) {
     const seen = firstSeen[t.account];
     if (seen !== undefined && now - Number(seen) > GREET_WINDOW_MS) continue;
+    if (seen !== undefined && now - Number(seen) < GREET_DELAY_MS) continue; // still learning the arena
     if (big(t.immune_until) !== 0n) continue; // already raided once
     const q = qubits().find((a) => eligible(a, t));
     if (q) launch(q, t, `Newest holder ${short(t.account)} has not been raided yet: ${fmt(t.balance)} $QDAY, say hello.`);
