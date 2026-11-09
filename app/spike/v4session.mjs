@@ -20,7 +20,7 @@ const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(0)}s]`,
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pre = DESK ? "d-" : "";
 const shot = async (n) => { await p.screenshot({ path: `${OUT}/${pre}${n}.png` }); log("shot", n); };
-const k = () => p.evaluate(() => document.querySelector(".strip")?.getAttribute("data-k") || (document.querySelector("#start:not([hidden])") ? "grab" : "none"));
+const k = () => p.evaluate(() => document.querySelector(".strip, .strip-chip")?.getAttribute("data-k") || (document.querySelector("#start:not([hidden])") ? "grab" : "none"));
 const waitFor = async (fn, ms, every = 1000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await p.evaluate(fn).catch(() => null); if (v) return v; await sleep(every); } return null; };
 const msg = () => p.evaluate(() => [...document.querySelectorAll(".m-msg, .s-msg, .bp-say")].map((e) => e.textContent).filter(Boolean).join(" | "));
 const A = (fn, ...args) => p.evaluate((src, ...a) => { const ar = document.querySelector("#field").__arena; return new Function("ar", ...a.map((_, i) => `a${i}`), `return (${src})(ar, ${a.map((_, i) => `a${i}`).join(",")})`)(ar, ...a); }, fn.toString(), ...args);

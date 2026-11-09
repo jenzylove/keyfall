@@ -233,6 +233,7 @@ export function play(root: HTMLElement) {
   let prevHunters = "";
   let huntAt = 0;
   let huntBusy = false;
+  let stripT = 0;
 
   // ---------------------------------------------------------------- titles
   function earn(k: TitleKey) {
@@ -245,7 +246,7 @@ export function play(root: HTMLElement) {
       sfx.vibrate([30, 40, 30, 40, 80]);
       fx.banner(field, "TITLE EARNED", `${name} · ${why}`, "cyan", 3200);
       toast({ tone: "gold", title: `New title: <b>${esc(name)}</b>. Share it from the menu.`, open: () => openSettings() });
-    }, 900);
+    }, 3400); // after the result banner has had its moment
   }
 
   const sess = () => chain.session();
@@ -422,7 +423,11 @@ export function play(root: HTMLElement) {
     missionKey = key;
     const strip = (tone: string, head: string, text: string, act = "") =>
       `<section class="strip tone-${tone}" data-k="${m.k}"><div class="strip-head">${head}</div><p class="strip-text">${text}</p>${act ? `<div class="strip-act">${act}</div>` : ""}<button type="button" class="strip-x" id="m-x" aria-label="Hide">×</button></section>`;
-    const chipHide = prog().stripHidden === m.k ? `<button type="button" class="strip-chip" id="m-show" data-k="${m.k}">${m.k === "defend" || (raid && m.k !== "movein") ? `<i class="dot"></i>` : ""}Mission</button>` : "";
+    const alarm = m.k === "defend" || (!!raid && m.k !== "movein");
+    const chipHide = prog().stripHidden === m.k ? `<button type="button" class="strip-chip${alarm ? " alarm" : ""}" id="m-show" data-k="${m.k}">${alarm ? `<i class="dot"></i>` : ""}${alarm ? `${N(raid!.attacker)} <b data-until="${raid!.deadline}">${clock(raid!.deadline - chainNow())}</b>` : "Mission"}</button>` : "";
+    // the strip collapses to a chip on its own after a few seconds
+    clearTimeout(stripT);
+    if (prog().stripHidden !== m.k && m.k !== "grab" && m.k !== "load") stripT = window.setTimeout(() => { if (alive && mission().k === m.k) { setProg({ stripHidden: m.k }); missionKey = ""; renderMission(); } }, m.k === "exposed" ? 7000 : 5000);
     let html = "";
     startEl.hidden = true;
     const backup = raid ? `<button type="button" class="btn ghost small" id="m-backup">${I.share} Backup</button>` : "";
@@ -460,11 +465,11 @@ export function play(root: HTMLElement) {
         break;
       }
       case "safe": {
-        let text = "Your coins can't bleed or freeze now. <b>Touch a glowing rival</b> to raid it.";
+        let text = "Safe from bleed and freeze. <b>Touch a glowing rival</b> to raid it.";
         if (esc2 && esc2.target === sess().wallet?.accountId) {
-          if (esc2.status === "open") text = `Safe. ${N(esc2.attacker)}'s raid will find nothing. Watch the clock: <b data-until="${esc2.deadline}">${clock(esc2.deadline - chainNow())}</b>.`;
-          else if (BigInt(esc2.take) === 0n) { text = `Escaped. ${N(esc2.attacker)}'s raid took 0. Now <b>touch a glowing rival</b> to raid it.`; earn("escape"); }
-          else text = `${N(esc2.attacker)}'s raid took ${full(esc2.take)} before you moved in. The rest is safe. <b>Touch a glowing rival</b> to raid it.`;
+          if (esc2.status === "open") text = `Safe. ${N(esc2.attacker)}'s raid finds nothing. Clock: <b data-until="${esc2.deadline}">${clock(esc2.deadline - chainNow())}</b>.`;
+          else if (BigInt(esc2.take) === 0n) { text = `Escaped: the raid took 0. <b>Touch a glowing rival</b> to raid it.`; earn("escape"); }
+          else text = `The raid took ${full(esc2.take)} before you moved in. <b>Touch a glowing rival</b> to raid it.`;
         }
         html = strip("gold", `${pips("safe")}<span class="m-count">Quantum safe</span>`, text);
         break;
@@ -507,7 +512,7 @@ export function play(root: HTMLElement) {
     const x = root.querySelector<HTMLButtonElement>("#m-x");
     if (x) x.onclick = () => { setProg({ stripHidden: m.k }); missionKey = ""; renderMission(); };
     const show = root.querySelector<HTMLButtonElement>("#m-show");
-    if (show) show.onclick = () => { setProg({ stripHidden: "" }); missionKey = ""; renderMission(); };
+    if (show) show.onclick = () => { setProg({ stripHidden: "" }); missionKey = ""; renderMission(); clearTimeout(stripT); stripT = window.setTimeout(() => { if (alive) { setProg({ stripHidden: m.k }); missionKey = ""; renderMission(); } }, 8000); };
   }
 
   function updateLive() {
@@ -573,6 +578,7 @@ export function play(root: HTMLElement) {
     if (!h) return;
     if (b.hunting) { hunted(id); return; }
     if (b.raidingMe && inVault() && w.incoming && w.incoming.attacker === id) { defendByTouch(w.incoming); return; }
+    if (b.raidingMe) { arena.say(id, line(id, "idle", String(Math.random())), 1800); return; } // the one who has you, bumping along
     if (!inVault()) {
       sfx.play("blip");
       arena.say("me", sess().wallet ? "Exposed coins can't fight. Run for the gate." : "Grab a bag first.", 2600);
@@ -1434,7 +1440,9 @@ export function play(root: HTMLElement) {
   function renderPinned() {
     const r = w.incoming;
     let pin = evHost.querySelector<HTMLButtonElement>(".ev.pin");
-    if (!r) { pin?.remove(); return; }
+    const m = mission();
+    const covered = ((m.k === "build" || m.k === "movein") && !!m.raid) || m.k === "defend"; // the strip already shows this raid
+    if (!r || covered) { pin?.remove(); return; }
     const live = threat();
     if (!pin || pin.dataset.id !== `${r.id}:${live}`) {
       pin?.remove();
