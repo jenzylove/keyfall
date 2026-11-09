@@ -6,10 +6,10 @@ import { fmtDuration } from "./dom";
 type Fmt = "tokens" | "near" | "bps" | "ms" | "n";
 
 export const PARAMS: [string, Fmt, string][] = [
-  ["total_supply", "tokens", "Every $QDAY that will ever exist. After genesis, only burns."],
+  ["total_supply", "tokens", "Every $KEYFALL that will ever exist. After genesis, only burns."],
   ["satoshi_supply", "tokens", "Satoshi's stash at genesis. It never moves and never defends."],
   ["curve_virtual_near", "near", "Virtual NEAR in the market curve. It sets the starting price."],
-  ["curve_virtual_tokens", "tokens", "Virtual $QDAY in the market curve."],
+  ["curve_virtual_tokens", "tokens", "Virtual $KEYFALL in the market curve."],
   ["reserve_cap", "near", "The most NEAR the market may ever hold."],
   ["sell_fee_bps", "bps", "Fee on every sell. Half burns, half goes to vaults."],
   ["epoch_ms", "ms", "One epoch. Shields, Satoshi and the harvest reset every epoch."],
@@ -36,7 +36,7 @@ export const pct = (bps: number, digits = 2) => `${(bps / 100).toLocaleString("e
 
 export function fmtParam(name: string, v: string | number): string {
   const f = PARAMS.find((p) => p[0] === name)?.[1] ?? "n";
-  if (f === "tokens") return `${fmtTokens(String(v))} $QDAY`;
+  if (f === "tokens") return `${fmtTokens(String(v))} $KEYFALL`;
   if (f === "near") return `${fmtNear(String(v), 0)} NEAR`;
   if (f === "bps") return pct(Number(v));
   if (f === "ms") return fmtDuration(Number(v));

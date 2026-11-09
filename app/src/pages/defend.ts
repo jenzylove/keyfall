@@ -41,7 +41,7 @@ export function defendPage(root: HTMLElement, params: Record<string, string>) {
     if (!r) {
       $("#d-title").textContent = "No such raid";
       $("#d-kick").textContent = "Defend link";
-      $("#d-act").innerHTML = `<a class="btn wide" href="/play" data-link>Play Q-DAY</a>`;
+      $("#d-act").innerHTML = `<a class="btn wide" href="/play" data-link>Play KEYFALL</a>`;
       return;
     }
     await chain.loadSession();
@@ -83,7 +83,7 @@ export function defendPage(root: HTMLElement, params: Record<string, string>) {
       };
     };
     if (!open) {
-      host.innerHTML = `<a class="btn wide" href="/play" data-link>Play Q-DAY</a>`;
+      host.innerHTML = `<a class="btn wide" href="/play" data-link>Play KEYFALL</a>`;
     } else if (closed) {
       host.innerHTML = `<p class="s-text">Anyone can settle the raid now${s.wallet || s.vault ? "" : ". We'll make you a free testnet wallet first"}.</p><button class="btn wide hot" id="d-go">Settle it</button>`;
       run($<HTMLButtonElement>("#d-go"), async () => { if (!chain.session().wallet && !chain.session().vault) await chain.join(); return chain.resolve(r.id); }, (v) => `Settled. The raid took ${full(String(v ?? "0"))}.`);
@@ -98,7 +98,7 @@ export function defendPage(root: HTMLElement, params: Record<string, string>) {
         <label class="m-field"><span>Vault name</span><input id="d-n" autocomplete="off" autocapitalize="off" spellcheck="false" value="${r.target_kind === "vault" ? esc(nameOf(r.target)) : ""}"/></label>
         <label class="m-field"><span>Recovery code</span><input id="d-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
         <button class="btn wide ghost" id="d-rs">Restore vault</button>
-        <a class="btn wide" href="/play" data-link>Play Q-DAY</a>`;
+        <a class="btn wide" href="/play" data-link>Play KEYFALL</a>`;
       run($<HTMLButtonElement>("#d-rs"), () => chain.restoreVault($<HTMLInputElement>("#d-n").value.trim(), $<HTMLInputElement>("#d-c").value.trim()), () => "Vault restored on this device.");
     }
   }

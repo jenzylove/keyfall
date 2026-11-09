@@ -1,7 +1,11 @@
 // The title screen: pixel logotype over the live radar, PLAY, how to play,
 // the rivals, the high score table and a real footer. Every number is live.
 
-import { getHolderCount, getHolders, getStats, type Holder } from "../chain";
+import { NETWORK, getHolderCount, getHolders, getStats, type Holder } from "../chain";
+
+const MAIN = (NETWORK as string) === "mainnet";
+const NET_SUB = MAIN ? "Mainnet · real $KEYFALL · your own NEAR wallet" : "Practice arena · free · no wallet";
+const NET_FOOT = MAIN ? "Play for real on mainnet, or practice for free on testnet." : "Practice coins have no value.";
 import { REPO, chainNow, esc, poll, syncClock } from "../ui/dom";
 import { Radar, type Blip } from "../ui/radar";
 import { avatar, satoshiAvatar } from "../ui/avatars";
@@ -19,14 +23,14 @@ const rivalArt = (who: string) =>
 export function landing(root: HTMLElement) {
   document.body.classList.add("on-title");
   root.innerHTML = `
-    <section class="title" aria-label="Q-DAY">
+    <section class="title" aria-label="KEYFALL">
       <div class="t-radar" id="t-radar"></div>
       <div class="t-copy">
         <h1 class="wordmark glitch">${logotype()}</h1>
-        <p class="premise">Quantum computers just broke old crypto keys. Get your coins into a quantum vault, then raid everyone who didn't.</p>
+        <p class="premise">Quantum computers just broke old crypto keys. Run your coins into a quantum vault before the hunters catch you. Then hunt everyone who didn't.</p>
         <a class="btn play pulse" href="/play" data-link id="t-play"><span class="tri" aria-hidden="true"></span>PLAY</a>
         <p class="t-cd"><span class="t-cd-k">Q-DAY IN</span><b id="t-cd">··</b></p>
-        <p class="t-sub">Free · no wallet · NEAR testnet</p>
+        <p class="t-sub">${NET_SUB}</p>
       </div>
       <a class="t-more" href="#how">How to play <i aria-hidden="true">▼</i></a>
     </section>
@@ -35,9 +39,9 @@ export function landing(root: HTMLElement) {
       <div class="wrap">
         <h2 class="sec-h"><span>01</span>How to play</h2>
         <div class="how-strip" id="how-strip">
-          <article class="how-card"><div class="how-art bag">${ART_BAG}</div><h3>Grab a bag</h3><p>Your coins start exposed. They bleed every 6 hours and freeze for good at Q-Day.</p></article>
-          <article class="how-card"><div class="how-art vault">${ART_VAULT}</div><h3>Build your vault</h3><p>Only a quantum safe key can open it. Only vaults can fight.</p></article>
-          <article class="how-card"><div class="how-art raid">${ART_RAID}</div><h3>Raid and survive</h3><p>Raid rivals, defend your bag, hit Satoshi. Biggest vault at Q-Day wins.</p></article>
+          <article class="how-card"><div class="how-art bag">${ART_BAG}</div><h3>Grab a bag</h3><p>Your coins start exposed, and the hunters turn toward you. They bleed every 6 hours and freeze for good at Q-Day.</p></article>
+          <article class="how-card"><div class="how-art vault">${ART_VAULT}</div><h3>Run to the gate</h3><p>Steer your bag with your thumb. Reach the gold gate and the vault door slams shut: only a quantum safe key can open it.</p></article>
+          <article class="how-card"><div class="how-art raid">${ART_RAID}</div><h3>Hunt and survive</h3><p>Touch a rival to raid it, intercept raiders, hit Satoshi in the centre. Biggest vault at Q-Day wins.</p></article>
         </div>
         <div class="how-dots" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
       </div>
@@ -63,15 +67,15 @@ export function landing(root: HTMLElement) {
     <footer class="foot">
       <div class="wrap">
         <div class="f-top">
-          <a class="brand" href="/" data-link><span class="mark">${MARK}</span>Q-DAY</a>
+          <a class="brand" href="/" data-link><span class="mark">${MARK}</span>KEYFALL</a>
           <nav class="f-nav">
             <a href="/play" data-link>Play</a>
             <a href="/proof" data-link>Under the hood</a>
             <a href="${REPO}" target="_blank" rel="noopener">GitHub ↗</a>
           </nav>
         </div>
-        <p class="f-line">Built at NEAR HACKATHON on NEAR testnet. Every vault is a real account that only a quantum safe key controls.</p>
-        <p class="f-line dim">Also by the same team: Offmap. MIT licence. Testnet coins have no value.</p>
+        <p class="f-line">Built at NEAR HACKATHON on NEAR. Every vault is a real account that only a quantum safe key controls.</p>
+        <p class="f-line dim">Also by the same team: Offmap. MIT licence. ${NET_FOOT}</p>
       </div>
     </footer>`;
 

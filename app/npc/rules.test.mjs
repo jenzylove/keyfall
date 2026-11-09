@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, isNpc, ROSTER, MAX_MOVES, explainRaid } from "./rules.mjs";
+import { decide, decideHunt, isNpc, ROSTER, MAX_MOVES, explainRaid } from "./rules.mjs";
 
 const C = "qday-test.testnet";
 const Q = (n) => (BigInt(n) * 10n ** 18n).toString();
@@ -184,4 +184,42 @@ test("an NPC low on gas sells 10% of its bag; one with enough gas does not", asy
   assert.equal(sells.length, 1);
   assert.equal(sells[0].npc, "shor");
   assert.equal(sells[0].amount, "100000");
+});
+
+test("hunt: the touching qubit raids an exposed target it may raid", () => {
+  const q1 = npc("qubit-01"), q2 = npc("qubit-02", { raids_left: 3 });
+  const m = decideHunt(base({ npcs: [q1, q2], holders: [holder("me.testnet", { immune_until: "1" })], target: "me.testnet", hunter: "qubit-02" }));
+  assert.equal(m.action, "raid");
+  assert.equal(m.npc, "qubit-02");
+  assert.equal(m.target, "me.testnet");
+  assert.ok(BigInt(m.stake) > 0n);
+  assert.match(m.reason, /caught/);
+});
+
+test("hunt: another eligible NPC steps in when the hunter is out of raids; vaults prefer Grover", () => {
+  const q = npc("qubit-01", { raids_left: 0 }), s = npc("shor"), g = npc("grover");
+  const ex = decideHunt(base({ npcs: [q, s, g], holders: [holder("me.testnet")], target: "me.testnet", hunter: "qubit-01" }));
+  assert.equal(ex.npc, "shor");
+  const v = decideHunt(base({ npcs: [q, s, g], holders: [holder("v.testnet", { kind: "vault" })], target: "v.testnet", hunter: "qubit-01" }));
+  assert.equal(v.npc, "grover");
+});
+
+test("hunt: refused when the target is immune, busy, too small, an NPC, out of band, or unknown", () => {
+  const q = npc("qubit-01");
+  const run = (h, o = {}) => decideHunt(base({ npcs: [q], holders: h ? [h] : [], target: h ? h.account : "ghost.testnet", hunter: "qubit-01", ...o }));
+  assert.match(run(holder("a.testnet", { immune_until: String(NOW + 1000) })).skipped, /Resting/);
+  assert.match(run(holder("a.testnet", { under_raid: "4" })).skipped, /under raid/);
+  assert.match(run(holder("a.testnet", { balance: Q(10) })).skipped, /small/);
+  assert.match(run(npc("shor")).skipped, /NPCs/);
+  assert.match(run(holder("a.testnet", { balance: Q(10001) }), { npcs: [npc("qubit-01", { balance: Q(500000) })] }).skipped, /No NPC/);
+  assert.match(run(null).skipped, /no bag/);
+  assert.match(run(holder("a.testnet"), { stats: { ...stats, after_q_day: true } }).skipped, /Q-Day/);
+});
+
+test("hunt: an NPC already attacking or under raid does not hunt", () => {
+  const q = npc("qubit-01");
+  const m = decideHunt(base({ npcs: [q], holders: [holder("me.testnet")], target: "me.testnet", hunter: "qubit-01", openRaids: [{ id: "1", attacker: q.account, target: "x.testnet", deadline: NOW + 9000 }] }));
+  assert.ok(m.skipped);
+  const ok = decideHunt(base({ npcs: [q], holders: [holder("me.testnet")], target: "me.testnet", hunter: "qubit-01", openRaids: [{ id: "1", attacker: q.account, target: "x.testnet", deadline: NOW - 9000 }] }));
+  assert.equal(ok.action, "raid");
 });

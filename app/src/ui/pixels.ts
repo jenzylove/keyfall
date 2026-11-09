@@ -21,31 +21,32 @@ function grid(rows: string[], colors: Record<string, string>, cls: Record<string
 // ------------------------------------------------------------------ logotype
 
 const GLYPH: Record<string, string[]> = {
-  Q: [".###.", "#...#", "#...#", "#...#", "#.#.#", "#..#.", ".##.#"],
-  D: ["####.", "#...#", "#...#", "#...#", "#...#", "#...#", "####."],
-  A: [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+  K: ["#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"],
+  E: ["#####", "#....", "#....", "####.", "#....", "#....", "#####"],
   Y: ["#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."],
-  "-": [".....", ".....", ".....", ".###.", ".....", ".....", "....."],
+  F: ["#####", "#....", "#....", "####.", "#....", "#....", "#...."],
+  A: [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+  L: ["#....", "#....", "#....", "#....", "#....", "#....", "#####"],
 };
-/** The Q-DAY logotype as pixels. The hyphen is red, the rest inherits currentColor. */
+/** The KEYFALL logotype as pixels. The falling key (the dot of the second L,
+ * drawn as a dropped pixel) is red; the rest inherits currentColor. */
 export function logotype(): string {
-  const word = "Q-DAY";
+  const word = "KEYFALL";
   let x = 0;
   let out = "";
   for (const ch of word) {
     const g = GLYPH[ch];
-    const w = ch === "-" ? 3 : 5;
-    const ox = ch === "-" ? -1 : 0;
     g.forEach((row, y) => {
       [...row].forEach((c, i) => {
         if (c !== "#") return;
-        const fill = ch === "-" ? "var(--hazard)" : "currentColor";
-        out += `<rect x="${x + i + ox}" y="${y}" width="1" height="1" fill="${fill}"/>`;
+        out += `<rect x="${x + i}" y="${y}" width="1" height="1" fill="currentColor"/>`;
       });
     });
-    x += w + 1;
+    x += 6;
   }
-  return `<svg class="logotype" viewBox="0 0 ${x - 1} 7" shape-rendering="crispEdges" role="img" aria-label="Q-DAY">${out}</svg>`;
+  // the key that fell: a red pixel dropping off the Y
+  out += `<rect x="14" y="8" width="1" height="1" fill="var(--hazard)" class="fallpx"/>`;
+  return `<svg class="logotype" viewBox="0 0 ${x - 1} 9" shape-rendering="crispEdges" role="img" aria-label="KEYFALL">${out}</svg>`;
 }
 
 /** Small mark for the top bar: a Q with a red slash. */

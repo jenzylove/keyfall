@@ -4,7 +4,7 @@
 
 import * as near from "@fastnear/api";
 import { signerFromSeed } from "@fastnear/ml-dsa-65";
-import { decide, ROSTER } from "./rules.mjs";
+import { decide, decideHunt, ROSTER } from "./rules.mjs";
 
 const TGAS = (n) => (BigInt(n) * 10n ** 12n).toString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -130,4 +130,30 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
     for (const s of Object.values(signers)) s.destroy?.();
   }
   return { at: new Date().toISOString(), moves };
+}
+
+/** The arena chase (app/api/hunt.ts): an NPC body caught `target` on the
+ * player's screen. Reads the same chain state as a tick, asks rules.mjs
+ * whether that NPC (or another one) may raid the target right now, and sends
+ * the one raid if so. Never more than one move. */
+export async function hunt({ contract, seeds, network = "testnet", target, hunter }) {
+  const view = (methodName, args = {}) => near.view({ contractId: contract, methodName, args, network });
+  const [config, stats, holders, openRaids] = await Promise.all([
+    view("config"),
+    view("stats"),
+    allHolders(view),
+    view("open_raids", { scan: 100 }),
+  ]);
+  const names = ROSTER.map((r) => r.name).filter((n) => seeds[n]);
+  const npcViews = (await Promise.all(names.map((n) => view("holder", { account_id: `${n}.${contract}` })))).filter(Boolean);
+  const move = decideHunt({ now: Number(stats.now_ms), config, stats, npcs: npcViews, holders, openRaids, target, hunter, contract });
+  const out = { at: new Date().toISOString(), target, hunter: hunter || null };
+  if (!move || move.skipped) return { ...out, skipped: move?.skipped || "Nothing to do." };
+  const signer = signerFromSeed(hexToBytes(seeds[move.npc]));
+  try {
+    const r = await sendCall({ network, signerId: `${move.npc}.${contract}`, signer, contract, methodName: "raid", args: { target: move.target, stake: move.stake }, gas: 100 });
+    return { ...out, npc: move.npc, stake: move.stake, reason: move.reason, hash: r.hash || null, error: r.error || undefined };
+  } finally {
+    signer.destroy?.();
+  }
 }
