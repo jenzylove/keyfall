@@ -196,8 +196,8 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .game {
   height: 100vh; height: 100dvh; display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  grid-template-areas: "hud" "field" "actions";
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "hud" "goal" "field" "actions";
   background: var(--bg); overflow: hidden; position: relative;
 }
 .game.hitstop *, .game.hitstop *::before, .game.hitstop *::after { animation-play-state: paused !important; }
@@ -205,7 +205,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .side.right { display: none; }
 .stats { display: none; }
 @media (min-width: 1024px) {
-  .game { grid-template-columns: 300px minmax(0, 1fr) 340px; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "hud hud hud" "left field right" "left actions right"; }
+  .game { grid-template-columns: 300px minmax(0, 1fr) 340px; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-areas: "hud hud hud" "goal goal goal" "left field right" "left actions right"; }
   .side.left { display: flex; flex-direction: column; gap: 14px; grid-area: left; padding: 14px 0 14px 18px; overflow: auto; min-height: 0; }
   .side.right { display: flex; grid-area: right; padding: 14px 18px 14px 0; min-height: 0; }
   .stats { display: block; }
@@ -215,8 +215,20 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 /* ------------------------------------------------------------ HUD */
 
 .hud { grid-area: hud; display: grid; grid-template-columns: auto 1fr 1.3fr 0.9fr auto auto; align-items: center; height: 56px; padding: 0 4px 0 10px; border-bottom: 2px solid var(--line); background: var(--bg2); }
-.hud-goal { display: none; align-items: center; gap: 10px; margin: 0 14px 0 0; font: 500 12px/1 var(--mono); color: var(--dim); }
-.hud-goal b { font: 700 13px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-ink); padding: 4px 7px; box-shadow: inset 0 0 0 2px var(--gold); }
+/* raids left this epoch: pips by your bag, words when none are left */
+.hud-pips { display: inline-flex; align-items: center; gap: 3px; height: 8px; margin-top: 1px; }
+.hud-pips .hp-k { font: 500 8px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
+.hud-pips .hp-k.none { color: var(--hazard-ink); letter-spacing: 0.06em; }
+.hud-pips i { width: 7px; height: 5px; background: var(--line2); }
+.hud-pips i.on { background: var(--hazard); }
+/* the goal bar: the win condition and where you stand, always on screen */
+.goal { grid-area: goal; margin: 0; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; background: var(--bg2); border-bottom: 2px solid var(--line); font: 500 11px/1 var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; }
+.goal b { flex: none; font: 700 11px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold-ink); padding: 3px 6px 4px; box-shadow: inset 0 0 0 2px var(--gold); }
+.goal .goal-t { flex: none; }
+.goal .goal-you { color: var(--ink); font-weight: 600; margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+.goal.has-you .goal-you::before { content: "·"; color: var(--dim); margin-right: 8px; font-weight: 500; }
+@media (max-width: 430px) { .goal { font-size: 10.5px; padding: 0 8px; gap: 6px; } .goal b { font-size: 10px; padding: 3px 5px 4px; } }
+@media (min-width: 1024px) { .goal { height: 32px; font-size: 12.5px; padding: 0 18px; justify-content: center; gap: 12px; } .goal .goal-you { margin-left: 0; } }
 .hud-home { display: grid; place-items: center; width: 30px; height: 30px; margin-right: 6px; }
 .hud-home svg { width: 24px; height: 24px; }
 .hud-cell { display: grid; gap: 2px; padding: 0 9px; border-left: 1px solid var(--line); min-width: 0; }
@@ -233,11 +245,10 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .hud-menu svg, .hud-snd svg { width: 22px; height: 22px; }
 .hud-snd.off { color: var(--dim); }
 .rdot { position: absolute; top: 9px; right: 7px; width: 8px; height: 8px; background: var(--hazard); box-shadow: 0 0 0 2px var(--bg2); }
-@media (max-width: 430px) { .hud { grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1.25fr) minmax(0, 0.6fr) auto auto; padding-left: 8px; } .hud-cell { padding: 0 7px; } .hud-cell:first-of-type { border-left: 0; } .hud-v { font-size: 18px; } .hud-cell.rank .hud-v small { display: none; } .hud-menu, .hud-snd { width: 32px; } .hud-goal { display: none; } .hud-v .chip { font-size: 9px; padding: 0 3px 1px; letter-spacing: 0.04em; } .hud-v { gap: 4px; } }
+@media (max-width: 430px) { .hud { grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1.25fr) minmax(0, 0.6fr) auto auto; padding-left: 8px; } .hud-cell { padding: 0 7px; } .hud-cell:first-of-type { border-left: 0; } .hud-v { font-size: 18px; } .hud-cell.rank .hud-v small { display: none; } .hud-menu, .hud-snd { width: 32px; } .hud-v .chip { font-size: 9px; padding: 0 3px 1px; letter-spacing: 0.04em; } .hud-v { gap: 4px; } }
 @media (min-width: 1024px) {
   .hud { grid-template-columns: auto repeat(3, minmax(0, 220px)) 1fr auto auto; height: 62px; padding: 0 10px 0 18px; }
   .hud-v { font-size: 26px; }
-  .hud-goal { display: flex; justify-self: end; }
 }
 
 /* ------------------------------------------------------------ mission: the quest banner */
@@ -340,6 +351,32 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .start-card .kick { text-align: left; }
 .start-title { margin: 0; font: 700 38px/1 var(--display); text-transform: uppercase; letter-spacing: 0.02em; }
 .start-card .btn.big { margin-top: 4px; }
+
+/* the first run guide: one big card at a time, readable on a 390 px phone */
+.guide-slot { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 7; pointer-events: none; }
+.guide-slot.low { top: 64px; }
+.guide { pointer-events: auto; display: grid; gap: 7px; padding: 10px 14px 12px; max-width: 560px; background: var(--sheet); color: var(--ink); box-shadow: inset 0 0 0 2px var(--line2), inset 0 4px 0 var(--gold), 0 6px 0 var(--press); animation: ev-in 0.36s cubic-bezier(0.2, 0.9, 0.2, 1) both; }
+.guide.tone-red { box-shadow: inset 0 0 0 2px var(--line2), inset 0 4px 0 var(--hazard), 0 6px 0 var(--press); }
+.guide.tone-cyan { box-shadow: inset 0 0 0 2px var(--line2), inset 0 4px 0 var(--cyan), 0 6px 0 var(--press); }
+.g-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 3px; }
+.g-step { font: 700 11px/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.g-skip { background: none; border: 0; padding: 6px 0 6px 12px; color: var(--dim); font: 500 11px/1 var(--mono); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.g-title { margin: 0; font: 700 30px/1 var(--display); text-transform: uppercase; letter-spacing: 0.02em; }
+.tone-red .g-title { color: var(--hazard-ink); } .tone-gold .g-title { color: var(--gold-ink); } .tone-cyan .g-title { color: var(--cyan-ink); }
+.g-text { margin: 0; font: 500 14px/1.45 var(--mono); }
+.g-foot { display: flex; align-items: center; gap: 12px; min-height: 28px; flex-wrap: wrap; }
+.g-next.btn.small { min-height: 40px; font-size: 15px; padding: 0 18px 2px; }
+.g-wait { font: 500 11px/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); animation: blink 1.6s steps(2) infinite; }
+.g-note { font: 500 12.5px/1.35 var(--mono); color: var(--hazard-ink); flex: 1 1 100%; }
+.g-note:empty { display: none; }
+@media (max-height: 720px) and (max-width: 1023px) { .g-title { font-size: 26px; } .g-text { font-size: 13px; } }
+@media (min-width: 1024px) { .guide-slot { left: 50%; right: auto; top: 14px; width: min(560px, 90%); transform: translateX(-50%); } .g-title { font-size: 34px; } .g-text { font-size: 15px; } }
+/* the guide's arrow for things outside the world (DASH, the goal bar) */
+.g-arrow { position: absolute; z-index: 40; width: 40px; height: 40px; margin-left: -20px; color: var(--cyan); pointer-events: none; animation: g-bounce 0.7s ease-in-out infinite alternate; filter: drop-shadow(0 3px 0 var(--press)); }
+.g-arrow svg { width: 100%; height: 100%; display: block; }
+.g-arrow.up { color: var(--gold); transform: rotate(180deg); animation-name: g-bounce-up; }
+@keyframes g-bounce { to { translate: 0 -8px; } }
+@keyframes g-bounce-up { to { translate: 0 8px; } }
 
 /* the mission strip: one line under the HUD */
 .strip-slot { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 6; pointer-events: none; }

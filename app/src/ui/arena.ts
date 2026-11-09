@@ -25,7 +25,10 @@ export interface ArenaBody {
   svg: string; // portrait
   focus?: boolean; // part of what matters right now; everyone else is a bystander
   showBag?: boolean; // bag number drawn (you, your target, your hunter)
+  hint?: string; // why you cannot raid it, in a few words; shown as you come close
 }
+/** What the guide points at in the world. */
+export type GuideTarget = { kind: "me" | "gate" | "boss" | "body"; id?: string } | null;
 export interface ArenaMe {
   kind: "none" | "exposed" | "vault";
   bag: string;
@@ -38,7 +41,7 @@ export interface ArenaMe {
 }
 export interface ArenaPlaces {
   gate: "hidden" | "open" | "home";
-  boss: { visible: boolean; ready: boolean; hp: number; hint?: boolean };
+  boss: { visible: boolean; ready: boolean; hp: number; hint?: boolean; line?: string };
 }
 export interface ArenaCallbacks {
   onTouch(id: string, body: ArenaBody): void;
@@ -76,6 +79,16 @@ const TUNNEL_TO = 420;
 const TOUCH_GAP = 3200;
 const TILE = 48;
 const GOLD = "#ffd60a", RED = "#ff3d2e", CYAN = "#27f0ff", GOLD2 = "#d9b000", GOLD3 = "#8a6d00";
+
+/** A phone, a small screen or a weak CPU: start in low power mode. Measured frame time can switch it on later. */
+function detectLowPower(): boolean {
+  try {
+    if (matchMedia("(pointer: coarse)").matches) return true;
+    if (Math.min(innerWidth, innerHeight) <= 500) return true;
+    if ((navigator.hardwareConcurrency || 8) <= 4) return true;
+  } catch {}
+  return false;
+}
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -147,6 +160,19 @@ export class Arena {
   fps = 60;
   ready = false;
   onDash: ((cool: number) => void) | null = null;
+  /** World distance you have steered since the last spawn (the guide's first step). */
+  travelled = 0;
+  private guide: GuideTarget = null;
+  /** Phone or low power mode: fewer pixels, fewer bodies, no per frame gradients, cached floor. */
+  lowPower = false;
+  /** Measurement only: stops the frame time check from switching low power on. */
+  powerLocked = false;
+  /** Frames still over 20 ms in low power mode: draw at 1x. */
+  slowDevice = false;
+  private slowFrames = 0;
+  private labelCache = new Map<string, { cv: HTMLCanvasElement; w: number; h: number }>();
+  private floorCache: HTMLCanvasElement | null = null;
+  private floorKey = "";
 
   constructor(host: HTMLElement, private cb: ArenaCallbacks) {
     this.el = document.createElement("div");
@@ -156,6 +182,7 @@ export class Arena {
     this.canvas = this.el.querySelector("canvas")!;
     this.over = this.el.querySelector(".ar-over")!;
     this.ctx = this.canvas.getContext("2d", { alpha: false })!;
+    this.lowPower = detectLowPower();
     this.me = this.sim(ME, 0, 0, 24);
     this.img("__sack_red__", SACK_RED);
     this.img("__sack_gold__", SACK_GOLD);
@@ -186,6 +213,14 @@ export class Arena {
   }
 
   setPlaces(p: ArenaPlaces) { this.places = p; }
+  /** The guide's arrow: what to touch next (null hides it). */
+  setGuide(g: GuideTarget) { this.guide = g; }
+  /** True while a guide card covers the top of the arena (the minimap steps aside). */
+  cardOn = false;
+  /** Screen px at the top that a card covers: edge pointers and labels stay below it. */
+  topInset = 0;
+  /** How many bodies the page should hand over: fewer on a phone. */
+  get bodyCap() { return this.lowPower ? 25 : 60; }
 
   setBodies(list: ArenaBody[]) {
     const seen = new Set<string>();
@@ -245,6 +280,7 @@ export class Arena {
   burst(id: string, color = GOLD, n = 14) {
     const s = this.simOf(id); if (!s) return;
     if (reducedMotion()) n = Math.min(n, 4);
+    else if (this.lowPower) n = Math.ceil(n / 2);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2, v = 90 + Math.random() * 160;
       this.particles.push({ x: s.x, y: s.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 120, t: 0, life: 0.7 + Math.random() * 0.4, c: color, s: 5, g: 420 });
@@ -253,6 +289,7 @@ export class Arena {
   fly(from: string, to: string, color = GOLD, n = 10) {
     const a = this.simOf(from), b = this.simOf(to); if (!a || !b) return;
     if (reducedMotion()) n = 2;
+    else if (this.lowPower) n = Math.ceil(n / 2);
     for (let i = 0; i < n; i++) this.particles.push({ x: a.x + (Math.random() - 0.5) * 20, y: a.y + (Math.random() - 0.5) * 20, vx: 0, vy: 0, t: -i * 0.04, life: 0.6, c: color, s: 5, tx: b.x, ty: b.y });
   }
   shake() { if (!reducedMotion()) this.shakeT = 0.4; }
@@ -268,7 +305,7 @@ export class Arena {
     this.dashT = DASH_MS / 1000;
     this.dashCool = DASH_COOL / 1000;
     // dust puffs
-    for (let i = 0; i < (reducedMotion() ? 2 : 10); i++) this.particles.push({ x: this.me.x - this.dashDir.x * this.me.r * 0.6, y: this.me.y + this.me.r * 0.6, vx: -this.dashDir.x * (60 + Math.random() * 90) + (Math.random() - 0.5) * 60, vy: -30 - Math.random() * 40, t: 0, life: 0.45 + Math.random() * 0.2, c: "rgba(200,200,210,0.5)", s: 4 + Math.round(Math.random() * 4), g: -40 });
+    for (let i = 0; i < (reducedMotion() ? 2 : this.lowPower ? 5 : 10); i++) this.particles.push({ x: this.me.x - this.dashDir.x * this.me.r * 0.6, y: this.me.y + this.me.r * 0.6, vx: -this.dashDir.x * (60 + Math.random() * 90) + (Math.random() - 0.5) * 60, vy: -30 - Math.random() * 40, t: 0, life: 0.45 + Math.random() * 0.2, c: "rgba(200,200,210,0.5)", s: 4 + Math.round(Math.random() * 4), g: -40 });
     return true;
   }
   get dashReady() { return this.dashCool <= 0; }
@@ -315,7 +352,9 @@ export class Arena {
     const r = this.el.getBoundingClientRect();
     if (!r.width || !r.height) return;
     this.w = Math.round(r.width); this.h = Math.round(r.height);
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.dpr = Math.min(this.slowDevice ? 1 : this.lowPower ? 1.5 : 2, window.devicePixelRatio || 1);
+    this.floorCache = null; this.floorKey = "";
+    this.labelCache.clear();
     this.canvas.width = Math.round(this.w * this.dpr); this.canvas.height = Math.round(this.h * this.dpr);
     this.canvas.style.width = `${this.w}px`; this.canvas.style.height = `${this.h}px`;
     if (first || this.W === 1000) {
@@ -370,6 +409,7 @@ export class Arena {
   }
   private spawn() {
     this.me.x = Math.round(this.w * 0.6); this.me.y = Math.round(this.H - this.h * 0.6); this.me.vx = this.me.vy = 0;
+    this.travelled = 0;
     this.burst("me", RED, 12);
   }
   private readColors() {
@@ -377,6 +417,7 @@ export class Arena {
     const v = (k: string, d: string) => cs.getPropertyValue(k).trim() || d;
     const next = { field: v("--field", "#070910"), grid: v("--grid", "rgba(39,240,255,0.07)"), ink: v("--ink", "#e8eaf2"), dim: v("--dim", "#8b90a3"), line: v("--line2", "#2a2e3d"), bg: v("--bg", "#05060a") };
     if (next.field !== this.colors.field) this.tiles = null;
+    if (next.bg !== this.colors.bg || next.ink !== this.colors.ink) this.labelCache.clear();
     this.colors = next;
   }
   /** Pre-render the floor tiles: 6 variants of a 48 px circuit floor. */
@@ -470,6 +511,16 @@ export class Arena {
     this.last = now;
     if (dt > 0.1) dt = 0.1;
     if (dt > 0) this.fps = lerp(this.fps, 1 / dt, 0.05);
+    // a frame over 20 ms for two seconds running: this device wants the low power path
+    if (!this.powerLocked && !document.hidden && !(this.lowPower && this.slowDevice)) {
+      this.slowFrames = dt > 0.02 ? this.slowFrames + dt : 0;
+      if (this.slowFrames > 2) {
+        this.slowFrames = 0;
+        if (!this.lowPower) this.lowPower = true; // first tier: fewer bodies, no gradients, cached floor, 1.5x pixels
+        else this.slowDevice = true; // second tier: 1x pixels
+        this.resize(false);
+      }
+    }
     this.colorT += dt;
     if (this.colorT > 2) { this.colorT = 0; this.readColors(); }
     if (this.stopT > 0) { this.stopT -= dt; this.draw(now); return; }
@@ -495,6 +546,7 @@ export class Arena {
       }
       if (this.dashCool > 0) { this.dashCool -= dt; this.onDash?.(clamp(1 - this.dashCool / (DASH_COOL / 1000), 0, 1)); }
       me.x += me.vx * dt; me.y += me.vy * dt;
+      if (this.dashT <= 0) this.travelled += Math.hypot(me.vx, me.vy) * dt;
       this.collide(me);
       me.x = clamp(me.x, me.r, this.W - me.r); me.y = clamp(me.y, me.r, this.H - me.r);
       if (!reducedMotion() && Math.hypot(me.vx, me.vy) > 50) { me.trail.push({ x: me.x, y: me.y + me.r * 0.5 }); if (me.trail.length > 7) me.trail.shift(); } else if (me.trail.length) me.trail.shift();
@@ -589,7 +641,7 @@ export class Arena {
       } else { p.vy += (p.g ?? 420) * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
     }
     this.particles = this.particles.filter((p) => p.t < p.life);
-    for (const m of this.motes) { m.y -= dt * (6 + m.s * 3); m.x += Math.sin(this.t * 0.5 + m.p) * dt * 8; if (m.y < -4) { m.y = this.H + 4; m.x = Math.random() * this.W; } }
+    if (!this.lowPower) for (const m of this.motes) { m.y -= dt * (6 + m.s * 3); m.x += Math.sin(this.t * 0.5 + m.p) * dt * 8; if (m.y < -4) { m.y = this.H + 4; m.x = Math.random() * this.W; } }
     if (this.shakeT > 0) this.shakeT -= dt;
     if (this.flashT > 0) this.flashT -= dt;
   }
@@ -614,7 +666,7 @@ export class Arena {
     this.drawFloor(c, ox, oy);
     // motes
     c.fillStyle = C.ink;
-    for (const m of this.motes) { if (m.x < ox - 4 || m.x > ox + this.w + 4 || m.y < oy - 4 || m.y > oy + this.h + 4) continue; c.globalAlpha = 0.12 + 0.12 * Math.sin(this.t * 1.5 + m.p); c.fillRect(Math.round(m.x), Math.round(m.y), m.s, m.s); }
+    if (!this.lowPower) for (const m of this.motes) { if (m.x < ox - 4 || m.x > ox + this.w + 4 || m.y < oy - 4 || m.y > oy + this.h + 4) continue; c.globalAlpha = 0.12 + 0.12 * Math.sin(this.t * 1.5 + m.p); c.fillRect(Math.round(m.x), Math.round(m.y), m.s, m.s); }
     c.globalAlpha = 1;
     // the edge of the world
     c.fillStyle = C.line; c.fillRect(0, 0, this.W, 4); c.fillRect(0, this.H - 4, this.W, 4); c.fillRect(0, 0, 4, this.H); c.fillRect(this.W - 4, 0, 4, this.H);
@@ -638,6 +690,7 @@ export class Arena {
     if (meDrawn && !drewMe) this.drawMe(c, now);
     this.flushLabels(c);
     this.drawParticles(c);
+    this.drawGuideArrow(c);
     c.restore();
 
     if (this.flashT > 0) { c.globalAlpha = this.flashT * 1.6; c.fillStyle = this.flashC; c.fillRect(0, 0, this.w, this.h); c.globalAlpha = 1; }
@@ -651,6 +704,29 @@ export class Arena {
     const atlas = this.tileAtlas();
     const x0 = Math.max(0, Math.floor(ox / TILE)), x1 = Math.min(Math.ceil(this.W / TILE), Math.ceil((ox + this.w) / TILE) + 1);
     const y0 = Math.max(0, Math.floor(oy / TILE)), y1 = Math.min(Math.ceil(this.H / TILE), Math.ceil((oy + this.h) / TILE) + 1);
+    if (this.lowPower) {
+      // the floor is static: redraw the visible tile window only when the camera crosses a tile edge
+      const key = `${x0},${y0},${x1},${y1},${this.colors.field}`;
+      if (!this.floorCache || this.floorKey !== key) {
+        const cw = (x1 - x0) * TILE, ch = (y1 - y0) * TILE;
+        if (!this.floorCache || this.floorCache.width !== Math.round(cw * this.dpr) || this.floorCache.height !== Math.round(ch * this.dpr)) {
+          this.floorCache = document.createElement("canvas");
+          this.floorCache.width = Math.round(cw * this.dpr); this.floorCache.height = Math.round(ch * this.dpr);
+        }
+        const g = this.floorCache.getContext("2d")!;
+        g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+        g.imageSmoothingEnabled = false;
+        for (let ty = y0; ty < y1; ty++)
+          for (let tx = x0; tx < x1; tx++) {
+            const r = hash32(`t${tx},${ty}`) % 10;
+            const v = r < 5 ? 0 : r - 4;
+            g.drawImage(atlas, v * TILE * this.dpr, 0, TILE * this.dpr, TILE * this.dpr, (tx - x0) * TILE, (ty - y0) * TILE, TILE, TILE);
+          }
+        this.floorKey = key;
+      }
+      c.drawImage(this.floorCache, 0, 0, this.floorCache.width, this.floorCache.height, x0 * TILE, y0 * TILE, (x1 - x0) * TILE, (y1 - y0) * TILE);
+      return;
+    }
     for (let ty = y0; ty < y1; ty++)
       for (let tx = x0; tx < x1; tx++) {
         const r = hash32(`t${tx},${ty}`) % 10;
@@ -712,8 +788,7 @@ export class Arena {
     c.save();
     // facing is a lean, never a mirror: portraits carry digits
     c.translate(Math.round(x) + face * 2, Math.round(y + bob));
-    c.rotate(face * 0.05);
-    c.scale(1 + wobble, 1 - wobble);
+    if (!this.lowPower) { c.rotate(face * 0.05); c.scale(1 + wobble, 1 - wobble); } // axis aligned draws are far cheaper on a phone
     const ok = im && im.complete && im.naturalWidth;
     const gr = up < 1 ? this.grey(id) : null;
     if (gr) { c.drawImage(gr, -Math.round(s / 2), -Math.round(s / 2), s, s); if (up > 0.02 && ok) { const a = c.globalAlpha; c.globalAlpha = a * up; c.drawImage(im!, -Math.round(s / 2), -Math.round(s / 2), s, s); c.globalAlpha = a; } }
@@ -761,7 +836,7 @@ export class Arena {
       for (let i = -1; i <= 1; i++) { const px = x + ny * i * r * 0.6, py = y - nx * i * r * 0.6; const len = 10 + ((this.t * 40 + i * 7) % 12); c.beginPath(); c.moveTo(px + nx * (r + 4), py + ny * (r + 4)); c.lineTo(px + nx * (r + 4 + len), py + ny * (r + 4 + len)); c.stroke(); }
       c.globalAlpha = 1;
     }
-    if (dimmed) c.globalAlpha *= 0.6;
+    if (dimmed || b.state === "rest") c.globalAlpha *= 0.6;
     c.globalAlpha *= draw.alpha;
     const r0 = r; const rr = draw.r;
     this.shadow(c, x, y + bob, rr);
@@ -786,25 +861,49 @@ export class Arena {
       for (let i = 0; i < n; i++) { c.beginPath(); c.arc(x, y + bob, r + 6 + i * 5, 0, Math.PI * 2); c.stroke(); }
     }
     c.restore();
-    if (!b.focus) return; // bystanders: no badges, no labels
+    const close = near < (b.focus ? 230 : 150); // close enough to read the rule before you bump
+    if (!b.focus && !close) return; // far bystanders: no badges, no labels
     c.save();
     const bx = x + rB + 2, by = y + bob - rB - 2;
-    if (b.state === "down" || b.state === "small") this.lock(c, bx, by, this.colors.dim);
-    else if (b.state === "busy") this.cross(c, bx, by, RED);
-    if (b.kind === "vault") { c.fillStyle = GOLD; c.fillRect(Math.round(x - r - 1), Math.round(y + bob + r - 7), 7, 6); c.fillStyle = "#0b0b0b"; c.fillRect(Math.round(x - r + 3), Math.round(y + bob + r - 5), 1, 2); }
-    // vault sparkle
-    if (b.kind === "vault" && !dimmed && ((this.t * 1000 + s.seed) % 2600) < 160) { c.fillStyle = "#fff"; const sx = x - r + rnd(s.seed, 70) * r * 2, sy = y - r + rnd(s.seed, 71) * r * 2; c.fillRect(Math.round(sx) - 1, Math.round(sy) - 3, 2, 6); c.fillRect(Math.round(sx) - 3, Math.round(sy) - 1, 6, 2); }
-    if (b.state === "open" && !hot) { c.strokeStyle = color; c.globalAlpha = 0.35 + 0.25 * Math.sin(this.t * 4 + s.seed); c.lineWidth = 2; c.strokeRect(x - r - 5 + 0.5, y + bob - r - 5 + 0.5, r * 2 + 10, r * 2 + 10); c.globalAlpha = 1; }
-    // lock on "!"
-    if (s.lock > 0) { c.font = this.font(22); c.textAlign = "center"; c.textBaseline = "bottom"; c.fillStyle = RED; const jump = Math.abs(Math.sin(s.lock * 9)) * 6; c.fillText("!", Math.round(x), Math.round(y - r - 8 - jump)); }
+    const iVault = this.meInfo.kind === "vault";
+    // why you cannot raid it, as an icon: lock = out of your band, moon = resting, hourglass = already being raided
+    if (iVault && (b.state === "down" || b.state === "small")) this.lock(c, bx, by, this.colors.dim);
+    else if (iVault && b.state === "rest") this.moon(c, bx, by, this.colors.dim);
+    else if (iVault && b.state === "busy") this.hourglass(c, bx, by, this.colors.dim);
+    // what you can raid right now: a red target mark that pulses
+    if (iVault && b.state === "open" && !hot) {
+      const p = 0.5 + 0.5 * Math.sin(this.t * 5 + s.seed);
+      const R2 = r + 9 + p * 3, L = 11;
+      c.fillStyle = RED; c.globalAlpha = 0.75 + 0.25 * p;
+      const corners: [number, number, number, number][] = [[-1, -1, 1, 1], [1, -1, -1, 1], [-1, 1, 1, -1], [1, 1, -1, -1]];
+      for (const [sx, sy, dx, dy] of corners) {
+        const cx = Math.round(x + sx * R2), cy = Math.round(y + bob + sy * R2);
+        c.fillRect(dx > 0 ? cx : cx - L + 2, cy - 1, L, 3);
+        c.fillRect(cx - 1, dy > 0 ? cy : cy - L + 2, 3, L);
+      }
+      c.fillRect(Math.round(x) - 1, Math.round(y + bob - R2) - 6, 3, 4); // the top tick
+      c.globalAlpha = 1;
+    }
+    if (b.focus) {
+      if (b.kind === "vault") { c.fillStyle = GOLD; c.fillRect(Math.round(x - r - 1), Math.round(y + bob + r - 7), 7, 6); c.fillStyle = "#0b0b0b"; c.fillRect(Math.round(x - r + 3), Math.round(y + bob + r - 5), 1, 2); }
+      // vault sparkle
+      if (b.kind === "vault" && !dimmed && ((this.t * 1000 + s.seed) % 2600) < 160) { c.fillStyle = "#fff"; const sx = x - r + rnd(s.seed, 70) * r * 2, sy = y - r + rnd(s.seed, 71) * r * 2; c.fillRect(Math.round(sx) - 1, Math.round(sy) - 3, 2, 6); c.fillRect(Math.round(sx) - 3, Math.round(sy) - 1, 6, 2); }
+      // lock on "!"
+      if (s.lock > 0) { c.font = this.font(22); c.textAlign = "center"; c.textBaseline = "bottom"; c.fillStyle = RED; const jump = Math.abs(Math.sin(s.lock * 9)) * 6; c.fillText("!", Math.round(x), Math.round(y - r - 8 - jump)); }
+    }
     c.restore();
     c.save();
     c.textAlign = "center"; c.textBaseline = "top";
-    c.font = this.font(12);
-    c.fillStyle = hot ? RED : this.colors.ink;
-    c.globalAlpha = dimmed ? 0.6 : 1;
-    this.label(c, b.name, x, y + r + 7, hot ? 3 : 2);
-    if (b.showBag) { c.font = this.font(10.5); c.fillStyle = this.colors.dim; this.label(c, b.bag, x, y + r + 20, 1); }
+    const ry = r1; // labels hang under the drawn size
+    if (b.focus) {
+      c.font = this.font(12);
+      c.fillStyle = hot ? RED : this.colors.ink;
+      c.globalAlpha = dimmed ? 0.6 : 1;
+      this.label(c, b.name, x, y + ry + 7, hot ? 3 : 2);
+      if (b.showBag) { c.font = this.font(10.5); c.fillStyle = this.colors.dim; this.label(c, b.bag, x, y + ry + 24, 1); }
+    }
+    // the rule in words as you come close, before you bump
+    if (iVault && b.hint && close && !hot) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
     c.restore();
   }
   /** Labels are queued and decluttered: a label that would sit in the top UI
@@ -812,12 +911,34 @@ export class Arena {
    * once and dropped if it still overlaps. Drawn at the end of the world pass. */
   private labels: { text: string; x: number; y: number; w: number; h: number; font: string; color: string; alpha: number; pri: number; base: "top" | "bottom" | "middle" }[] = [];
   private label(c: CanvasRenderingContext2D, text: string, x: number, y: number, pri = 1) {
-    const w = c.measureText(text).width + 6;
-    const h = parseFloat(c.font) * 1.15 + 2;
+    const { w, h } = this.labelTile(c, text, c.font, String(c.fillStyle));
     this.labels.push({ text, x, y, w, h, font: c.font, color: String(c.fillStyle), alpha: c.globalAlpha, pri, base: c.textBaseline as any });
   }
+  /** A label rendered once (text is the costliest thing a canvas draws): box, text, size. */
+  private labelTile(c: CanvasRenderingContext2D, text: string, font: string, color: string) {
+    const key = `${font}|${color}|${text}`;
+    let t = this.labelCache.get(key);
+    if (t) return t;
+    if (this.labelCache.size > 400) this.labelCache.clear();
+    c.save(); c.font = font;
+    const w = Math.ceil(c.measureText(text).width + 6);
+    c.restore();
+    const px = /(\d+(?:\.\d+)?)px/.exec(font); // the font string starts with its weight, not its size
+    const h = Math.ceil((px ? Number(px[1]) : 12) * 1.15 + 2);
+    const cv = document.createElement("canvas");
+    cv.width = Math.max(1, Math.round(w * this.dpr)); cv.height = Math.max(1, Math.round(h * this.dpr));
+    const g = cv.getContext("2d")!;
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    g.imageSmoothingEnabled = false;
+    g.globalAlpha = 0.75; g.fillStyle = this.colors.bg; g.fillRect(0, 0, w, h);
+    g.globalAlpha = 1; g.font = font; g.textAlign = "center"; g.textBaseline = "top"; g.fillStyle = color;
+    g.fillText(text, Math.round(w / 2), 1);
+    t = { cv, w, h };
+    this.labelCache.set(key, t);
+    return t;
+  }
   private flushLabels(c: CanvasRenderingContext2D) {
-    const band = this.cam.y + 112; // under the HUD strip and pills
+    const band = this.cam.y + Math.max(112, this.topInset); // under the HUD strip and pills, or the guide card
     const placed: { x: number; y: number; w: number; h: number }[] = [];
     const list = [...this.labels].sort((a, b) => b.pri - a.pri);
     this.labels = [];
@@ -828,19 +949,44 @@ export class Arena {
       let box = { x: l.x, y: top + l.h / 2, w: l.w, h: l.h };
       if (hit(box)) { top += l.h + 1; box = { ...box, y: top + l.h / 2 }; if (hit(box) || l.pri < 2) continue; }
       placed.push(box);
-      c.save();
-      c.font = l.font; c.textAlign = "center"; c.textBaseline = "top"; c.globalAlpha = l.alpha * 0.75;
-      c.fillStyle = this.colors.bg; c.fillRect(Math.round(l.x - l.w / 2), Math.round(top), Math.round(l.w), Math.round(l.h));
-      c.globalAlpha = l.alpha; c.fillStyle = l.color; c.fillText(l.text, Math.round(l.x), Math.round(top + 1));
-      c.restore();
+      const t = this.labelTile(c, l.text, l.font, l.color);
+      c.globalAlpha = l.alpha;
+      c.drawImage(t.cv, Math.round(l.x - t.w / 2), Math.round(top), t.w, t.h);
+      c.globalAlpha = 1;
     }
   }
   private lock(c: CanvasRenderingContext2D, x: number, y: number, col: string) {
     c.fillStyle = col; c.fillRect(x - 5, y - 2, 10, 8); c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.arc(x, y - 3, 3.5, Math.PI, 0); c.stroke();
     c.fillStyle = this.colors.field; c.fillRect(x - 1, y + 1, 2, 3);
   }
-  private cross(c: CanvasRenderingContext2D, x: number, y: number, col: string) {
-    c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); c.arc(x, y, 5, 0, Math.PI * 2); c.moveTo(x - 7, y); c.lineTo(x + 7, y); c.moveTo(x, y - 7); c.lineTo(x, y + 7); c.stroke();
+  private moon(c: CanvasRenderingContext2D, x: number, y: number, col: string) {
+    c.fillStyle = col; c.beginPath(); c.arc(x, y, 6, 0, Math.PI * 2); c.fill();
+    c.fillStyle = this.colors.field; c.beginPath(); c.arc(x + 3, y - 2, 5, 0, Math.PI * 2); c.fill();
+  }
+  private hourglass(c: CanvasRenderingContext2D, x: number, y: number, col: string) {
+    c.fillStyle = col;
+    c.fillRect(x - 5, y - 7, 10, 2); c.fillRect(x - 5, y + 5, 10, 2);
+    c.fillRect(x - 4, y - 5, 8, 2); c.fillRect(x - 2, y - 3, 4, 2); c.fillRect(x - 1, y - 1, 2, 2); c.fillRect(x - 2, y + 1, 4, 2); c.fillRect(x - 4, y + 3, 8, 2);
+    c.fillStyle = this.colors.field; c.fillRect(x - 2, y - 5, 4, 1); c.fillRect(x - 1, y + 3, 2, 1);
+  }
+  /** The guide's arrow: a bouncing pixel chevron over what to touch next. */
+  private drawGuideArrow(c: CanvasRenderingContext2D) {
+    const g = this.guide;
+    if (!g) return;
+    const s = g.kind === "me" ? this.me : g.kind === "gate" ? this.gate : g.kind === "boss" ? this.boss : g.id ? this.bodies.get(g.id) : null;
+    if (!s) return;
+    const r = g.kind === "boss" ? 100 : g.kind === "gate" ? 60 : ("r" in s ? (s as Sim).r : 24) + 8;
+    const bounce = reducedMotion() ? 0 : Math.abs(Math.sin(this.t * 4)) * 8;
+    const ax = Math.round(s.x), ay = Math.round(s.y - r - 14 - bounce);
+    const col = g.kind === "body" ? RED : g.kind === "me" ? CYAN : GOLD;
+    c.save();
+    c.fillStyle = "#0c0c0b";
+    c.fillRect(ax - 14, ay - 30, 28, 6); c.fillRect(ax - 10, ay - 24, 20, 6); c.fillRect(ax - 6, ay - 18, 12, 6); c.fillRect(ax - 2, ay - 12, 4, 6);
+    c.fillRect(ax - 8, ay - 38, 16, 8);
+    c.fillStyle = col;
+    c.fillRect(ax - 12, ay - 28, 24, 4); c.fillRect(ax - 8, ay - 24, 16, 4); c.fillRect(ax - 4, ay - 20, 8, 4); c.fillRect(ax - 1, ay - 16, 2, 4);
+    c.fillRect(ax - 6, ay - 36, 12, 8);
+    c.restore();
   }
 
   private drawMe(c: CanvasRenderingContext2D, now: number) {
@@ -885,7 +1031,7 @@ export class Arena {
     c.font = this.font(12); c.fillStyle = color;
     this.label(c, "YOU", m.x, m.y + m.r + 8, 6);
     c.font = this.font(10.5); c.fillStyle = this.colors.ink;
-    this.label(c, info.bag, m.x, m.y + m.r + 21, 5);
+    this.label(c, info.bag, m.x, m.y + m.r + 25, 5);
     if (info.inFlight) {
       const q = Math.floor(now / 110) % 4, sx = m.x - 8, sy = m.y - m.r - 34;
       c.fillStyle = this.colors.ink;
@@ -901,10 +1047,13 @@ export class Arena {
     const { x, y } = this.gate, open = this.places.gate === "open";
     c.save();
     const pulse = 0.5 + 0.5 * Math.sin(this.t * 3);
-    // light spill
-    const gr = c.createRadialGradient(x, y, 20, x, y, 150);
-    gr.addColorStop(0, `rgba(255,214,10,${open ? 0.28 + pulse * 0.1 : 0.14})`); gr.addColorStop(1, "rgba(255,214,10,0)");
-    c.fillStyle = gr; c.fillRect(x - 150, y - 150, 300, 300);
+    // light spill (a flat glow on a phone: no per frame gradient)
+    if (this.lowPower) { c.fillStyle = GOLD; c.globalAlpha = open ? 0.08 + pulse * 0.04 : 0.05; c.fillRect(x - 110, y - 110, 220, 220); c.globalAlpha = 1; }
+    else {
+      const gr = c.createRadialGradient(x, y, 20, x, y, 150);
+      gr.addColorStop(0, `rgba(255,214,10,${open ? 0.28 + pulse * 0.1 : 0.14})`); gr.addColorStop(1, "rgba(255,214,10,0)");
+      c.fillStyle = gr; c.fillRect(x - 150, y - 150, 300, 300);
+    }
     // rotating ring segments
     c.strokeStyle = GOLD; c.lineWidth = 6; c.globalAlpha = open ? 0.9 : 0.5;
     for (let i = 0; i < 4; i++) { const a0 = this.t * 0.8 + (i * Math.PI) / 2; c.beginPath(); c.arc(x, y, 58, a0, a0 + 0.9); c.stroke(); }
@@ -941,9 +1090,12 @@ export class Arena {
     // boss sprite, about 3.5x a player
     const S = 160, bob = Math.sin(this.t * 1.6) * 3;
     c.fillStyle = "rgba(0,0,0,0.5)"; c.fillRect(x - 60, y + 70, 120, 8);
-    const gr = c.createRadialGradient(x, y, 30, x, y, 130);
-    gr.addColorStop(0, this.places.boss.ready ? "rgba(255,214,10,0.22)" : "rgba(255,214,10,0.08)"); gr.addColorStop(1, "rgba(255,214,10,0)");
-    c.fillStyle = gr; c.fillRect(x - 130, y - 130, 260, 260);
+    if (this.lowPower) { c.fillStyle = GOLD; c.globalAlpha = this.places.boss.ready ? 0.09 : 0.03; c.fillRect(x - 100, y - 100, 200, 200); c.globalAlpha = 1; }
+    else {
+      const gr = c.createRadialGradient(x, y, 30, x, y, 130);
+      gr.addColorStop(0, this.places.boss.ready ? "rgba(255,214,10,0.22)" : "rgba(255,214,10,0.08)"); gr.addColorStop(1, "rgba(255,214,10,0)");
+      c.fillStyle = gr; c.fillRect(x - 130, y - 130, 260, 260);
+    }
     const im = this.imgs.get("__boss__");
     if (im && im.complete && im.naturalWidth) c.drawImage(im, x - S / 2, y - S / 2 + bob, S, S);
     if (this.places.boss.ready) { c.strokeStyle = GOLD; c.lineWidth = 3; c.globalAlpha = 0.5 + 0.5 * Math.sin(this.t * 5); c.strokeRect(x - 40.5, y - 10.5 + bob, 81, 60); c.globalAlpha = 1; }
@@ -955,8 +1107,8 @@ export class Arena {
     c.fillStyle = GOLD3; for (let i = 1; i < 10; i++) c.fillRect(x - bw / 2 + Math.round((bw * i) / 10), y - S / 2 - 20, 1, bh);
     c.textAlign = "center"; c.textBaseline = "bottom"; c.font = this.font(15); c.fillStyle = GOLD;
     this.label(c, "SATOSHI", x, y - S / 2 - 26, 4);
-    c.textBaseline = "top"; c.font = this.mono(10); c.fillStyle = this.places.boss.ready ? GOLD : this.colors.dim;
-    if (this.places.boss.hint) this.label(c, this.places.boss.ready ? "touch the core to hit" : "dodge the pulse", x, y + S / 2 + 8, 2);
+    c.textBaseline = "top"; c.font = this.mono(10.5); c.fillStyle = this.places.boss.ready ? GOLD : this.colors.dim;
+    if (this.places.boss.hint) this.label(c, this.places.boss.line || (this.places.boss.ready ? "Touch his core" : "Dodge the pulse"), x, y + S / 2 + 8, 3);
     c.restore();
   }
 
@@ -1008,7 +1160,12 @@ export class Arena {
     if (this.places.gate !== "hidden") targets.push({ x: this.gate.x, y: this.gate.y, color: GOLD, label: this.places.gate === "open" ? "GATE" : "VAULT", pulse: false });
     for (const id of this.order) { const b = this.info.get(id)!, s = this.bodies.get(id)!; if (b && s && (b.hunting || b.raidingMe)) targets.push({ x: s.x, y: s.y, color: RED, label: b.name.toUpperCase(), pulse: true }); }
     if (this.places.boss.ready) targets.push({ x: this.boss.x, y: this.boss.y, color: GOLD, label: "SATOSHI", pulse: false });
-    const cx = this.w / 2, cy = this.h / 2, inset = 26, top = 118, bottom = 24;
+    const g = this.guide;
+    if (g && g.kind !== "me") {
+      const s = g.kind === "gate" ? this.gate : g.kind === "boss" ? this.boss : g.id ? this.bodies.get(g.id) : null;
+      if (s && !targets.some((t) => t.x === s.x && t.y === s.y)) targets.push({ x: s.x, y: s.y, color: g.kind === "body" ? RED : GOLD, label: g.kind === "gate" ? "GOLD DOOR" : g.kind === "boss" ? "SATOSHI" : (g.id && this.info.get(g.id)?.name.toUpperCase()) || "TARGET", pulse: true });
+    }
+    const cx = this.w / 2, cy = this.h / 2, inset = 26, top = Math.max(118, this.topInset + 14), bottom = 24;
     const placed: { x: number; y: number; w: number }[] = [];
     for (const t of targets) {
       const p = this.toScreen(t.x, t.y);
@@ -1054,7 +1211,7 @@ export class Arena {
   }
 
   private drawMinimap(c: CanvasRenderingContext2D) {
-    if (this.meInfo.kind === "none") return;
+    if (this.meInfo.kind === "none" || this.cardOn) return; // the guide card sits where the map goes
     const R = 34, cx = this.w - R - 10, cy = R + 10;
     const sx = (R * 1.8) / Math.max(this.W, this.H);
     const map = (x: number, y: number) => ({ x: cx + (x - this.W / 2) * sx, y: cy + (y - this.H / 2) * sx });

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, decideHunt, isNpc, ROSTER, MAX_MOVES, explainRaid } from "./rules.mjs";
+import { decide, decideHunt, isNpc, ROSTER, MAX_MOVES, GREET_DELAY_MS, explainRaid } from "./rules.mjs";
 
 const C = "qday-test.testnet";
 const Q = (n) => (BigInt(n) * 10n ** 18n).toString();
@@ -154,6 +154,18 @@ test("Qubits skip holders registered more than 30 minutes ago or already raided"
   const raided = holder("hit.testnet", { balance: Q(60000), immune_until: "0" });
   const m2 = decide(base({ npcs: qs, holders: [{ ...raided, immune_until: String(NOW - 5) }] }));
   assert.equal(raids(m2).length, 0);
+});
+
+test("Qubits leave a holder alone for its first minutes, then greet it", () => {
+  const qs = [npc("qubit-01", { balance: Q(20000) })];
+  const fresh = holder("fresh.testnet", { balance: Q(60000) });
+  const early = decide(base({ npcs: qs, holders: [fresh], firstSeen: { "fresh.testnet": NOW - 90 * 1000 } }));
+  assert.equal(raids(early).length, 0);
+  const edge = decide(base({ npcs: qs, holders: [fresh], firstSeen: { "fresh.testnet": NOW - GREET_DELAY_MS + 1 } }));
+  assert.equal(raids(edge).length, 0);
+  const later = decide(base({ npcs: qs, holders: [fresh], firstSeen: { "fresh.testnet": NOW - GREET_DELAY_MS } }));
+  assert.equal(raids(later).length, 1);
+  assert.equal(raids(later)[0].target, "fresh.testnet");
 });
 
 test("never more than 6 moves per tick", () => {
