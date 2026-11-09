@@ -266,12 +266,8 @@ export function play(root: HTMLElement) {
     if (have.includes(k)) return;
     try { localStorage.setItem(LS_T, JSON.stringify([...have, k])); } catch {}
     const [name, why] = TITLES[k];
-    setTimeout(() => {
-      sfx.play("fanfare");
-      sfx.vibrate([30, 40, 30, 40, 80]);
-      fx.banner(field, "TITLE EARNED", `${name} · ${why}`, "cyan", 3200);
-      toast({ tone: "gold", title: `New title: <b>${esc(name)}</b>. Share it from the menu.`, open: () => openSettings() });
-    }, 3400); // after the result banner has had its moment
+    // one message channel: a slim gold pill that waits its turn (after the strip collapses)
+    toast({ tone: "gold", cls: "title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}`, open: () => openSettings(), onShow: () => { sfx.play("fanfare"); sfx.vibrate([30, 40, 30, 40, 80]); } });
   }
 
   const sess = () => chain.session();
@@ -1118,7 +1114,7 @@ export function play(root: HTMLElement) {
 
   // ---------------------------------------------------------------- events
 
-  interface Ev { tone: "hot" | "gold" | "ink"; title: string; who?: string; open?: () => void }
+  interface Ev { tone: "hot" | "gold" | "ink"; title: string; who?: string; open?: () => void; cls?: string; onShow?: () => void }
   const queue: Ev[] = [];
   let showing: HTMLElement | null = null;
   const evHost = root.querySelector<HTMLElement>("#events")!;
@@ -1133,7 +1129,8 @@ export function play(root: HTMLElement) {
     if (!ev) { showing = null; return; }
     const el = document.createElement("button");
     el.type = "button";
-    el.className = `ev tone-${ev.tone}`;
+    el.className = `ev tone-${ev.tone}${ev.cls ? ` ${ev.cls}` : ""}`;
+    ev.onShow?.();
     el.innerHTML = `${ev.who ? `<span class="av">${ev.who === "satoshi" ? satoshiAvatar() : avatar(ev.who)}</span>` : ""}<span class="ev-t">${ev.title}</span>`;
     el.onclick = () => { ev.open?.(); dismiss(); };
     evHost.appendChild(el);

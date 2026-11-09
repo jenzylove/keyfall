@@ -126,6 +126,7 @@ export class Arena {
   boss = { x: 0, y: 0, angle: 0 };
   blocks: Block[] = [];
   private imgs = new Map<string, HTMLImageElement>();
+  private greys = new Map<string, HTMLCanvasElement>();
   private tiles: HTMLCanvasElement | null = null;
   private particles: Particle[] = [];
   private motes: { x: number; y: number; s: number; p: number }[] = [];
@@ -200,7 +201,7 @@ export class Arena {
         for (let k = 0; k < 12; k++) {
           hx = lerp(this.W * 0.08, this.W * 0.92, rnd(seed, 10 + k));
           hy = lerp(this.H * 0.08, this.H * 0.92, rnd(seed, 30 + k));
-          const nearSpawn = Math.hypot(hx - this.W * 0.14, hy - this.H * 0.88) < this.W * 0.3;
+          const nearSpawn = Math.hypot(hx - this.w * 0.6, hy - (this.H - this.h * 0.6)) < this.W * 0.3;
           const nearBoss = Math.hypot(hx - this.W / 2, hy - this.H / 2) < 200;
           const nearGate = Math.hypot(hx - this.gate.x, hy - this.gate.y) < 140;
           if (!nearSpawn && !nearBoss && !nearGate && !this.inBlock(hx, hy, 30)) break;
@@ -308,6 +309,7 @@ export class Arena {
     // an SVG needs an intrinsic size before a canvas will draw it
     im.src = `data:image/svg+xml;utf8,${encodeURIComponent(svg.replace(/<svg /, `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" `))}`;
     this.imgs.set(id, im);
+    this.greys.delete(id);
   }
   private resize(first: boolean) {
     const r = this.el.getBoundingClientRect();
@@ -322,7 +324,7 @@ export class Arena {
       this.H = clamp(Math.round(this.h * 2.2), 900, 2000);
       this.boss = { x: Math.round(this.W / 2), y: Math.round(this.H / 2), angle: 0 };
       this.gate = { x: Math.round(this.W * 0.8), y: Math.round(this.H * 0.21) }; // low enough that you stay clear of the top strip when you reach it
-      this.me.x = this.W * 0.16; this.me.y = this.H * 0.88;
+      this.me.x = Math.round(this.w * 0.6); this.me.y = Math.round(this.H - this.h * 0.6);
       this.cam = { x: this.boss.x - this.w / 2, y: this.boss.y - this.h / 2 };
       this.buildWorld();
     }
@@ -339,7 +341,7 @@ export class Arena {
         const x = Math.round(lerp(60, this.W - 60 - w, rnd(seed, i * 40 + k)) / 8) * 8;
         const y = Math.round(lerp(60, this.H - 60 - h, rnd(seed, i * 40 + 20 + k)) / 8) * 8;
         const cx = x + w / 2, cy = y + h / 2;
-        if (Math.hypot(cx - this.W * 0.16, cy - this.H * 0.88) < 190) continue;
+        if (Math.hypot(cx - this.w * 0.6, cy - (this.H - this.h * 0.6)) < 190) continue;
         if (Math.hypot(cx - this.gate.x, cy - this.gate.y) < 170) continue;
         if (Math.hypot(cx - this.boss.x, cy - this.boss.y) < 230) continue;
         if (this.blocks.some((b) => Math.abs(b.x + b.w / 2 - cx) < (b.w + w) / 2 + 70 && Math.abs(b.y + b.h / 2 - cy) < (b.h + h) / 2 + 70)) continue;
@@ -367,7 +369,7 @@ export class Arena {
     }
   }
   private spawn() {
-    this.me.x = this.W * 0.16; this.me.y = this.H * 0.88; this.me.vx = this.me.vy = 0;
+    this.me.x = Math.round(this.w * 0.6); this.me.y = Math.round(this.H - this.h * 0.6); this.me.vx = this.me.vy = 0;
     this.burst("me", RED, 12);
   }
   private readColors() {
@@ -572,8 +574,12 @@ export class Arena {
     if (me.bounce > 0) me.bounce -= dt;
     const k = 1 - Math.exp(-dt * 6);
     const look = playing ? me : this.boss;
-    this.cam.x = clamp(lerp(this.cam.x, look.x - this.w / 2, k), 0, Math.max(0, this.W - this.w));
-    this.cam.y = clamp(lerp(this.cam.y, look.y - this.h / 2, k), 0, Math.max(0, this.H - this.h));
+    // the world edge may show a little (hazard border) rather than push you into a corner:
+    // you stay at least a quarter screen from any edge
+    const cx0 = clamp(lerp(this.cam.x, look.x - this.w / 2, k), -this.w * 0.25, this.W - this.w * 0.75);
+    const cy0 = clamp(lerp(this.cam.y, look.y - this.h / 2, k), -this.h * 0.25, this.H - this.h * 0.75);
+    this.cam.x = playing ? clamp(cx0, look.x - this.w * 0.75, look.x - this.w * 0.25) : cx0;
+    this.cam.y = playing ? clamp(cy0, look.y - this.h * 0.75, look.y - this.h * 0.25) : cy0;
     for (const p of this.particles) {
       p.t += dt;
       if (p.t < 0) continue;
@@ -683,7 +689,24 @@ export class Arena {
     }
   }
 
-  private sprite(c: CanvasRenderingContext2D, id: string, x: number, y: number, r: number, face: 1 | -1, bob: number, wobble: number) {
+  /** A desaturated copy of a portrait, made once (no per frame filter). */
+  private grey(id: string): HTMLCanvasElement | null {
+    const g = this.greys.get(id);
+    if (g) return g;
+    const im = this.imgs.get(id);
+    if (!im || !im.complete || !im.naturalWidth) return null;
+    const cv = document.createElement("canvas");
+    cv.width = 96; cv.height = 96;
+    const g2 = cv.getContext("2d")!;
+    g2.imageSmoothingEnabled = false;
+    g2.drawImage(im, 0, 0, 96, 96);
+    const d = g2.getImageData(0, 0, 96, 96), px = d.data;
+    for (let i = 0; i < px.length; i += 4) { const l = Math.round(px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11); px[i] = px[i + 1] = px[i + 2] = l; }
+    g2.putImageData(d, 0, 0);
+    this.greys.set(id, cv);
+    return cv;
+  }
+  private sprite(c: CanvasRenderingContext2D, id: string, x: number, y: number, r: number, face: 1 | -1, bob: number, wobble: number, up = 1) {
     const im = this.imgs.get(id);
     const s = Math.round(r * 2);
     c.save();
@@ -691,7 +714,10 @@ export class Arena {
     c.translate(Math.round(x) + face * 2, Math.round(y + bob));
     c.rotate(face * 0.05);
     c.scale(1 + wobble, 1 - wobble);
-    if (im && im.complete && im.naturalWidth) c.drawImage(im, -Math.round(s / 2), -Math.round(s / 2), s, s);
+    const ok = im && im.complete && im.naturalWidth;
+    const gr = up < 1 ? this.grey(id) : null;
+    if (gr) { c.drawImage(gr, -Math.round(s / 2), -Math.round(s / 2), s, s); if (up > 0.02 && ok) { const a = c.globalAlpha; c.globalAlpha = a * up; c.drawImage(im!, -Math.round(s / 2), -Math.round(s / 2), s, s); c.globalAlpha = a; } }
+    else if (ok) c.drawImage(im!, -Math.round(s / 2), -Math.round(s / 2), s, s);
     else { c.fillStyle = "#191815"; c.fillRect(-Math.round(s / 2), -Math.round(s / 2), s, s); }
     c.restore();
   }
@@ -737,7 +763,6 @@ export class Arena {
     }
     if (dimmed) c.globalAlpha *= 0.6;
     c.globalAlpha *= draw.alpha;
-    if (up < 1 && !reducedMotion()) c.filter = `saturate(${Math.round(up * 100)}%)`;
     const r0 = r; const rr = draw.r;
     this.shadow(c, x, y + bob, rr);
     // exposed: dripping pixels
@@ -748,7 +773,7 @@ export class Arena {
       c.globalAlpha = a0;
     }
     this.outline(c, x, y + bob, rr, up < 1 ? this.colors.dim : color, hot ? 3 : 2);
-    this.sprite(c, b.id, x, y, rr, s.face, bob, wobble);
+    this.sprite(c, b.id, x, y, rr, s.face, bob, wobble, up);
     const r1 = rr; void r0; // the badges below use the drawn size
     const rB = r1;
     // blink

@@ -10,7 +10,7 @@ const OUT = "C:/Users/LENOVO/qday-launch/v4shots";
 const FR = `${OUT}/calm-frames`;
 const FFMPEG = "C:/Users/LENOVO/tools/ffmpeg-9.0-essentials_build/bin/ffmpeg";
 const FFPROBE = "C:/Users/LENOVO/tools/ffmpeg-9.0-essentials_build/bin/ffprobe";
-const PROFILE = process.argv[2] || "C:/Users/LENOVO/qday-launch/chrome-v4rec6";
+const PROFILE = process.argv[2] || "C:/Users/LENOVO/qday-launch/chrome-v4rec7";
 fs.rmSync(FR, { recursive: true, force: true }); fs.mkdirSync(FR, { recursive: true });
 const b = await puppeteer.launch({ userDataDir: PROFILE, executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: false, args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required", "--use-gl=angle", "--use-angle=d3d11", "--window-size=420,900", "--window-position=20,20"] });
 const p = await b.newPage();
