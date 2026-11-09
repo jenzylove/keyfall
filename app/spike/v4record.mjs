@@ -10,11 +10,11 @@ const OUT = "C:/Users/LENOVO/qday-launch/v4shots";
 const FR = `${OUT}/calm-frames`;
 const FFMPEG = "C:/Users/LENOVO/tools/ffmpeg-9.0-essentials_build/bin/ffmpeg";
 const FFPROBE = "C:/Users/LENOVO/tools/ffmpeg-9.0-essentials_build/bin/ffprobe";
-const PROFILE = process.argv[2] || "C:/Users/LENOVO/qday-launch/chrome-v4rec3";
+const PROFILE = process.argv[2] || "C:/Users/LENOVO/qday-launch/chrome-v4rec5";
 fs.rmSync(FR, { recursive: true, force: true }); fs.mkdirSync(FR, { recursive: true });
 const b = await puppeteer.launch({ userDataDir: PROFILE, executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: false, args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required", "--use-gl=angle", "--use-angle=d3d11", "--window-size=420,900", "--window-position=20,20"] });
 const p = await b.newPage();
-await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 1, isMobile: true, hasTouch: true }); // headful screencast frames the window 1:1 at scale 1
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(0)}s]`, ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,6 +52,7 @@ if ((await k()) === "grab") {
   log("grab:", r);
   if (r !== "ok") { await b.close(); process.exit(1); }
 }
+if ((await k()) === "grab" || !(await A((ar) => ar.meInfo.kind !== "none"))) { log("no bag: not recording"); await b.close(); process.exit(1); }
 await sleep(1500);
 await shot("calm-00-spawn");
 
@@ -66,7 +67,7 @@ cdp.on("Page.screencastFrame", async (ev) => {
 `);
   await cdp.send("Page.screencastFrameAck", { sessionId: ev.sessionId }).catch(() => {});
 });
-await cdp.send("Page.startScreencast", { format: "jpeg", quality: 75, everyNthFrame: 1, maxWidth: 520, maxHeight: 1126 });
+await cdp.send("Page.startScreencast", { format: "jpeg", quality: 75, everyNthFrame: 1, maxWidth: 390, maxHeight: 844 });
 const rec0 = Date.now();
 
 // stand still: the hunter tunnels in and catches you
@@ -99,7 +100,8 @@ for (let i = 0; i < frames.length; i++) {
 }
 list += `file 'f${String(frames.length - 1).padStart(4, "0")}.jpg'\n`;
 fs.writeFileSync(`${FR}/list.txt`, list);
-execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", `${FR}/list.txt`, "-vf", "fps=30,scale=780:1688:flags=bicubic,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "19", `${OUT}/calm-chase.mp4`]);
+execFileSync(FFMPEG, ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", `${FR}/list.txt`, "-vf", "fps=30,scale=780:1688:flags=neighbor,format=yuv420p", "-c:v", "libx264", "-preset", "medium", "-crf", "19", `${OUT}/calm-chase.tmp.mp4`]);
+fs.renameSync(`${OUT}/calm-chase.tmp.mp4`, `${OUT}/calm-chase.mp4`);
 const probe = execFileSync(FFPROBE, ["-v", "error", "-select_streams", "v:0", "-count_frames", "-show_entries", "stream=nb_read_frames,r_frame_rate,duration", "-of", "default=nw=1", `${OUT}/calm-chase.mp4`]).toString();
 console.log(probe);
 console.log("source frame rate:", (frames.length / ((frames[frames.length - 1] - frames[0]) || 1)).toFixed(1), "fps captured");
