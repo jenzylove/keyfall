@@ -1,0 +1,25 @@
+// v4 smoke: load /play fresh, skip the intro, screenshot, report console errors and fps.
+import puppeteer from "puppeteer-core";
+const BASE = process.env.BASE || "http://localhost:5188";
+const OUT = "C:/Users/LENOVO/qday-launch/v4shots";
+const b = await puppeteer.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true, args: ["--no-sandbox", "--use-gl=swiftshader", "--enable-unsafe-swiftshader"] });
+const p = await b.newPage();
+await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const errors = [];
+p.on("console", (m) => (m.type() === "error" || m.type() === "warning") && !/well-known|403|favicon/.test(m.text()) && errors.push(m.text()));
+p.on("pageerror", (e) => errors.push(String(e)));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+await p.evaluateOnNewDocument(() => { localStorage.setItem("qday.theme", "dark"); });
+await p.goto(`${BASE}/play`, { waitUntil: "networkidle2" });
+await sleep(1500);
+await p.screenshot({ path: `${OUT}/smoke-intro.png` });
+if (await p.$("#in-skip")) await p.click("#in-skip");
+await sleep(4000);
+await p.screenshot({ path: `${OUT}/smoke-start.png` });
+const info = await p.evaluate(() => { const ar = document.querySelector("#field").__arena; return { fps: Math.round(ar.fps), bodies: ar.order.length, W: ar.W, H: ar.H, ready: ar.ready, strip: document.querySelector(".strip")?.textContent, start: !document.querySelector("#start").hidden }; });
+console.log(JSON.stringify(info));
+await p.goto(`${BASE}/`, { waitUntil: "networkidle2" });
+await sleep(2500);
+await p.screenshot({ path: `${OUT}/smoke-landing.png`, fullPage: true });
+console.log("errors:", JSON.stringify(errors));
+await b.close();

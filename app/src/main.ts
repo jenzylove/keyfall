@@ -9,10 +9,10 @@ import * as sfx from "./ui/sound";
 export type Page = (root: HTMLElement, params: Record<string, string>) => () => void;
 
 const routes: [RegExp, Page, string][] = [
-  [/^\/$/, landing, "Q-DAY · Get into a quantum vault before Q-Day"],
-  [/^\/play\/?$/, play, "Play · Q-DAY"],
-  [/^\/d\/(?<id>\d+)\/?$/, defendPage, "Defend · Q-DAY"],
-  [/^\/proof\/?$/, proof, "Under the hood · Q-DAY"],
+  [/^\/$/, landing, "KEYFALL · Run your coins into a quantum vault before Q-Day"],
+  [/^\/play\/?$/, play, "Play · KEYFALL"],
+  [/^\/d\/(?<id>\d+)\/?$/, defendPage, "Defend · KEYFALL"],
+  [/^\/proof\/?$/, proof, "Under the hood · KEYFALL"],
 ];
 
 const app = document.getElementById("app")!;
@@ -27,7 +27,7 @@ function chrome() {
   app.innerHTML = `
     <div class="crt" aria-hidden="true"></div>
     <header class="wrap top">
-      <a class="brand" href="/" data-link><span class="mark">${MARK}</span>Q-DAY</a>
+      <a class="brand" href="/" data-link><span class="mark">${MARK}</span>KEYFALL</a>
       <nav class="nav">
         <a href="/play" data-link class="play-link">Play</a>
         <a href="/proof" data-link>Under the hood</a>
@@ -79,7 +79,7 @@ function render() {
       return;
     }
   }
-  document.title = "Not found · Q-DAY";
+  document.title = "Not found · KEYFALL";
   page.innerHTML = `<section class="wrap page-title"><p class="eyebrow"><span class="dot"></span>Signal lost</p><h1 class="display h2">No such page</h1><p><a class="btn" href="/" data-link>Back to the title</a></p></section>`;
 }
 

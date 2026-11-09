@@ -170,6 +170,46 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
   return moves;
 }
 
+/** The arena chase: an NPC body touched `target` on the player's screen and
+ * asks to raid it now. Same checks as decide() (band, immunity, busy, size,
+ * raids left, 20% stake cap); the "greet once" rule is relaxed because the
+ * player was physically caught. `hunter` is the NPC that touched them and is
+ * preferred when it may raid; otherwise another eligible NPC takes the raid.
+ * Returns one raid move, or { skipped } with the reason in words. */
+export function decideHunt({ now, config, stats, npcs = [], holders = [], openRaids = [], target, hunter, contract }) {
+  if (stats?.after_q_day) return { skipped: "Q-Day has passed. Raids are over." };
+  now = Number(now);
+  const home = contract || (npcs[0] ? String(npcs[0].account).split(".").slice(1).join(".") : "");
+  const npcIds = new Set(npcs.map((n) => n.account));
+  const npcOf = (id) => npcIds.has(id) || isNpc(id, home);
+  const raw = holders.find((h) => h.account === target);
+  if (!raw) return { skipped: "That account holds no bag." };
+  if (npcOf(raw.account)) return { skipped: "NPCs do not hunt each other." };
+  const t = { ...raw, balance: big(raw.balance) };
+  if (t.under_raid != null) return { skipped: "Already under raid." };
+  if (big(t.immune_until) > BigInt(now)) return { skipped: "Resting after a raid." };
+  if (t.balance < big(config.min_target_balance)) return { skipped: "Too small to raid." };
+  const live = openRaids.filter((r) => Number(r.deadline) >= now);
+  const attacking = new Set(live.map((r) => r.attacker));
+  const busy = new Set(live.map((r) => r.target));
+  const can = (n) =>
+    n.raids_left > 0 && n.under_raid == null && !busy.has(n.account) && !attacking.has(n.account) &&
+    t.balance * big(config.punch_down_band) >= big(n.balance);
+  const list = npcs.filter(can);
+  const style = (n) => { const nm = npcName(n.account); return nm === "shor" ? "shor" : nm === "grover" ? "grover" : "qubit"; };
+  const order = t.kind === "exposed" ? ["qubit", "shor", "grover"] : ["grover", "qubit", "shor"];
+  const pref = (n) => (npcName(n.account) === hunter ? 0 : 1);
+  list.sort((a, b) => pref(a) - pref(b) || order.indexOf(style(a)) - order.indexOf(style(b)) || b.raids_left - a.raids_left);
+  for (const att of list) {
+    const take = expectedTake(t, config);
+    const stake = pickStake(take, big(att.balance), config);
+    if (stake === null) continue;
+    const name = npcName(att.account);
+    return { npc: name, action: "raid", target: t.account, stake: stake.toString(), reason: `${name} caught ${short(t.account)} in the arena. Staking ${fmt(stake)} for about ${fmt(take)}.` };
+  }
+  return { skipped: list.length ? "No NPC can stake enough right now." : "No NPC has a raid left for a bag that size." };
+}
+
 /** Why an NPC raid picked this account. `snap` may carry { balance, shield_bps }. */
 export function explainRaid(raid, snap = {}) {
   const name = npcName(raid.attacker);

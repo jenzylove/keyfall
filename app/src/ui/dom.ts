@@ -124,8 +124,8 @@ export function sentence(f: FeedItem, mine: string[] = [], plain = false): strin
   const W = (a: string | null) => (plain ? (mine.includes(a || "") ? "you" : a === "satoshi" ? "Satoshi" : short(a || "")) : who(a || "", mine));
   const amt = fmtTokens(f.amount);
   switch (f.kind) {
-    case "buy": return `${W(f.actor)} bought ${amt} $QDAY`;
-    case "sell": return `${W(f.actor)} sold ${amt} $QDAY`;
+    case "buy": return `${W(f.actor)} bought ${amt} $KEYFALL`;
+    case "sell": return `${W(f.actor)} sold ${amt} $KEYFALL`;
     case "vault": return `${W(f.actor)} opened a quantum vault`;
     case "migrate": return `${W(f.actor)} moved ${amt} into the vault ${W(f.target)}`;
     case "transfer": return `${W(f.actor)} sent ${amt} to ${W(f.target)}`;
@@ -180,7 +180,7 @@ export async function act(
 
 export const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** Whole $QDAY input to base units. */
+/** Whole $KEYFALL input to base units. */
 export function wholeToUnits(v: string): bigint | null {
   const m = String(v).trim().replace(/,/g, "");
   if (!/^\d+(\.\d{0,6})?$/.test(m)) return null;
