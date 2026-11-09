@@ -12,15 +12,49 @@ import {
   bytesToBase64,
 } from "@fastnear/utils";
 
-export const NETWORK = "testnet" as const;
-// Reads and transactions go straight from the browser to public testnet nodes,
-// moving to the next one when a node fails or rate limits. The app's own proxy
+// Two arenas, one game: MAINNET (real NEAR, real $KEYFALL) and PRACTICE
+// (testnet, free). The choice is per browser; `?net=mainnet` or `?net=practice`
+// switches it. Mainnet is only offered once its contract is configured.
+export type Network = "mainnet" | "testnet";
+const MAINNET_CONTRACT: string = import.meta.env.VITE_CONTRACT_MAINNET || "";
+const TESTNET_CONTRACT: string = import.meta.env.VITE_CONTRACT || "";
+const LS_NET = "keyfall.net.v1";
+export const MAINNET_READY = Boolean(MAINNET_CONTRACT);
+function pickNetwork(): Network {
+  if (!MAINNET_READY) return "testnet";
+  try {
+    const q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("net") : null;
+    const fromQuery: Network | null = q === "mainnet" ? "mainnet" : q === "practice" || q === "testnet" ? "testnet" : null;
+    if (fromQuery) {
+      localStorage.setItem(LS_NET, fromQuery);
+      return fromQuery;
+    }
+    const saved = localStorage.getItem(LS_NET);
+    if (saved === "mainnet" || saved === "testnet") return saved;
+  } catch {}
+  return "testnet";
+}
+export const NETWORK: Network = pickNetwork();
+export const IS_MAINNET = NETWORK === "mainnet";
+/** Switch arenas and reload. Each arena keeps its own wallet and vault on this device. */
+export function switchNetwork(n: Network) {
+  try {
+    localStorage.setItem(LS_NET, n);
+  } catch {}
+  const u = new URL(location.href);
+  u.searchParams.delete("net");
+  location.replace(u.toString());
+}
+// Reads and transactions go straight from the browser to public nodes, moving
+// to the next one when a node fails or rate limits. The app's own proxy
 // (/api/rpc) is the last resort, so the site never depends on one node.
+const PUBLIC_RPCS: Record<Network, string[]> = {
+  testnet: ["https://rpc.testnet.fastnear.com", "https://rpc.testnet.near.org", "https://test.rpc.fastnear.com"],
+  mainnet: ["https://rpc.mainnet.fastnear.com", "https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"],
+};
 const RPCS = [
-  "https://rpc.testnet.fastnear.com",
-  "https://rpc.testnet.near.org",
-  "https://test.rpc.fastnear.com",
-  ...(typeof location !== "undefined" && !/localhost|127\.0\.0\.1/.test(location.hostname) ? [`${location.origin}/api/rpc`] : []),
+  ...PUBLIC_RPCS[NETWORK],
+  ...(typeof location !== "undefined" && !/localhost|127\.0\.0\.1/.test(location.hostname) ? [`${location.origin}/api/rpc${NETWORK === "mainnet" ? "?net=mainnet" : ""}`] : []),
 ];
 let rpcIndex = 0;
 near.config({ networkId: NETWORK, nodeUrl: RPCS[0] } as any);
@@ -43,11 +77,15 @@ async function withRpc<T>(fn: () => Promise<T>): Promise<T> {
   }
   throw last;
 }
-export const CONTRACT: string = import.meta.env.VITE_CONTRACT || "";
-export const EXPLORER = "https://testnet.nearblocks.io";
+export const CONTRACT: string = NETWORK === "mainnet" ? MAINNET_CONTRACT : TESTNET_CONTRACT;
+export const EXPLORER = NETWORK === "mainnet" ? "https://nearblocks.io" : "https://testnet.nearblocks.io";
 /** The game's API. On a local dev server it is the live site (CORS allows localhost). */
 export const API_BASE = typeof location !== "undefined" && /localhost|127\.0\.0\.1/.test(location.hostname) ? "https://qday-one.vercel.app" : "";
-export const apiUrl = (path: string) => `${API_BASE}${path}`;
+/** The game's API for this arena: mainnet calls carry `net=mainnet`. */
+export const apiUrl = (path: string) => {
+  if (NETWORK !== "mainnet") return `${API_BASE}${path}`;
+  return `${API_BASE}${path}${path.includes("?") ? "&" : "?"}net=mainnet`;
+};
 export const txLink = (h: string) => `${EXPLORER}/txns/${h}`;
 export const accountLink = (a: string) => `${EXPLORER}/address/${a}`;
 
@@ -150,8 +188,9 @@ export async function nearBalance(accountId: string): Promise<bigint> {
 
 // ------------------------------------------------------------------ local key store
 
-const LS_WALLET = "qday.wallet.v1";
-const LS_VAULT = "qday.vault.v1";
+// Practice keeps the original keys so existing players keep their vaults.
+const LS_WALLET = NETWORK === "mainnet" ? "keyfall.mainnet.wallet.v1" : "qday.wallet.v1";
+const LS_VAULT = NETWORK === "mainnet" ? "keyfall.mainnet.vault.v1" : "qday.vault.v1";
 
 interface WalletRecord { accountId: string; secretKey: string; contract: string }
 interface VaultRecord { accountId: string; iv: string; sealed: string; contract: string }
@@ -325,7 +364,8 @@ function needVault() {
  * First choice: the game's sponsor funds an implicit account for a key made
  * right here (`/api/join` only ever sees the account id). Fallback: the public
  * testnet faucet, which allows a few accounts per network per day. */
-export async function join(): Promise<{ accountId: string; via: "sponsor" | "faucet" }> {
+export async function join(): Promise<{ accountId: string; via: "sponsor" | "faucet" | "self" }> {
+  if (NETWORK === "mainnet") return { ...mainnetWallet(), via: "self" };
   const secretKey = privateKeyFromRandom();
   const publicKey = publicKeyFromPrivate(secretKey);
   let accountId = [...fromBase58(publicKey.replace(/^ed25519:/, ""))].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -357,6 +397,45 @@ export async function join(): Promise<{ accountId: string; via: "sponsor" | "fau
   lsSet(LS_WALLET, { accountId, secretKey, contract: CONTRACT } satisfies WalletRecord);
   walletSigner = { accountId, signer: signerFromPrivateKey(secretKey) };
   return { accountId, via };
+}
+
+/** Mainnet: make (or reuse) this device's wallet key. The wallet is an implicit
+ * account that exists once someone sends it NEAR: from any NEAR wallet or
+ * exchange, or from another chain through NEAR Intents (`fundingQuote`). */
+export function mainnetWallet(): { accountId: string } {
+  if (NETWORK !== "mainnet") throw new ChainError("Mainnet only.");
+  if (walletSigner) return { accountId: walletSigner.accountId };
+  const secretKey = privateKeyFromRandom();
+  const publicKey = publicKeyFromPrivate(secretKey);
+  const accountId = [...fromBase58(publicKey.replace(/^ed25519:/, ""))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  lsSet(LS_WALLET, { accountId, secretKey, contract: CONTRACT } satisfies WalletRecord);
+  walletSigner = { accountId, signer: signerFromPrivateKey(secretKey) };
+  return { accountId };
+}
+
+export interface FundingQuote { depositAddress: string; amountIn: string; amountInFormatted: string; amountOut: string; asset: string; chain: string; deadline: string }
+/** A NEAR Intents quote: send `amountInFormatted` of `asset` on `chain` to
+ * `depositAddress`, and `amountOut` NEAR lands in this device's wallet. */
+export async function fundingQuote(source: "usdc-sol" | "usdc-base" | "usdt-sol" | "sol" | "eth-base", near: number): Promise<FundingQuote> {
+  const w = mainnetWallet();
+  const r = await fetch(apiUrl("/api/fund"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId: w.accountId, source, near }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ChainError(j?.error || `funding quote failed (${r.status})`);
+  return j as FundingQuote;
+}
+export async function fundingStatus(depositAddress: string): Promise<string> {
+  const r = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`).catch(() => null);
+  const j: any = r ? await r.json().catch(() => ({})) : {};
+  return String(j?.status || "UNKNOWN");
+}
+
+/** Cash out: send NEAR from the vault (signed with its quantum key) to any NEAR account. */
+export async function cashOut(to: string, yocto: string) {
+  return send(needVault(), to, [near.actions.transfer(yocto)]);
+}
+/** Send the exposed wallet's NEAR to any NEAR account (keeps a little for gas). */
+export async function walletWithdraw(to: string, yocto: string) {
+  return send(needWallet(), to, [near.actions.transfer(yocto)]);
 }
 
 export async function buy(nearAmount: number, from: "wallet" | "vault" = "wallet", minOut?: string) {

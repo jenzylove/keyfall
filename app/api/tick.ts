@@ -1,42 +1,47 @@
 // Vercel Node function. POST runs one NPC tick, GET returns the last result.
-// Seeds come from env NPC_SEEDS (JSON { "shor": "<64 hex>", ... }), the
-// contract from VITE_CONTRACT. Throttled: a tick within 20 s of the previous
+// Arena from ?net (see _net.ts): seeds from NPC_SEEDS / NPC_SEEDS_MAINNET,
+// contract from VITE_CONTRACT / CONTRACT_MAINNET. Throttled: a tick within 20 s of the previous
 // one in this instance returns the cached result.
 
 // @ts-ignore plain ES module
 import { tick } from "../npc/tick.mjs";
 import { cors, originOk } from "./_origin.js";
+import { arena, netOf } from "./_net.js";
 
 const THROTTLE_MS = 20_000;
-let last: { at: string; moves: unknown[] } | null = null;
-let lastRun = 0;
-let running: Promise<{ at: string; moves: unknown[] }> | null = null;
+type Result = { at: string; moves: unknown[] };
+// One throttle per arena.
+const last: Record<string, Result | null> = {};
+const lastRun: Record<string, number> = {};
+const running: Record<string, Promise<Result> | null> = {};
 
 export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
   if (cors(req, res)) return;
-  if (req.method === "GET") return res.status(200).json(last ?? { at: null, moves: [] });
+  const net = netOf(req);
+  if (req.method === "GET") return res.status(200).json(last[net] ?? { at: null, moves: [] });
   if (req.method !== "POST") return res.status(405).json({ error: "use GET or POST" });
   if (!originOk(req)) return res.status(403).json({ error: "ticks come from the Q-DAY site or the crank" });
 
-  const contract = process.env.VITE_CONTRACT;
-  let seeds: Record<string, string> = {};
+  let a;
   try {
-    seeds = JSON.parse(process.env.NPC_SEEDS || "{}");
-  } catch {
-    return res.status(500).json({ error: "NPC_SEEDS is not valid JSON" });
+    a = arena(net);
+  } catch (e: any) {
+    return res.status(500).json({ error: String(e?.message || e) });
   }
-  if (!contract || !Object.keys(seeds).length) return res.status(500).json({ error: "NPCs are not configured" });
+  if (!a.contract || !Object.keys(a.seeds).length) return res.status(500).json({ error: `NPCs are not configured for ${net}` });
 
-  if (last && Date.now() - lastRun < THROTTLE_MS) return res.status(200).json({ ...last, cached: true });
+  const prev = last[net];
+  if (prev && Date.now() - (lastRun[net] || 0) < THROTTLE_MS) return res.status(200).json({ ...prev, cached: true });
   try {
-    running ||= tick({ contract, seeds, network: "testnet" });
-    last = await running;
-    lastRun = Date.now();
-    return res.status(200).json(last);
+    running[net] ||= tick({ contract: a.contract, seeds: a.seeds, network: net });
+    const r = (await running[net])!;
+    last[net] = r;
+    lastRun[net] = Date.now();
+    return res.status(200).json(r);
   } catch (e: any) {
     return res.status(500).json({ error: String(e?.message || e).slice(0, 300) });
   } finally {
-    running = null;
+    running[net] = null;
   }
 }
