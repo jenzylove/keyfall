@@ -44,12 +44,15 @@ export interface ArenaPlaces {
   boss: { visible: boolean; ready: boolean; hp: number; hint?: boolean; line?: string };
 }
 export interface ArenaCallbacks {
+  /** A hunter body bumped into you (the server decides whether that is a raid). */
   onTouch(id: string, body: ArenaBody): void;
   onGate(): void;
-  onBoss(): void;
+  /** Your shot landed on a body ("satoshi" for the core). Return the outcome: ok, or why it deflected. */
+  onShot(id: string): { ok: boolean; why?: string };
   onPulse(): void;
   chainNow(): number;
 }
+interface Shot { x: number; y: number; vx: number; vy: number; t: number; from: "me" | string; target: string | null; mine: boolean }
 
 interface Sim {
   id: string;
@@ -77,6 +80,10 @@ const CHASE = { qubit: 145, shor: 160, grover: 135, charge: 180, flee: 125, foll
 const TUNNEL_FROM = 640;
 const TUNNEL_TO = 420;
 const TOUCH_GAP = 3200;
+const SHOT_SPEED = 820;
+const SHOT_LIFE = 1.35; // seconds: about one screen of range
+const SHOT_COOL = 0.6;
+const AIM_HALF = (13 * Math.PI) / 180; // a cone of about 25 degrees
 const TILE = 48;
 const GOLD = "#ffd60a", RED = "#ff3d2e", CYAN = "#27f0ff", GOLD2 = "#d9b000", GOLD3 = "#8a6d00";
 
@@ -149,7 +156,7 @@ export class Arena {
   private keys = new Set<string>();
   private dashT = 0; private dashCool = 0; private dashDir = { x: 0, y: -1 };
   private facing = { x: 0, y: -1 };
-  private lastGate = 0; private lastBoss = 0; private lastPulse = 0;
+  private lastGate = 0; private lastPulse = 0;
   private raf = 0; private last = 0; private t = 0;
   private alive = true;
   private colors = { field: "#070910", grid: "rgba(39,240,255,0.07)", ink: "#e8eaf2", dim: "#8b90a3", line: "#2a2e3d", bg: "#05060a" };
@@ -160,6 +167,8 @@ export class Arena {
   fps = 60;
   ready = false;
   onDash: ((cool: number) => void) | null = null;
+  /** Space on desktop: the page decides whether a shot may go (gold only). */
+  onShootKey: (() => void) | null = null;
   /** World distance you have steered since the last spawn (the guide's first step). */
   travelled = 0;
   private guide: GuideTarget = null;
@@ -170,6 +179,12 @@ export class Arena {
   /** Frames still over 20 ms in low power mode: draw at 1x. */
   slowDevice = false;
   private slowFrames = 0;
+  private shots: Shot[] = [];
+  private shotCool = 0;
+  private ringHit = new Map<string, number>(); // shield ring flash per body ("me" for you)
+  private hintIds = new Set<string>(); // bodies whose reason line is drawn this frame
+  /** Which bodies a shot may snap to right now (set by the page: raidable, the raider, Satoshi when ready). */
+  targets = new Set<string>();
   private labelCache = new Map<string, { cv: HTMLCanvasElement; w: number; h: number }>();
   private floorCache: HTMLCanvasElement | null = null;
   private floorKey = "";
@@ -255,10 +270,10 @@ export class Arena {
   /** A speech bubble over a body ("me" for you, "satoshi" for the boss). */
   /** Set by the page: true while another text (the strip, a toast) is on screen. */
   quiet: () => boolean = () => false;
-  say(id: string, text: string, ms = 3600) {
+  say(id: string, text: string, ms = 3600, force = false) {
     if (!text) return;
-    if (this.quiet()) return; // one message at a time
-    if (id !== "me" && id !== "satoshi" && this.info.get(id) && !this.info.get(id)!.focus) return; // bystanders keep quiet
+    if (this.quiet() && !force) return; // one message at a time (a shot's answer always shows, at the body)
+    if (!force && id !== "me" && id !== "satoshi" && this.info.get(id) && !this.info.get(id)!.focus) return; // bystanders keep quiet
     if (id !== "me" && id !== "satoshi" && !this.bodies.has(id)) return;
     const key = id === "me" ? ME : id;
     this.bubbles = this.bubbles.filter((b) => { if (b.id === key) { b.el.remove(); return false; } return true; });
@@ -309,6 +324,56 @@ export class Arena {
     return true;
   }
   get dashReady() { return this.dashCool <= 0; }
+  get shootReady() { return this.shotCool <= 0 && this.meInfo.kind !== "none"; }
+
+  /** Fire where you face, snapping to the nearest target in the aim cone. Local and free; the hit decides. */
+  shoot(): boolean {
+    if (!this.shootReady) return false;
+    this.shotCool = SHOT_COOL;
+    const d = this.inputDir();
+    const m = Math.hypot(d.x, d.y);
+    let dir = m > 0.1 ? { x: d.x / m, y: d.y / m } : { ...this.facing };
+    const aim = this.aimTarget(dir);
+    if (aim) { const s = this.simOf(aim)!; const dx = s.x - this.me.x, dy = s.y - this.me.y, l = Math.hypot(dx, dy) || 1; dir = { x: dx / l, y: dy / l }; }
+    this.shots.push({ x: this.me.x + dir.x * (this.me.r + 6), y: this.me.y + dir.y * (this.me.r + 6) - 6, vx: dir.x * SHOT_SPEED, vy: dir.y * SHOT_SPEED, t: 0, from: "me", target: aim, mine: true });
+    this.me.vx -= dir.x * 60; this.me.vy -= dir.y * 60; // recoil
+    this.facing = dir;
+    if (!reducedMotion()) for (let i = 0; i < (this.lowPower ? 2 : 4); i++) this.particles.push({ x: this.me.x + dir.x * (this.me.r + 8), y: this.me.y + dir.y * (this.me.r + 8) - 6, vx: dir.x * 120 + (Math.random() - 0.5) * 120, vy: dir.y * 120 + (Math.random() - 0.5) * 120, t: 0, life: 0.18, c: "#fff", s: 3, g: 0 });
+    return true;
+  }
+  /** The target your next shot would snap to, or null. */
+  aimTarget(dir = this.facing): string | null {
+    let best: string | null = null, bd = Infinity;
+    const range = this.viewSpan;
+    for (const id of this.targets) {
+      const s = this.simOf(id); if (!s) continue;
+      const dx = s.x - this.me.x, dy = s.y - this.me.y, dist = Math.hypot(dx, dy);
+      if (dist > range || dist < 1) continue;
+      const ang = Math.acos(clamp((dx * dir.x + dy * dir.y) / dist, -1, 1));
+      const half = id === "satoshi" ? AIM_HALF * 2.5 : AIM_HALF; // the boss is a big target
+      if (ang > half) continue;
+      if (dist < bd) { bd = dist; best = id; }
+    }
+    return best;
+  }
+  /** A hunter fires at you: the picture of a raid the chain already confirmed. */
+  npcShot(from: string) {
+    const s = this.bodies.get(from); if (!s) return;
+    const dx = this.me.x - s.x, dy = this.me.y - s.y, l = Math.hypot(dx, dy) || 1;
+    this.shots.push({ x: s.x + (dx / l) * (s.r + 6), y: s.y + (dy / l) * (s.r + 6) - 6, vx: (dx / l) * SHOT_SPEED * 0.8, vy: (dy / l) * SHOT_SPEED * 0.8, t: 0, from, target: ME, mine: false });
+  }
+  /** The shield ring takes a hit: flash and cyan shards. */
+  shieldHit(id: string) {
+    const key = id === "me" ? ME : id;
+    this.ringHit.set(key, 0.5);
+    const s = this.simOf(id); if (!s) return;
+    const n = reducedMotion() ? 2 : this.lowPower ? 5 : 10;
+    for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2; this.particles.push({ x: s.x + Math.cos(a) * 30, y: s.y + Math.sin(a) * 30, vx: Math.cos(a) * 140, vy: Math.sin(a) * 140, t: 0, life: 0.4, c: CYAN, s: 3, g: 0 }); }
+  }
+  private deflectAt(x: number, y: number, color = "#fff") {
+    const n = reducedMotion() ? 2 : this.lowPower ? 4 : 7;
+    for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2; this.particles.push({ x, y, vx: Math.cos(a) * 160, vy: Math.sin(a) * 160, t: 0, life: 0.3, c: color, s: 3, g: 0 }); }
+  }
   /** The longer side of the view, in world px (one screen). */
   get viewSpan() { return Math.max(this.w, this.h); }
   /** Where Satoshi stands, relative to you. */
@@ -480,7 +545,7 @@ export class Arena {
     const k = e.key.toLowerCase();
     if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "shift"].includes(k)) {
       if (k === " " || k === "arrowup" || k === "arrowdown") e.preventDefault();
-      if (e.type === "keydown") { this.keys.add(k); if (k === " " || k === "shift") this.dash(); }
+      if (e.type === "keydown") { this.keys.add(k); if (k === "shift") this.dash(); if (k === " " && !e.repeat) this.onShootKey?.(); }
       else this.keys.delete(k);
     }
   };
@@ -599,10 +664,12 @@ export class Arena {
           const imp = 150;
           me.vx += nx * imp; me.vy += ny * imp; s.vx -= nx * imp * 0.6; s.vy -= ny * imp * 0.6;
           s.bounce = 0.3; me.bounce = 0.3;
-          if (nowMs - s.lastTouch > TOUCH_GAP) { s.lastTouch = nowMs; this.hitstop(70); this.cb.onTouch(id, b); }
+          // only a hunter's touch means anything (the server decides); your own contact fires nothing
+          if ((b.hunting || b.raidingMe) && nowMs - s.lastTouch > TOUCH_GAP) { s.lastTouch = nowMs; this.hitstop(70); this.cb.onTouch(id, b); }
         }
       }
     }
+    this.stepShots(dt);
     if (playing && this.places.gate !== "hidden") {
       const d = Math.hypot(me.x - this.gate.x, me.y - this.gate.y);
       if (d < 50 + me.r * 0.5 && nowMs - this.lastGate > 4000) { this.lastGate = nowMs; this.cb.onGate(); }
@@ -620,7 +687,6 @@ export class Arena {
       if (bd < 74 + me.r) {
         me.x = this.boss.x + (bx / bd) * (74 + me.r); me.y = this.boss.y + (by / bd) * (74 + me.r);
         me.vx += (bx / bd) * 120; me.vy += (by / bd) * 120;
-        if (nowMs - this.lastBoss > 4000) { this.lastBoss = nowMs; this.hitstop(110); this.cb.onBoss(); }
       }
     }
     if (me.bounce > 0) me.bounce -= dt;
@@ -644,6 +710,51 @@ export class Arena {
     if (!this.lowPower) for (const m of this.motes) { m.y -= dt * (6 + m.s * 3); m.x += Math.sin(this.t * 0.5 + m.p) * dt * 8; if (m.y < -4) { m.y = this.H + 4; m.x = Math.random() * this.W; } }
     if (this.shakeT > 0) this.shakeT -= dt;
     if (this.flashT > 0) this.flashT -= dt;
+  }
+
+  /** Projectiles: fly, home a little onto their snapped target, stop on blocks, land on bodies. */
+  private stepShots(dt: number) {
+    if (this.shotCool > 0) this.shotCool -= dt;
+    for (const [k, v] of this.ringHit) { if (v - dt <= 0) this.ringHit.delete(k); else this.ringHit.set(k, v - dt); }
+    const me = this.me;
+    const keep: Shot[] = [];
+    for (const p of this.shots) {
+      p.t += dt;
+      if (p.target) {
+        const s = this.simOf(p.target === ME ? "me" : p.target);
+        if (s) { const dx = s.x - p.x, dy = s.y - p.y, l = Math.hypot(dx, dy) || 1, sp = Math.hypot(p.vx, p.vy); const k = 1 - Math.exp(-dt * 6); p.vx = lerp(p.vx, (dx / l) * sp, k); p.vy = lerp(p.vy, (dy / l) * sp, k); }
+      }
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.t > SHOT_LIFE || p.x < 0 || p.y < 0 || p.x > this.W || p.y > this.H) { this.deflectAt(p.x, p.y, this.colors.dim); continue; }
+      if (this.inBlock(p.x, p.y, 0)) { this.deflectAt(p.x, p.y, "#c8c8d0"); continue; }
+      let hit = false;
+      if (p.mine) {
+        // Satoshi's core
+        if (this.places.boss.visible && Math.hypot(p.x - this.boss.x, p.y - this.boss.y) < 60) {
+          const r = this.cb.onShot("satoshi");
+          if (r.ok) { this.hitstop(110); this.burst("satoshi", GOLD, 12); } else { this.deflectAt(p.x, p.y, GOLD); this.say("satoshi", r.why || "", 2600, true); }
+          hit = true;
+        }
+        if (!hit) for (const id of this.order) {
+          const s = this.bodies.get(id)!, b = this.info.get(id)!;
+          if (!s || !b) continue;
+          if (Math.hypot(p.x - s.x, p.y - s.y) > s.r * 0.95) continue;
+          const r = this.cb.onShot(id);
+          if (b.shieldBps > 0) this.shieldHit(id);
+          if (r.ok) { this.hitstop(80); s.bounce = 0.3; s.vx += p.vx * 0.15; s.vy += p.vy * 0.15; this.burst(id, b.kind === "vault" ? GOLD : RED, 8); }
+          else { this.deflectAt(p.x, p.y, this.colors.dim); if (r.why) this.say(id, r.why, 2600, true); }
+          hit = true;
+          break;
+        }
+      } else if (Math.hypot(p.x - me.x, p.y - me.y) < me.r * 0.95) {
+        // a hunter's shot lands on you
+        if (this.meInfo.shieldBps > 0) this.shieldHit("me"); else this.burst("me", RED, 8);
+        me.bounce = 0.3; this.shake(); this.flash();
+        hit = true;
+      }
+      if (!hit) keep.push(p);
+    }
+    this.shots = keep;
   }
 
   // ---------------------------------------------------------------- drawing
@@ -679,6 +790,14 @@ export class Arena {
     for (const b of this.blocks) this.drawBlock(c, b, ox, oy);
     this.drawBoss(c);
     this.drawLines(c);
+    this.drawAim(c);
+    // reason lines: the nearest two bodies with a reason, and the one your aim is on
+    this.hintIds.clear();
+    if (this.meInfo.kind === "vault") {
+      const near = this.order.filter((id) => this.info.get(id)?.hint).map((id) => ({ id, d: this.distTo(id) })).sort((a, b) => a.d - b.d).slice(0, 2);
+      for (const n of near) if (n.d < 230) this.hintIds.add(n.id);
+      const aim = this.aimTarget(); if (aim && aim !== "satoshi") this.hintIds.add(aim);
+    }
     const ids = [...this.order].sort((a, b) => (this.bodies.get(a)?.y || 0) - (this.bodies.get(b)?.y || 0));
     const meDrawn = this.meInfo.kind !== "none";
     let drewMe = false;
@@ -689,6 +808,7 @@ export class Arena {
     }
     if (meDrawn && !drewMe) this.drawMe(c, now);
     this.flushLabels(c);
+    this.drawShots(c);
     this.drawParticles(c);
     this.drawGuideArrow(c);
     c.restore();
@@ -855,11 +975,7 @@ export class Arena {
     if (this.blinkAt(s.seed)) { c.fillStyle = "#0c0c0b"; c.fillRect(Math.round(x - rB * 0.7), Math.round(y + bob - rB * 0.35), Math.round(rB * 1.4), 3); }
     // hunters: red eyes
     if (hot) { c.fillStyle = RED; c.fillRect(Math.round(x - rB * 0.42), Math.round(y + bob - rB * 0.3), 4, 3); c.fillRect(Math.round(x + rB * 0.18), Math.round(y + bob - rB * 0.3), 4, 3); }
-    if (b.shieldBps > 0 && b.focus) {
-      const n = Math.min(3, Math.ceil(b.shieldBps / 1000));
-      c.strokeStyle = CYAN; c.lineWidth = 2; c.globalAlpha *= 0.8;
-      for (let i = 0; i < n; i++) { c.beginPath(); c.arc(x, y + bob, r + 6 + i * 5, 0, Math.PI * 2); c.stroke(); }
-    }
+    this.shieldRing(c, b.id, x, y + bob, rr, b.shieldBps);
     c.restore();
     const close = near < (b.focus ? 230 : 150); // close enough to read the rule before you bump
     if (!b.focus && !close) return; // far bystanders: no badges, no labels
@@ -903,7 +1019,7 @@ export class Arena {
       if (b.showBag) { c.font = this.font(10.5); c.fillStyle = this.colors.dim; this.label(c, b.bag, x, y + ry + 24, 1); }
     }
     // the rule in words as you come close, before you bump
-    if (iVault && b.hint && close && !hot) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
+    if (iVault && b.hint && close && !hot && this.hintIds.has(b.id)) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
     c.restore();
   }
   /** Labels are queued and decluttered: a label that would sit in the top UI
@@ -1017,12 +1133,7 @@ export class Arena {
       c.fillStyle = GOLD2; c.fillRect(Math.round(m.x + m.r - 4), Math.round(m.y + bob + m.r - 6), 6, 5);
       c.fillStyle = "#0b0b0b"; c.fillRect(Math.round(m.x + m.r - 2), Math.round(m.y + bob + m.r - 4), 2, 2);
     }
-    if (info.shieldBps > 0) {
-      const n = Math.min(3, Math.ceil(info.shieldBps / 1000));
-      c.strokeStyle = CYAN; c.lineWidth = 2; c.globalAlpha = 0.85;
-      for (let i = 0; i < n; i++) { c.beginPath(); c.arc(m.x, m.y + bob, m.r + 8 + i * 5, 0, Math.PI * 2); c.stroke(); }
-      c.globalAlpha = 1;
-    }
+    this.shieldRing(c, ME, m.x, m.y + bob, m.r, info.shieldBps);
     c.restore();
     if (info.kind === "vault" && info.maxRaids > 0) {
       for (let i = 0; i < info.maxRaids; i++) { c.fillStyle = i < info.raidsLeft ? RED : this.colors.line; c.fillRect(Math.round(m.x - (info.maxRaids * 7) / 2 + i * 7), Math.round(m.y - m.r - 10), 5, 4); }
@@ -1140,6 +1251,45 @@ export class Arena {
       }
       c.restore();
     }
+  }
+
+  /** Bullets: a bright pixel slug with a short tail. */
+  private drawShots(c: CanvasRenderingContext2D) {
+    for (const p of this.shots) {
+      const sp = Math.hypot(p.vx, p.vy) || 1, nx = p.vx / sp, ny = p.vy / sp;
+      const col = p.mine ? GOLD : RED;
+      c.globalAlpha = 0.35; c.fillStyle = col;
+      for (let i = 1; i <= 3; i++) c.fillRect(Math.round(p.x - nx * i * 7) - 2, Math.round(p.y - ny * i * 7) - 2, 4, 4);
+      c.globalAlpha = 1;
+      c.fillStyle = "#0c0c0b"; c.fillRect(Math.round(p.x) - 4, Math.round(p.y) - 4, 8, 8);
+      c.fillStyle = col; c.fillRect(Math.round(p.x) - 3, Math.round(p.y) - 3, 6, 6);
+      c.fillStyle = "#fff"; c.fillRect(Math.round(p.x) - 1, Math.round(p.y) - 2, 2, 2);
+    }
+  }
+  /** The aim: a faint dotted line to the body your next shot would snap to, with a bracket on it. */
+  private drawAim(c: CanvasRenderingContext2D) {
+    if (this.meInfo.kind !== "vault") return;
+    const aim = this.aimTarget();
+    if (!aim) return;
+    const s = this.simOf(aim); if (!s) return;
+    const r = aim === "satoshi" ? 64 : ("r" in s ? (s as Sim).r : 24) + 10;
+    c.save();
+    c.strokeStyle = GOLD; c.globalAlpha = 0.5; c.lineWidth = 2; c.setLineDash([3, 7]); c.lineDashOffset = -((this.t * 60) % 10);
+    c.beginPath(); c.moveTo(this.me.x, this.me.y); c.lineTo(s.x, s.y); c.stroke();
+    c.setLineDash([]); c.globalAlpha = 0.9;
+    const p = 0.5 + 0.5 * Math.sin(this.t * 8), R = r + p * 3;
+    c.strokeRect(Math.round(s.x - R) + 0.5, Math.round(s.y - R) + 0.5, Math.round(R * 2), Math.round(R * 2));
+    c.restore();
+  }
+  /** Shield ring: one cyan ring per 10%, brighter while it takes a hit. */
+  private shieldRing(c: CanvasRenderingContext2D, key: string, x: number, y: number, r: number, bps: number) {
+    if (bps <= 0) return;
+    const n = Math.min(3, Math.ceil(bps / 1000));
+    const hit = this.ringHit.get(key) || 0;
+    c.save();
+    c.strokeStyle = hit > 0 ? "#fff" : CYAN; c.lineWidth = hit > 0 ? 3 : 2; c.globalAlpha = (hit > 0 ? 1 : 0.8) * c.globalAlpha;
+    for (let i = 0; i < n; i++) { c.beginPath(); c.arc(x, y, r + 7 + i * 5 + (hit > 0 ? hit * 6 : 0), 0, Math.PI * 2); c.stroke(); }
+    c.restore();
   }
 
   private drawParticles(c: CanvasRenderingContext2D) {
