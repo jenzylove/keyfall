@@ -684,8 +684,8 @@ impl Contract {
     pub fn ft_metadata(&self) -> serde_json::Value {
         json!({
             "spec": "ft-1.0.0",
-            "name": "Q-DAY",
-            "symbol": "QDAY",
+            "name": "KEYFALL",
+            "symbol": "KEYFALL",
             "icon": ICON,
             "reference": null,
             "reference_hash": null,
