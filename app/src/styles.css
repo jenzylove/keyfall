@@ -355,6 +355,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 /* the first run guide: one big card at a time, readable on a 390 px phone */
 .guide-slot { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 7; pointer-events: none; }
 .guide-slot.low { top: 64px; }
+.guide.still { animation: none; }
 .guide.compact { gap: 4px; padding: 8px 14px 10px; cursor: pointer; }
 .guide.compact .g-text, .guide.compact .g-note:empty { display: none; }
 .guide.compact .g-title { font-size: 22px; }

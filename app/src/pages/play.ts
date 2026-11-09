@@ -700,6 +700,7 @@ export function play(root: HTMLElement) {
   let gTarget = ""; // step 5: the body the arrow points at
   let gNote = ""; let gNoteT = 0;
   let gExpanded = false; // a tap on a compact card opens it again for a moment
+  let gShownStep = 0;
   let guideRaided = false;
   let guideBossHit = false;
   const guideEl = root.querySelector<HTMLElement>("#guide")!;
@@ -814,7 +815,9 @@ export function play(root: HTMLElement) {
     const ammo = ` You have ${shots} shot${shots === 1 ? "" : "s"} this round.`;
     const text = gstep === 5 ? (variant === "boss" ? `Nobody you can rob is near. Satoshi is always there: shoot his core.${ammo}` : card.text + ammo) : card.text;
     const wait = gstep === 1 ? "Waiting for you to move" : gstep === 3 ? (waiting ? esc(busyText) : "Touch the door when you reach it") : gstep === 5 ? (variant === "boss" ? "Aim at Satoshi and press SHOOT" : "Aim at the marked body and press SHOOT") : "";
-    guideEl.innerHTML = `<section class="guide tone-${tone}${compact ? " compact" : ""}" data-step="${gstep}" aria-live="polite">
+    const still = gShownStep === gstep; // the same card redrawn: no entrance animation again
+    gShownStep = gstep;
+    guideEl.innerHTML = `<section class="guide tone-${tone}${compact ? " compact" : ""}${still ? " still" : ""}" data-step="${gstep}" aria-live="polite">
       <header class="g-head"><span class="g-step">Step ${gstep} of 7</span><button type="button" class="g-skip" id="g-skip">Skip guide</button></header>
       <h2 class="g-title">${esc(card.title)}</h2>
       <p class="g-text">${esc(text)}</p>
