@@ -196,7 +196,7 @@ export function play(root: HTMLElement) {
   });
   arena.quiet = () => stripOpen() || !!showing || guideOn();
   /** One message at a time: a line for you goes on the guide card while it teaches, else as a bubble. */
-  const tell = (text: string, ms = 3600) => { if (guideOn()) guideNote(text, ms); else arena.say("me", text, ms); };
+  const tell = (text: string, ms = 3600) => arena.say("me", text, ms, true); // refusals are bubbles at the body, never text on the guide card
   arena.setGateArt(ART_VAULT);
   arena.setBossArt(ART_SATOSHI);
   field.insertBefore(arena.el, field.firstChild);
@@ -751,12 +751,7 @@ export function play(root: HTMLElement) {
     render();
     tick(); // the NPCs may come now
   }
-  function guideNote(text: string, ms = 3600) {
-    gNote = text; gNoteT = Date.now() + ms;
-    const n = guideEl.querySelector<HTMLElement>("#g-note");
-    if (n) n.textContent = text;
-    setTimeout(() => { if (Date.now() >= gNoteT) { gNote = ""; const n2 = guideEl.querySelector<HTMLElement>("#g-note"); if (n2) n2.textContent = ""; } }, ms + 20);
-  }
+  void gNoteT; // the card keeps its note slot for the in flight line only; refusals are bubbles at the body
 
   /** Advance on the real event. Runs every 300 ms and after each render. */
   function guideTick() {
