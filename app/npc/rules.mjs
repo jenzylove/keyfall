@@ -120,7 +120,8 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     t.balance >= big(config.min_target_balance) &&
     t.balance * big(config.punch_down_band) >= att.balance;
 
-  const targets = holders.map(view);
+  const fresh = (id) => firstSeen[id] !== undefined && now - Number(firstSeen[id]) < GREET_DELAY_MS;
+  const targets = holders.map(view).filter((t) => !fresh(t.account)); // nobody raids a holder in its first minutes
   const launch = (att, t, why) => {
     const take = expectedTake(t, config);
     const stake = pickStake(take, att.balance, config);
@@ -178,9 +179,10 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
  * player was physically caught. `hunter` is the NPC that touched them and is
  * preferred when it may raid; otherwise another eligible NPC takes the raid.
  * Returns one raid move, or { skipped } with the reason in words. */
-export function decideHunt({ now, config, stats, npcs = [], holders = [], openRaids = [], target, hunter, contract }) {
+export function decideHunt({ now, config, stats, npcs = [], holders = [], openRaids = [], target, hunter, contract, firstSeen = {} }) {
   if (stats?.after_q_day) return { skipped: "Q-Day has passed. Raids are over." };
   now = Number(now);
+  if (firstSeen[target] !== undefined && now - Number(firstSeen[target]) < GREET_DELAY_MS) return { skipped: "New player, still learning the arena." };
   const home = contract || (npcs[0] ? String(npcs[0].account).split(".").slice(1).join(".") : "");
   const npcIds = new Set(npcs.map((n) => n.account));
   const npcOf = (id) => npcIds.has(id) || isNpc(id, home);

@@ -235,3 +235,12 @@ test("hunt: an NPC already attacking or under raid does not hunt", () => {
   const ok = decideHunt(base({ npcs: [q], holders: [holder("me.testnet")], target: "me.testnet", hunter: "qubit-01", openRaids: [{ id: "1", attacker: q.account, target: "x.testnet", deadline: NOW - 9000 }] }));
   assert.equal(ok.action, "raid");
 });
+
+test("no NPC raids a holder in its first minutes, by tick or by hunt", () => {
+  const seen = { "fresh.testnet": NOW - 60 * 1000 };
+  const all = [npc("shor"), npc("grover"), npc("qubit-01")];
+  const m = decide(base({ npcs: all, holders: [holder("fresh.testnet", { balance: Q(300000) })], firstSeen: seen }));
+  assert.equal(m.filter((x) => x.action === "raid").length, 0);
+  const h = decideHunt(base({ npcs: all, holders: [holder("fresh.testnet")], target: "fresh.testnet", hunter: "qubit-01", firstSeen: seen }));
+  assert.ok(h.skipped);
+});
