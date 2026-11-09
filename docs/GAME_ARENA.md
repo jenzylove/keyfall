@@ -77,3 +77,15 @@ The chief owns `chain.ts` network switching and wallet connect. The UI reads `ch
 - Play the real practice session on testnet: spawn, a Qubit hunts and catches you (real raid), you reach the gate (real vault + migrate), the raid settles at 0, you raid a rival by touch, you hit Satoshi by touch. Screenshots of every state in `C:\Users\LENOVO\qday-launch\v4shots\`, looked at one by one.
 - Record a 20 second screen capture of the chase (puppeteer screencast or frames) so the owner can see it move.
 - 50+ fps measured on the arena with 60 bodies (report the number).
+
+## v4.2 shooting
+
+Owner, Nov 9: "a kind of shooting vibe... bullets moving in front... hit that person... a shoot button, then there will be a need for using shield". Shooting replaces touch to rob. The gate stays touch to enter.
+
+- **SHOOT** is the big button under the right thumb (bottom bar: SHIELD, MARKET, DASH, SHOOT). Desktop: Space or click. A shot is a pixel projectile fired where you face or move, with aim assist: it snaps to the nearest target you can hit inside a cone of about 25 degrees and about one screen of range. Projectiles travel, miss, and stop on obstacles.
+- **Ammo is your real raids left this epoch.** The HUD and the button show "3 shots". A miss is free and local (0.6 s cooldown). A hit on an open raidable body fires the real `raid(target)`: the hit mark pulses "in flight" until the chain confirms, then the real stake and result show. A hit on a body you cannot raid deflects with the reason ("Resting 9 h", "Too small for you") and costs nothing. Red players cannot shoot: "Get gold first" (only a vault can raid; the contract rule).
+- **Shield** is a cyan ring around every shielded body, yours too, from the real shield bps. A shot or an NPC raid landing on a shielded body breaks visibly on the ring. SHIELD copy: "Shield: shots on you take less".
+- **Defend** = shoot the raider charging your vault (`defend(raidId)`). **Satoshi** = shoot his core when your hit is ready (`bossRaid()`); otherwise the shot bounces off with the reason.
+- **NPC raids on you** show as the hunter firing a projectile at you: a dramatisation of a raid the chain or `/api/hunt` already confirmed, never a shot that implies a raid that did not happen. Hunters still chase and their touch still asks the server (`/api/hunt`); your own contact no longer fires anything.
+- Guide step 5: "Shoot a target. Red target marks are players you can hit. Aim by moving, then press SHOOT. You have N shots this round." Step 6 adds the shield and shooting back at raiders.
+- Reason lines under bodies show only for the nearest one or two and the body your aim is on; the rest keep the small icon. Refusals are bubbles at the body, never text on the guide card. "Resting" is the one word for immunity everywhere.

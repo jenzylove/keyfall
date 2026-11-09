@@ -146,7 +146,8 @@ export async function hunt({ contract, seeds, network = "testnet", target, hunte
   ]);
   const names = ROSTER.map((r) => r.name).filter((n) => seeds[n]);
   const npcViews = (await Promise.all(names.map((n) => view("holder", { account_id: `${n}.${contract}` })))).filter(Boolean);
-  const move = decideHunt({ now: Number(stats.now_ms), config, stats, npcs: npcViews, holders, openRaids, target, hunter, contract });
+  const firstSeen = await firstSeenFromFeed(view).catch(() => ({}));
+  const move = decideHunt({ now: Number(stats.now_ms), config, stats, npcs: npcViews, holders, openRaids, target, hunter, contract, firstSeen });
   const out = { at: new Date().toISOString(), target, hunter: hunter || null };
   if (!move || move.skipped) return { ...out, skipped: move?.skipped || "Nothing to do." };
   const signer = signerFromSeed(hexToBytes(seeds[move.npc]));

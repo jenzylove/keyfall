@@ -575,7 +575,17 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 
 /* ------------------------------------------------------------ action bar: arcade buttons */
 
-.actions { grid-area: actions; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; padding: 10px 10px calc(12px + env(safe-area-inset-bottom)); border-top: 2px solid var(--line); background: var(--bg2); }
+.actions { grid-area: actions; display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.5fr); gap: 6px; padding: 10px 8px calc(12px + env(safe-area-inset-bottom)); border-top: 2px solid var(--line); background: var(--bg2); }
+/* SHOOT: the biggest button, under the right thumb */
+.act.shoot { background: var(--hazard); color: #fff; box-shadow: inset 0 0 0 2px var(--hazard), 0 5px 0 var(--press); touch-action: none; }
+.act.shoot .act-nm { font-size: 22px; letter-spacing: 0.14em; }
+.act.shoot .act-ic { width: 26px; height: 26px; }
+.act.shoot .act-st { color: #ffd9d4; font-weight: 600; }
+.act.shoot.ready { box-shadow: inset 0 0 0 2px #fff, 0 5px 0 var(--press), 0 0 18px var(--red-soft); }
+.act.shoot.used { animation: dash-used 0.3s ease both; }
+.act.shoot.off { opacity: 0.45; background: var(--panel); color: var(--ink); box-shadow: inset 0 0 0 2px var(--line2), 0 5px 0 var(--press); }
+.act.shoot.off .act-st { color: var(--dim); }
+@media (max-width: 430px) { .act-nm { font-size: 13px; letter-spacing: 0.06em; } .act.dash .act-nm { font-size: 15px; letter-spacing: 0.1em; } .act.shoot .act-nm { font-size: 19px; letter-spacing: 0.1em; } .act-st { font-size: 9px; } .act { padding: 6px 1px 8px; } }
 .act.dash { background: var(--ink); color: var(--bg); box-shadow: inset 0 0 0 2px var(--ink), 0 5px 0 var(--press); touch-action: none; }
 .act.dash .act-nm { font-size: 20px; letter-spacing: 0.14em; }
 .act.dash .act-ic { width: 26px; height: 26px; }
@@ -890,5 +900,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
   .crt { display: none; }
 }
 @media (max-width: 430px) { .strip.tone-alarm .strip-text { display: none; } .strip.tone-alarm { grid-template-columns: auto minmax(0, 1fr) auto; } }
-.field > .events .ev.title { background: var(--gold); color: var(--on-safe); box-shadow: 0 3px 0 var(--gold-dark), 0 3px 0 2px var(--press); font-weight: 600; }
-.field > .events .ev.title b { font: 700 11px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; }
+/* title earned: a compact gold pill that reads */
+.field > .events .ev.title { justify-self: start; width: max-content; max-width: 100%; min-height: 32px; max-height: none; padding: 6px 12px 7px 10px; background: var(--gold); color: #0b0b0b; box-shadow: 0 3px 0 var(--gold-dark), 0 3px 0 2px var(--press); font-weight: 600; line-height: 1.3; }
+.field > .events .ev.title .ev-t { white-space: normal; overflow: visible; }
+.field > .events .ev.title b { font: 700 11px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: #0b0b0b; }
