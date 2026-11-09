@@ -385,6 +385,7 @@ export function play(root: HTMLElement) {
     if (Number(h.immune_until) > now) return { state: "rest", why: `Safe for ${span(Number(h.immune_until) - now)} after a raid.` };
     if (BigInt(h.balance) < PB(c(), "min_target_balance")) return { state: "small", why: `Too small to raid: bags under ${full(PB(c(), "min_target_balance"))} are left alone.` };
     if (!inVault()) return { state: "idle", why: "" };
+    if (w.vault?.under_raid) return { state: "idle", why: "You are under raid. Intercept the raider first." }; // the contract refuses a raid from a vault under raid
     if (BigInt(h.balance) * BigInt(P(c(), "punch_down_band")) < w.vaultBal) return { state: "down", why: "Too small for your bag: no punching down." };
     return { state: w.vault && w.vault.raids_left > 0 ? "open" : "idle", why: "" };
   }
