@@ -617,6 +617,7 @@ export class Arena {
       this.drawBody(c, s, this.info.get(id)!);
     }
     if (meDrawn && !drewMe) this.drawMe(c, now);
+    this.flushLabels(c);
     this.drawParticles(c);
     c.restore();
 
@@ -673,8 +674,10 @@ export class Arena {
     const im = this.imgs.get(id);
     const s = Math.round(r * 2);
     c.save();
-    c.translate(Math.round(x), Math.round(y + bob));
-    c.scale(face * (1 + wobble), 1 - wobble);
+    // facing is a lean, never a mirror: portraits carry digits
+    c.translate(Math.round(x) + face * 2, Math.round(y + bob));
+    c.rotate(face * 0.05);
+    c.scale(1 + wobble, 1 - wobble);
     if (im && im.complete && im.naturalWidth) c.drawImage(im, -Math.round(s / 2), -Math.round(s / 2), s, s);
     else { c.fillStyle = "#191815"; c.fillRect(-Math.round(s / 2), -Math.round(s / 2), s, s); }
     c.restore();
@@ -752,18 +755,38 @@ export class Arena {
     c.font = this.font(12);
     c.fillStyle = hot ? RED : this.colors.ink;
     c.globalAlpha = dimmed ? 0.6 : 1;
-    this.label(c, b.name, x, y + r + 7);
+    this.label(c, b.name, x, y + r + 7, hot ? 3 : 2);
     c.font = this.font(10.5); c.fillStyle = this.colors.dim;
-    this.label(c, b.bag, x, y + r + 20);
+    this.label(c, b.bag, x, y + r + 20, 1);
     c.restore();
   }
-  private label(c: CanvasRenderingContext2D, text: string, x: number, y: number) {
-    const w = c.measureText(text).width;
-    const fill = c.fillStyle;
-    c.fillStyle = this.colors.bg; c.globalAlpha *= 0.75;
-    c.fillRect(Math.round(x - w / 2 - 3), Math.round(y - 1), Math.round(w + 6), 13);
-    c.globalAlpha /= 0.75; c.fillStyle = fill;
-    c.fillText(text, Math.round(x), Math.round(y));
+  /** Labels are queued and decluttered: a label that would sit in the top UI
+   * band is dropped, one that overlaps a higher priority label is nudged down
+   * once and dropped if it still overlaps. Drawn at the end of the world pass. */
+  private labels: { text: string; x: number; y: number; w: number; h: number; font: string; color: string; alpha: number; pri: number; base: "top" | "bottom" | "middle" }[] = [];
+  private label(c: CanvasRenderingContext2D, text: string, x: number, y: number, pri = 1) {
+    const w = c.measureText(text).width + 6;
+    const h = parseFloat(c.font) * 1.15 + 2;
+    this.labels.push({ text, x, y, w, h, font: c.font, color: String(c.fillStyle), alpha: c.globalAlpha, pri, base: c.textBaseline as any });
+  }
+  private flushLabels(c: CanvasRenderingContext2D) {
+    const band = this.cam.y + 112; // under the HUD strip and pills
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const list = [...this.labels].sort((a, b) => b.pri - a.pri);
+    this.labels = [];
+    const hit = (a: { x: number; y: number; w: number; h: number }) => placed.some((p) => Math.abs(p.x - a.x) * 2 < p.w + a.w && Math.abs(p.y - a.y) * 2 < p.h + a.h);
+    for (const l of list) {
+      let top = l.base === "bottom" ? l.y - l.h : l.base === "middle" ? l.y - l.h / 2 : l.y;
+      if (top < band) continue;
+      let box = { x: l.x, y: top + l.h / 2, w: l.w, h: l.h };
+      if (hit(box)) { top += l.h + 1; box = { ...box, y: top + l.h / 2 }; if (hit(box) || l.pri < 2) continue; }
+      placed.push(box);
+      c.save();
+      c.font = l.font; c.textAlign = "center"; c.textBaseline = "top"; c.globalAlpha = l.alpha * 0.75;
+      c.fillStyle = this.colors.bg; c.fillRect(Math.round(l.x - l.w / 2), Math.round(top), Math.round(l.w), Math.round(l.h));
+      c.globalAlpha = l.alpha; c.fillStyle = l.color; c.fillText(l.text, Math.round(l.x), Math.round(top + 1));
+      c.restore();
+    }
   }
   private moon(c: CanvasRenderingContext2D, x: number, y: number) {
     c.beginPath(); c.arc(x, y, 5, 0, Math.PI * 2); c.fill();
@@ -817,16 +840,16 @@ export class Arena {
     }
     c.textAlign = "center"; c.textBaseline = "top";
     c.font = this.font(12); c.fillStyle = color;
-    this.label(c, "YOU", m.x, m.y + m.r + 8);
+    this.label(c, "YOU", m.x, m.y + m.r + 8, 6);
     c.font = this.font(10.5); c.fillStyle = this.colors.ink;
-    this.label(c, info.bag, m.x, m.y + m.r + 21);
+    this.label(c, info.bag, m.x, m.y + m.r + 21, 5);
     if (info.inFlight) {
       const q = Math.floor(now / 110) % 4, sx = m.x - 8, sy = m.y - m.r - 34;
       c.fillStyle = this.colors.ink;
       [[0, 0], [8, 0], [8, 8], [0, 8]].forEach(([dx, dy], i) => { c.globalAlpha = i === q ? 1 : 0.3; c.fillRect(sx + dx, sy + dy, 6, 6); });
       c.globalAlpha = 1;
       c.font = this.mono(10.5); c.fillStyle = this.colors.ink; c.textBaseline = "bottom";
-      this.label(c, info.inFlight, m.x, m.y - m.r - 42);
+      this.label(c, info.inFlight, m.x, m.y - m.r - 42, 7);
     }
   }
 
@@ -859,8 +882,8 @@ export class Arena {
     for (let i = 0; i < 5; i++) { const ph = (this.t * 0.4 + i / 5) % 1; c.globalAlpha = (1 - ph) * 0.9; c.fillRect(Math.round(x - 60 + rnd(31, i) * 120), Math.round(y + 50 - ph * 110), 2, 2); }
     c.globalAlpha = 1;
     c.textAlign = "center"; c.textBaseline = "top"; c.font = this.font(13); c.fillStyle = GOLD;
-    this.label(c, open ? "VAULT GATE" : "YOUR VAULT", x, y + 54);
-    if (open) { c.font = this.mono(10); c.fillStyle = this.colors.ink; this.label(c, "run here to get safe", x, y + 68); }
+    this.label(c, open ? "VAULT GATE" : "YOUR VAULT", x, y + 54, 4);
+    if (open) { c.font = this.mono(10); c.fillStyle = this.colors.ink; this.label(c, "run here to get safe", x, y + 68, 2); }
     c.restore();
   }
 
@@ -888,9 +911,9 @@ export class Arena {
     c.fillStyle = GOLD; c.fillRect(x - bw / 2, y - S / 2 - 20, Math.round(bw * hp), bh);
     c.fillStyle = GOLD3; for (let i = 1; i < 10; i++) c.fillRect(x - bw / 2 + Math.round((bw * i) / 10), y - S / 2 - 20, 1, bh);
     c.textAlign = "center"; c.textBaseline = "bottom"; c.font = this.font(15); c.fillStyle = GOLD;
-    this.label(c, "SATOSHI", x, y - S / 2 - 26);
+    this.label(c, "SATOSHI", x, y - S / 2 - 26, 4);
     c.textBaseline = "top"; c.font = this.mono(10); c.fillStyle = this.places.boss.ready ? GOLD : this.colors.dim;
-    this.label(c, this.places.boss.ready ? "touch the core to hit" : "dodge the pulse", x, y + S / 2 - 8);
+    this.label(c, this.places.boss.ready ? "touch the core to hit" : "dodge the pulse", x, y + S / 2 + 8, 2);
     c.restore();
   }
 
@@ -943,9 +966,10 @@ export class Arena {
     for (const id of this.order) { const b = this.info.get(id)!, s = this.bodies.get(id)!; if (b && s && (b.hunting || b.raidingMe)) targets.push({ x: s.x, y: s.y, color: RED, label: b.name.toUpperCase(), pulse: true }); }
     if (this.places.boss.ready) targets.push({ x: this.boss.x, y: this.boss.y, color: GOLD, label: "SATOSHI", pulse: false });
     const cx = this.w / 2, cy = this.h / 2, inset = 26, top = 118, bottom = 24;
+    const placed: { x: number; y: number; w: number }[] = [];
     for (const t of targets) {
       const p = this.toScreen(t.x, t.y);
-      if (p.x > 10 && p.x < this.w - 10 && p.y > 10 && p.y < this.h - 10) continue;
+      if (p.x > -20 && p.x < this.w + 20 && p.y > -20 && p.y < this.h + 20) continue; // on screen: no pointer
       const dx = p.x - cx, dy = p.y - cy;
       const sx = (this.w / 2 - inset) / Math.abs(dx || 1e-6), sy = Math.min((cy - top) / Math.abs(Math.min(dy, -1e-6)), (this.h - bottom - cy) / Math.abs(Math.max(dy, 1e-6)));
       const k = Math.min(sx, dy < 0 ? (cy - top) / Math.abs(dy || 1e-6) : (this.h - bottom - cy) / Math.abs(dy || 1e-6));
@@ -960,9 +984,13 @@ export class Arena {
       c.restore();
       c.save();
       c.font = this.font(10); c.textAlign = "center"; c.textBaseline = "middle"; c.fillStyle = t.color;
-      const lx = clamp(ex - Math.cos(ang) * 26, 30, this.w - 30), ly = clamp(ey - Math.sin(ang) * 26, top - 6, this.h - 14);
+      const lx = clamp(ex - Math.cos(ang) * 26, 30, this.w - 30);
+      let ly = clamp(ey - Math.sin(ang) * 26, top - 6, this.h - 14);
       const txt = `${t.label} ${Math.round(dist / 10)}m`;
       const w = c.measureText(txt).width + 8;
+      // stack pointer labels instead of overlapping them
+      for (let i = 0; i < 4 && placed.some((q) => Math.abs(q.x - lx) * 2 < q.w + w && Math.abs(q.y - ly) < 16); i++) ly += 16;
+      placed.push({ x: lx, y: ly, w });
       c.fillStyle = this.colors.bg; c.globalAlpha = 0.8; c.fillRect(Math.round(lx - w / 2), Math.round(ly - 7), Math.round(w), 14); c.globalAlpha = 1;
       c.fillStyle = t.color; c.fillText(txt, Math.round(lx), Math.round(ly) + 1);
       c.restore();

@@ -15,6 +15,28 @@ import * as sfx from "../ui/sound";
 import * as fx from "../ui/fx";
 import { line } from "../ui/lines";
 import { ART_DOOR, ART_QC, ART_SATOSHI, ART_VAULT, MARK } from "../ui/pixels";
+import qrcode from "qrcode-generator";
+
+const MAIN = chain.IS_MAINNET;
+const VAULT_RESERVE = 0.35; // NEAR kept back for the vault account and gas
+const SOURCES: { id: Parameters<typeof chain.fundingQuote>[0]; label: string; chain: string }[] = [
+  { id: "usdc-sol", label: "USDC", chain: "Solana" },
+  { id: "usdt-sol", label: "USDT", chain: "Solana" },
+  { id: "sol", label: "SOL", chain: "Solana" },
+  { id: "usdc-base", label: "USDC", chain: "Base" },
+  { id: "eth-base", label: "ETH", chain: "Base" },
+];
+/** A crisp QR as inline SVG. */
+function qrSvg(text: string): string {
+  const q = qrcode(0, "M");
+  q.addData(text);
+  q.make();
+  const n = q.getModuleCount();
+  let d = "";
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (q.isDark(y, x)) d += `M${x} ${y}h1v1h-1z`;
+  return `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" shape-rendering="crispEdges" role="img" aria-label="Deposit address as a QR code"><rect x="-2" y="-2" width="${n + 4}" height="${n + 4}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+const NEAR_NAME = /^([a-z0-9]+([_-][a-z0-9]+)*\.)+near$|^[0-9a-f]{64}$/;
 
 const bps = (x: bigint, b: number | bigint) => (x * BigInt(b)) / 10000n;
 const isqrt = (n: bigint) => { if (n < 2n) return n; let x = BigInt(Math.floor(Math.sqrt(Number(n)))); while (x * x > n) x--; while ((x + 1n) * (x + 1n) <= n) x++; return x; };
@@ -108,7 +130,7 @@ export function play(root: HTMLElement) {
   root.innerHTML = `
     <div class="game">
       <header class="hud">
-        <a class="hud-net ${NET_LABEL.toLowerCase()}" href="/" data-link aria-label="${GAME} title, ${NET_LABEL} arena">${MARK}<span>${NET_LABEL}</span></a>
+        <button type="button" class="hud-net ${NET_LABEL.toLowerCase()}" id="h-net" aria-label="${NET_LABEL} arena. Switch arena">${MARK}<span>${NET_LABEL}</span></button>
         <div class="hud-cell"><span class="hud-k">Q-Day in</span><span class="hud-v" id="h-qday">··</span></div>
         <div class="hud-cell bag"><span class="hud-k">Your bag</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span></div>
         <div class="hud-cell rank"><span class="hud-k">Rank</span><span class="hud-v" id="h-rank">··</span></div>
@@ -435,16 +457,22 @@ export function play(root: HTMLElement) {
       case "load":
         html = strip("ink", `<span class="m-count">Reading the chain</span>`, `Loading the arena<span class="ell"></span>`);
         break;
-      case "grab":
+      case "grab": {
         html = "";
         startEl.hidden = false;
+        const funded = MAIN && (w.walletNear ?? 0n) >= BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1));
+        const nearTxt = MAIN && w.walletNear !== null && w.walletNear > 0n ? `Your wallet holds <b>${chain.fmtNear(w.walletNear, 2)} NEAR</b>. ` : "";
         startEl.innerHTML = `<div class="start-card">
-          <p class="kick gold">${NET_LABEL} arena · ${(chain.NETWORK as string) === "mainnet" ? "real coins" : "free, no wallet"}</p>
+          <p class="kick gold">${NET_LABEL} arena · ${MAIN ? "real NEAR, real $KEYFALL" : "free, no wallet"}</p>
           <h2 class="start-title">Grab a bag</h2>
-          <p class="s-text">You need coins to enter the arena. ${m.buyOnly ? "Buy your first bag." : "We make you a free practice wallet and buy your first bag."} Then run it to the vault gate before a hunter catches you.</p>
-          <button class="btn wide big" id="m-go">${busy === "grab" ? esc(busyText) : m.buyOnly ? "Buy my bag" : "Grab my bag"}</button>
+          <p class="s-text">${MAIN
+            ? `${nearTxt}${funded ? "Choose how much NEAR goes into your bag." : "Top up this device's wallet with NEAR, from another chain or from any NEAR wallet, then buy your first bag."} Then run it to the vault gate before a hunter catches you.`
+            : `You need coins to enter the arena. ${m.buyOnly ? "Buy your first bag." : "We make you a free practice wallet and buy your first bag."} Then run it to the vault gate before a hunter catches you.`}</p>
+          <button class="btn wide big" id="m-go">${busy === "grab" ? esc(busyText) : MAIN ? (funded ? "Buy my bag" : "Top up") : m.buyOnly ? "Buy my bag" : "Grab my bag"}</button>
+          ${MAIN ? `<button type="button" class="btn ghost wide small" id="m-practice">Practice for free instead</button>` : chain.MAINNET_READY ? `<button type="button" class="btn ghost wide small" id="m-real">Play for real on mainnet</button>` : ""}
           <p class="m-msg" id="m-msg" role="status"></p></div>`;
         break;
+      }
       case "exposed":
         html = strip("hot", `${pips("exposed")}<span class="m-count">Exposed</span>`,
           `Your coins sit behind an old key and hunters are coming. <b>Run to the gold gate</b> (top right on the map) and your bag is safe. That is the smart play.`);
@@ -452,16 +480,16 @@ export function play(root: HTMLElement) {
       case "build":
       case "movein":
         if (raid)
-          html = strip("alarm", `${pips(m.k)}<span class="m-count">Caught</span><span class="m-clock" data-until="${raid.deadline}">${clock(raid.deadline - chainNow())}</span>`,
-            `<b>${N(raid.attacker)}</b> has you. Reach the gate before the clock ends and the raid takes nothing.`, backup);
+          html = strip("alarm", `<span class="m-count">${N(raid.attacker)} has you</span><span class="m-clock" data-until="${raid.deadline}">${clock(raid.deadline - chainNow())}</span>`,
+            `Reach the gate before the clock ends.`, backup);
         else
           html = strip("gold", `${pips(m.k)}<span class="m-count">${m.k === "movein" ? "Move in" : "Vault"}</span>`,
             m.k === "movein" ? `Your vault is ready. <b>Touch the gate</b> to move your coins in.` : `Touch the gold gate to build your vault and move in.`);
         break;
       case "defend": {
         const r = m.raid!;
-        html = strip("alarm", `<span class="m-count">Incoming</span><span class="m-clock" data-until="${r.deadline}">${clock(r.deadline - chainNow())}</span>`,
-          `<b>${N(r.attacker)}</b> is charging at your vault. <b>Intercept it</b> before the clock ends and its stake of ${full(r.stake)} is yours.`, backup);
+        html = strip("alarm", `<span class="m-count">${N(r.attacker)} charges you</span><span class="m-clock" data-until="${r.deadline}">${clock(r.deadline - chainNow())}</span>`,
+          `<b>Intercept it</b> and its stake of ${full(r.stake)} is yours.`, backup);
         break;
       }
       case "safe": {
@@ -479,7 +507,8 @@ export function play(root: HTMLElement) {
           pendingRaid ? `Your beam is in flight to ${N(pendingRaid)}. Waiting for the chain to confirm.` : `Touch a glowing rival to raid it. Exposed bags run; chase them. Vaults may defend.`);
         break;
       case "done":
-        html = strip("gold", `<span class="m-count">Free play</span>`, `Touch Satoshi's core when it glows, shield up before others raid you, and climb the board.`, `<button type="button" class="btn small" id="m-go">Got it</button>`);
+        html = strip("gold", `<span class="m-count">Free play</span>`, !MAIN && chain.MAINNET_READY ? `You know the arena. Play for real on mainnet with your own NEAR, or keep practising.` : `Touch Satoshi's core when it glows, shield up before others raid you, and climb the board.`,
+          `${!MAIN && chain.MAINNET_READY ? `<button type="button" class="btn small hot" id="m-real">Play for real</button>` : ""}<button type="button" class="btn small ghost" id="m-go">Got it</button>`);
         break;
       case "over": {
         const top = vaultsRanked().slice(0, 3);
@@ -497,15 +526,27 @@ export function play(root: HTMLElement) {
     const go = root.querySelector<HTMLButtonElement>("#m-go");
     const msg = root.querySelector<HTMLElement>("#m-msg");
     if (busy && go) { go.disabled = true; go.classList.add("busy"); }
-    if (m.k === "grab" && go) go.onclick = () => flow("grab", msg, async (say) => {
+    if (m.k === "grab" && go) go.onclick = () => {
       sfx.unlock();
-      if (!sess().wallet) { say("Making your wallet…"); await chain.join(); }
-      say("Buying your bag…");
-      const r = await chain.buy(1);
-      keepReceipt("buy", r.hash);
-      tick();
-      return "Your bag landed. Run to the gate.";
-    });
+      if (MAIN) {
+        if (!sess().wallet) chain.join().catch(() => {});
+        const funded = (w.walletNear ?? 0n) >= BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1));
+        if (funded) openBuy(); else openTopUp();
+        return;
+      }
+      flow("grab", msg, async (say) => {
+        if (!sess().wallet) { say("Making your wallet…"); await chain.join(); }
+        say("Buying your bag…");
+        const r = await chain.buy(1);
+        keepReceipt("buy", r.hash);
+        tick();
+        return "Your bag landed. Run to the gate.";
+      });
+    };
+    const real = root.querySelector<HTMLButtonElement>("#m-real");
+    if (real) real.onclick = () => chain.switchNetwork("mainnet");
+    const prac = root.querySelector<HTMLButtonElement>("#m-practice");
+    if (prac) prac.onclick = () => chain.switchNetwork("testnet");
     const bk = root.querySelector<HTMLButtonElement>("#m-backup");
     if (bk && (m.k === "build" || m.k === "movein" || m.k === "defend") && m.raid) bk.onclick = () => shareRaid(m.raid!);
     if (m.k === "done" && go) go.onclick = () => { setProg({ stage: "free" }); missionKey = ""; render(); };
@@ -835,6 +876,168 @@ export function play(root: HTMLElement) {
     if (k === "market") openMarket();
   });
   root.querySelector("#h-menu")!.addEventListener("click", () => openSettings());
+  root.querySelector("#h-net")!.addEventListener("click", () => openNetwork());
+
+  // ---------------------------------------------------------------- arenas, top up, buy, cash out (mainnet)
+
+  function openNetwork() {
+    show("net", "", "Choose your arena", `
+      <h2 class="s-title">Two arenas, one game</h2>
+      <div class="net-pick">
+        <button type="button" class="net-opt ${MAIN ? "on" : ""}" data-net="mainnet" ${chain.MAINNET_READY ? "" : "disabled"}><b>Mainnet</b><span>Real NEAR, real $KEYFALL. Your own wallet on this device.</span>${chain.MAINNET_READY ? "" : `<small>Opening soon</small>`}</button>
+        <button type="button" class="net-opt ${MAIN ? "" : "on"}" data-net="testnet"><b>Practice</b><span>Free. A practice wallet is made for you. Coins have no value.</span></button>
+      </div>
+      <p class="m-hint">Each arena keeps its own wallet and vault on this device.</p>`);
+    for (const b of sheet!.body.querySelectorAll<HTMLButtonElement>(".net-opt")) b.onclick = () => { const n = b.dataset.net as "mainnet" | "testnet"; if ((n === "mainnet") !== MAIN) chain.switchNetwork(n); else sheet?.close(); };
+  }
+
+  let fundSource = SOURCES[0].id;
+  let fundNear = 1;
+  let fundPoll = 0;
+  function openTopUp() {
+    clearInterval(fundPoll);
+    const wallet = sess().wallet?.accountId || chain.mainnetWallet().accountId;
+    show("topup", "", "Top up", `
+      <p class="kick gold">Mainnet</p>
+      <h2 class="s-title">Top up your wallet</h2>
+      <p class="s-text">Your bag, your vault and every move run on NEAR. 1 NEAR covers a bag, the vault and plenty of moves.</p>
+      <div class="pick" role="group" aria-label="How much NEAR">${[1, 2, 5].map((n) => `<button type="button" data-near="${n}" aria-pressed="${n === fundNear}">${n} NEAR</button>`).join("")}</div>
+      <label class="m-field"><span>Pay with</span><select id="tu-src">${SOURCES.map((s) => `<option value="${s.id}" ${s.id === fundSource ? "selected" : ""}>${s.label} on ${s.chain}</option>`).join("")}</select></label>
+      <button class="btn wide" id="tu-go">Get a deposit address</button>
+      <p class="s-msg" id="tu-msg" role="status"></p>
+      <div id="tu-quote" hidden></div>
+      <div class="set-block">
+        <div class="set-h"><b>Or send NEAR directly</b></div>
+        <p class="s-text">From any NEAR wallet or exchange, send NEAR to this device's wallet:</p>
+        <div class="addr"><code id="tu-wallet">${esc(wallet)}</code><button type="button" class="btn ghost small" data-copy="${esc(wallet)}">Copy</button></div>
+        <p class="m-hint" id="tu-bal">Waiting for NEAR to arrive…</p>
+      </div>`, "gold");
+    const B = sheet!.body;
+    for (const b of B.querySelectorAll<HTMLButtonElement>("[data-near]")) b.onclick = () => { fundNear = Number(b.dataset.near); for (const x of B.querySelectorAll<HTMLButtonElement>("[data-near]")) x.setAttribute("aria-pressed", String(x === b)); };
+    B.querySelector<HTMLSelectElement>("#tu-src")!.onchange = (e) => { fundSource = (e.target as HTMLSelectElement).value as typeof fundSource; };
+    const out = B.querySelector<HTMLElement>("#tu-msg")!;
+    const go = B.querySelector<HTMLButtonElement>("#tu-go")!;
+    go.onclick = async () => {
+      go.disabled = true; go.classList.add("busy"); go.textContent = "Getting a quote";
+      out.className = "s-msg"; out.textContent = "";
+      try {
+        const q = await chain.fundingQuote(fundSource, fundNear);
+        const src = SOURCES.find((s) => s.id === fundSource)!;
+        const until = new Date(q.deadline);
+        B.querySelector<HTMLElement>("#tu-quote")!.hidden = false;
+        B.querySelector<HTMLElement>("#tu-quote")!.innerHTML = `
+          <div class="quote">
+            <p class="s-text">Send exactly <b class="yel">${esc(q.amountInFormatted)} ${esc(src.label)}</b> on <b>${esc(src.chain)}</b> to this address. ${chain.fmtNear(q.amountOut, 2)} NEAR lands in your wallet, usually within a few minutes.</p>
+            <div class="qr">${qrSvg(q.depositAddress)}</div>
+            <div class="addr"><code>${esc(q.depositAddress)}</code><button type="button" class="btn ghost small" data-copy="${esc(q.depositAddress)}">Copy</button></div>
+            <p class="m-hint">Good until ${until.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}. Send the exact amount in one transfer.</p>
+            <p class="s-calc" id="tu-status"><i class="dot"></i> Waiting for your deposit…</p>
+          </div>`;
+        wireCopy(B);
+        let last = "";
+        clearInterval(fundPoll);
+        fundPoll = window.setInterval(async () => {
+          if (!B.isConnected) { clearInterval(fundPoll); return; }
+          const st = await chain.fundingStatus(q.depositAddress);
+          const el = B.querySelector<HTMLElement>("#tu-status");
+          if (!el) return;
+          const words: Record<string, string> = { PENDING_DEPOSIT: "Waiting for your deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", PROCESSING: "Swapping to NEAR…", SUCCESS: "NEAR delivered. Opening your wallet…", REFUNDED: "The swap was refunded. Try another amount.", FAILED: "The swap failed. Nothing was lost; try again.", INCOMPLETE_DEPOSIT: "The deposit was short. Send the rest to the same address." };
+          if (st !== last) { last = st; el.innerHTML = `<i class="dot${st === "SUCCESS" ? " safe" : ""}"></i> ${esc(words[st] || "Waiting for your deposit…")}`; }
+        }, 5000);
+      } catch (e) {
+        const msg = String((e as any)?.message || "");
+        out.className = "s-msg bad";
+        out.textContent = /404|405|failed \(/.test(msg) ? "Paying from another chain is not switched on yet. Send NEAR to the wallet below instead." : plainError(e);
+      } finally {
+        go.disabled = false; go.classList.remove("busy"); go.textContent = "Get a deposit address";
+      }
+    };
+    wireCopy(B);
+    // the wallet balance: the moment NEAR arrives we move on to the bag
+    const balPoll = window.setInterval(async () => {
+      if (!B.isConnected) { clearInterval(balPoll); clearInterval(fundPoll); return; }
+      const bal = await chain.nearBalance(wallet);
+      const el = B.querySelector<HTMLElement>("#tu-bal");
+      if (el) el.textContent = bal > 0n ? `Wallet holds ${chain.fmtNear(bal, 2)} NEAR.` : "Waiting for NEAR to arrive…";
+      if (bal >= BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1))) {
+        clearInterval(balPoll); clearInterval(fundPoll);
+        sfx.play("coins");
+        toast({ tone: "gold", title: `${chain.fmtNear(bal, 2)} NEAR arrived in your wallet.` });
+        await refresh();
+        openBuy();
+      }
+    }, 5000);
+  }
+  function wireCopy(B: HTMLElement) {
+    for (const b of B.querySelectorAll<HTMLButtonElement>("[data-copy]")) b.onclick = async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copy!); b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy"; }, 1600); }
+      catch { b.textContent = "Select it"; }
+    };
+  }
+
+  /** Mainnet: how much of the wallet's NEAR goes into the first bag. */
+  function openBuy() {
+    const have = Number(chain.fmtNear(w.walletNear ?? 0n, 3).replace(/,/g, ""));
+    const max = Math.max(0.1, Math.floor((have - VAULT_RESERVE) * 100) / 100);
+    show("buy", "", "Buy your bag", `
+      <p class="kick gold">Mainnet</p>
+      <h2 class="s-title">Buy your bag</h2>
+      <p class="s-text">Your wallet holds <b>${have.toFixed(2)} NEAR</b>. ${VAULT_RESERVE} NEAR stays back for your vault and gas.</p>
+      <label class="s-range"><span>NEAR into the bag</span><input type="range" id="by-r" min="0.1" max="${max}" step="0.05" value="${Math.min(max, 0.5)}"/></label>
+      <p class="s-calc" id="by-calc"></p>
+      <button class="btn wide" id="by-go">Buy</button>
+      <p class="s-msg" id="by-msg" role="status"></p>`, "gold");
+    const B = sheet!.body;
+    const r = B.querySelector<HTMLInputElement>("#by-r")!;
+    let t = 0;
+    const update = async () => {
+      const n = Number(r.value);
+      const calc = B.querySelector<HTMLElement>("#by-calc")!;
+      calc.innerHTML = `Spend <b>${n.toFixed(2)} NEAR</b>, keep ${(have - n).toFixed(2)} NEAR.`;
+      const q = await chain.quoteBuy(chain.nearToYocto(n)).catch(() => null);
+      if (B.isConnected && Number(r.value) === n) calc.innerHTML = `Spend <b>${n.toFixed(2)} NEAR</b> for about <b class="yel">${q ? full(q) : "…"}</b> $KEYFALL. Keep ${(have - n).toFixed(2)} NEAR for the vault and moves.`;
+      B.querySelector<HTMLButtonElement>("#by-go")!.textContent = `Buy for ${n.toFixed(2)} NEAR`;
+    };
+    r.addEventListener("input", () => { clearTimeout(t); t = window.setTimeout(update, 200); });
+    move(B.querySelector("#by-go")!, B.querySelector("#by-msg")!, async () => { const res = await chain.buy(Number(r.value)); tick(); return res; }, () => "Your bag landed. Run to the gate.", "buy", () => { sfx.play("coins"); setTimeout(() => sheet?.close(), 700); });
+    update();
+  }
+
+  /** Mainnet: send NEAR from the vault to any NEAR account. */
+  function openCashOut() {
+    const have = w.vaultNear ?? 0n;
+    const spendableY = have - BigInt(chain.nearToYocto(0.05));
+    show("cashout", "", "Cash out", `
+      <p class="kick gold">Mainnet</p>
+      <h2 class="s-title">Cash out</h2>
+      <p class="s-text">Your vault holds <b>${chain.fmtNear(have, 3)} NEAR</b>. Sell $KEYFALL for NEAR in the market first if you want more, then send NEAR to a NEAR account you control.</p>
+      <label class="m-field"><span>Send to (NEAR account)</span><input id="co-to" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.near"/></label>
+      <p class="m-hint" id="co-hint">Type the account that should receive the NEAR.</p>
+      <label class="s-range"><span>NEAR to send</span><input type="range" id="co-r" min="0" max="${Math.max(0, Number(chain.fmtNear(spendableY, 3).replace(/,/g, "")))}" step="0.01" value="0"/></label>
+      <p class="s-calc" id="co-calc">Slide to choose how much to send.</p>
+      <button class="btn wide hot" id="co-go" disabled>Send</button>
+      <p class="s-msg" id="co-msg" role="status"></p>`, "gold");
+    const B = sheet!.body;
+    const to = B.querySelector<HTMLInputElement>("#co-to")!, hint = B.querySelector<HTMLElement>("#co-hint")!, r = B.querySelector<HTMLInputElement>("#co-r")!, go = B.querySelector<HTMLButtonElement>("#co-go")!;
+    let okTo = false, n = 0;
+    const check = async () => {
+      const v = to.value.trim().toLowerCase();
+      okTo = false;
+      if (!v) { hint.className = "m-hint"; hint.textContent = "Type the account that should receive the NEAR."; return gate(); }
+      if (!NEAR_NAME.test(v)) { hint.className = "m-hint bad"; hint.textContent = "That is not a NEAR account name (like yourname.near)."; return gate(); }
+      const id = ++n;
+      hint.className = "m-hint"; hint.textContent = "Checking that account exists…";
+      const bal = await chain.nearBalance(v);
+      if (id !== n) return;
+      if (bal > 0n) { okTo = true; hint.className = "m-hint"; hint.textContent = `Found. ${v} holds ${chain.fmtNear(bal, 2)} NEAR.`; }
+      else { hint.className = "m-hint bad"; hint.textContent = "That account does not exist on NEAR. Sending there would lose the NEAR, so it is blocked."; }
+      gate();
+    };
+    const gate = () => { const amt = Number(r.value); B.querySelector<HTMLElement>("#co-calc")!.textContent = amt > 0 ? `Send ${amt.toFixed(2)} NEAR. About ${chain.fmtNear(spendableY - BigInt(chain.nearToYocto(amt)), 2)} NEAR stays for moves.` : "Slide to choose how much to send."; if (!go.classList.contains("busy")) go.disabled = !(okTo && amt > 0); };
+    to.addEventListener("input", () => { clearTimeout(n); check(); });
+    r.addEventListener("input", gate);
+    move(go, B.querySelector("#co-msg")!, () => chain.cashOut(to.value.trim().toLowerCase(), chain.nearToYocto(Number(r.value))), () => `Sent ${Number(r.value).toFixed(2)} NEAR to ${to.value.trim()}.`, "cashout", () => { sfx.play("coins"); });
+  }
 
   // ---------------------------------------------------------------- arena
 
@@ -943,7 +1146,7 @@ export function play(root: HTMLElement) {
       const amt = full(f.amount);
       const won = BigInt(f.amount) > 0n;
       if (f.kind === "harvest") toast({ tone: "ink", title: `Harvest: exposed bags bled ${amt}. Half went to vaults.` });
-      else if (f.kind === "raid" && me.includes(f.target || "")) { arena.say(f.actor, line(f.actor, "raids")); toast({ tone: "hot", who: f.actor, title: `${N(f.actor)} is raiding you. ${inVault() ? "Intercept it to defend." : "Run for the gate."}` }); }
+      else if (f.kind === "raid" && me.includes(f.target || "")) arena.say(f.actor, line(f.actor, "raids")); // the strip carries the raid; no toast on top
       else if (f.kind === "resolve" && me.includes(f.actor)) {
         toast({ tone: "gold", who: f.target || undefined, title: won ? `Your raid on ${N(f.target)} landed: took ${amt}` : `Your raid on ${N(f.target)} took nothing` });
         if (won) {
@@ -1360,6 +1563,9 @@ export function play(root: HTMLElement) {
       <div class="set-list">
         <button type="button" class="set-item" id="st-act"><span>Activity</span><span>›</span></button>
         <button type="button" class="set-item" id="st-boss"><span>Satoshi boss fight</span><span>›</span></button>
+        <button type="button" class="set-item" id="st-net"><span>Switch arena</span><span>${MAIN ? "Mainnet" : "Practice"}</span></button>
+        ${MAIN && s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out NEAR</span><span>›</span></button>` : ""}
+        ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>` : ""}
         <button type="button" class="set-item" id="st-theme"><span>Theme</span><span>${theme === "dark" ? "Dark" : "Light"}</span></button>
         <details class="set-item det"><summary><span>Restore a vault from a code</span><span>›</span></summary>
           <div class="restore"><label class="m-field"><span>Vault name</span><input id="rs-n" autocomplete="off" autocapitalize="off" spellcheck="false"/></label>
@@ -1373,6 +1579,11 @@ export function play(root: HTMLElement) {
     const out = B.querySelector<HTMLElement>("#st-msg")!;
     B.querySelector<HTMLButtonElement>("#st-act")!.onclick = () => openActivity();
     B.querySelector<HTMLButtonElement>("#st-boss")!.onclick = () => openSatoshi();
+    B.querySelector<HTMLButtonElement>("#st-net")!.onclick = () => openNetwork();
+    const cash = B.querySelector<HTMLButtonElement>("#st-cash");
+    if (cash) cash.onclick = () => openCashOut();
+    const tu = B.querySelector<HTMLButtonElement>("#st-topup");
+    if (tu) tu.onclick = () => openTopUp();
     const shareT = B.querySelector<HTMLButtonElement>("#st-share");
     if (shareT) shareT.onclick = async () => {
       const names = titles().map((k) => TITLES[k][0]).join(", ");

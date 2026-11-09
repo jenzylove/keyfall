@@ -8,6 +8,7 @@
 // @ts-ignore plain ES module
 import { hunt } from "../npc/tick.mjs";
 import { cors, originOk } from "./_origin.js";
+import { arena, netOf } from "./_net.js";
 
 const PER_IP_MS = 12_000;
 const PER_TARGET_MS = 20_000;
@@ -24,14 +25,15 @@ export default async function handler(req: any, res: any) {
   if (req.method !== "POST") return res.status(405).json({ error: "use POST" });
   if (!originOk(req)) return res.status(403).json({ error: "hunts come from the KEYFALL site only" });
 
-  const contract = process.env.VITE_CONTRACT;
-  let seeds: Record<string, string> = {};
+  const net = netOf(req);
+  let a;
   try {
-    seeds = JSON.parse(process.env.NPC_SEEDS || "{}");
-  } catch {
-    return res.status(500).json({ error: "NPC_SEEDS is not valid JSON" });
+    a = arena(net);
+  } catch (e: any) {
+    return res.status(500).json({ error: String(e?.message || e) });
   }
-  if (!contract || !Object.keys(seeds).length) return res.status(500).json({ error: "NPCs are not configured" });
+  const { contract, seeds } = a;
+  if (!contract || !Object.keys(seeds).length) return res.status(500).json({ error: `NPCs are not configured for ${net}` });
 
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
   const target = String(body.target || "");
@@ -50,7 +52,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     while (running) await running.catch(() => {});
-    running = hunt({ contract, seeds, network: "testnet", target, hunter });
+    running = hunt({ contract, seeds, network: net, target, hunter });
     const out = await running;
     return res.status(200).json(out);
   } catch (e: any) {

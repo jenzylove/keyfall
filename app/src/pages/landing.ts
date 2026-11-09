@@ -1,11 +1,10 @@
 // The title screen: pixel logotype over the live radar, PLAY, how to play,
 // the rivals, the high score table and a real footer. Every number is live.
 
-import { NETWORK, getHolderCount, getHolders, getStats, type Holder } from "../chain";
+import { MAINNET_READY, getHolderCount, getHolders, getStats, type Holder } from "../chain";
 
-const MAIN = (NETWORK as string) === "mainnet";
-const NET_SUB = MAIN ? "Mainnet · real $KEYFALL · your own NEAR wallet" : "Practice arena · free · no wallet";
-const NET_FOOT = MAIN ? "Play for real on mainnet, or practice for free on testnet." : "Practice coins have no value.";
+const NET_SUB = MAINNET_READY ? "Practice is free with no wallet · mainnet is real NEAR" : "Practice arena · free · no wallet";
+const NET_FOOT = MAINNET_READY ? "Live on NEAR mainnet. Practice on testnet is free and its coins have no value." : "Practice coins have no value.";
 import { REPO, chainNow, esc, poll, syncClock } from "../ui/dom";
 import { Radar, type Blip } from "../ui/radar";
 import { avatar, satoshiAvatar } from "../ui/avatars";
@@ -28,7 +27,8 @@ export function landing(root: HTMLElement) {
       <div class="t-copy">
         <h1 class="wordmark glitch">${logotype()}</h1>
         <p class="premise">Quantum computers just broke old crypto keys. Run your coins into a quantum vault before the hunters catch you. Then hunt everyone who didn't.</p>
-        <a class="btn play pulse" href="/play" data-link id="t-play"><span class="tri" aria-hidden="true"></span>PLAY</a>
+        <a class="btn play pulse" href="/play${MAINNET_READY ? "?net=practice" : ""}" data-link id="t-play"><span class="tri" aria-hidden="true"></span>PLAY</a>
+        ${MAINNET_READY ? `<a class="btn ghost play-real" href="/play?net=mainnet" data-link id="t-real">Play for real on mainnet</a>` : ""}
         <p class="t-cd"><span class="t-cd-k">Q-DAY IN</span><b id="t-cd">··</b></p>
         <p class="t-sub">${NET_SUB}</p>
       </div>

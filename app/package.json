@@ -21,6 +21,7 @@
   "dependencies": {
     "@fastnear/api": "^2.5.0",
     "@fastnear/ml-dsa-65": "^2.5.0",
-    "@fastnear/utils": "^2.5.0"
+    "@fastnear/utils": "^2.5.0",
+    "qrcode-generator": "^1.4.4"
   }
 }
