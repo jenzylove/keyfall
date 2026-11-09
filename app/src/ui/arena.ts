@@ -356,7 +356,9 @@ export class Arena {
       const ang = Math.acos(clamp((dx * dir.x + dy * dir.y) / dist, -1, 1));
       const half = id === "satoshi" ? half0 * 1.5 : half0; // the boss is a big target
       if (ang > half) continue;
-      if (dist < bd) { bd = dist; best = id; }
+      const raider = id !== "satoshi" && !!this.info.get(id)?.raidingMe; // the one charging you comes first
+      const score = raider ? dist - 10000 : dist;
+      if (score < bd) { bd = score; best = id; }
     }
     return best;
   }
@@ -702,6 +704,15 @@ export class Arena {
     const cy0 = clamp(lerp(this.cam.y, look.y - this.h / 2, k), -this.h * 0.25, this.H - this.h * 0.75);
     this.cam.x = playing ? clamp(cx0, look.x - this.w * 0.75, look.x - this.w * 0.25) : cx0;
     this.cam.y = playing ? clamp(cy0, look.y - this.h * 0.75, look.y - this.h * 0.25) : cy0;
+    // the guide card covers the top: what the step points at must sit in the clear area below it
+    if (playing && this.cardOn && this.guide && this.guide.kind !== "me") {
+      const g = this.guide;
+      const s = g.kind === "gate" ? this.gate : g.kind === "boss" ? this.boss : g.id ? this.bodies.get(g.id) : null;
+      if (s) {
+        const clearTop = this.topInset + (g.kind === "boss" ? 110 : 70);
+        if (s.y - this.cam.y < clearTop) this.cam.y = Math.max(s.y - clearTop, me.y - (this.h - 80)); // pan up, but keep you on screen
+      }
+    }
     for (const p of this.particles) {
       p.t += dt;
       if (p.t < 0) continue;
@@ -742,7 +753,7 @@ export class Arena {
         if (!hit) for (const id of this.order) {
           const s = this.bodies.get(id)!, b = this.info.get(id)!;
           if (!s || !b) continue;
-          if (Math.hypot(p.x - s.x, p.y - s.y) > s.r * 0.95) continue;
+          if (Math.hypot(p.x - s.x, p.y - s.y) > s.r * (b.raidingMe ? 1.3 : 0.95)) continue; // a charging raider is a generous target
           const r = this.cb.onShot(id);
           if (b.shieldBps > 0) this.shieldHit(id);
           if (r.ok) { this.hitstop(80); s.bounce = 0.3; s.vx += p.vx * 0.15; s.vy += p.vy * 0.15; this.burst(id, b.kind === "vault" ? GOLD : RED, 8); }

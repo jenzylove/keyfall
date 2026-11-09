@@ -7,7 +7,7 @@
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 const BASE = process.env.BASE || "http://localhost:5189";
-const OUT = "C:/Users/LENOVO/qday-launch/v42shots";
+const OUT = process.env.OUT || "C:/Users/LENOVO/qday-launch/v42shots";
 const MODE = process.argv[2] || "--vault";
 const PROFILE = process.argv[3] || (MODE === "--fresh" ? `C:/Users/LENOVO/qday-launch/chrome-v42-${Date.now()}` : "C:/Users/LENOVO/qday-launch/chrome-v41-vault2");
 fs.mkdirSync(OUT, { recursive: true });
@@ -73,6 +73,117 @@ await waitFor(() => document.querySelector("#field")?.__arena?.ready, 30000);
 await waitFor(() => (document.querySelector("#field")?.__world?.().holders || 0) > 0 ? "ok" : null, 40000);
 await sleep(1200);
 log("world", JSON.stringify(await W()), "fps", await fps(), "lowPower", await A((ar) => ar.lowPower));
+
+if (MODE === "--raid") {
+  // shoot a named body (a vault you also control, to set up the defend check)
+  const target = process.argv[4];
+  const ok = await A((ar, id) => ar.bodies.has(id) && ar.info.get(id).state, target);
+  log("target", target, "state", ok);
+  await steerTo(target, 60000, 230);
+  await sleep(300);
+  const aim = await aimAndShoot(target);
+  log("aim ->", aim);
+  const r = await waitFor(() => document.querySelector("#field").__arena.meInfo.inFlight ? "signing" : [...document.querySelectorAll(".bp-say")].map((e) => e.textContent).join("|") || null, 6000, 150);
+  log("shot:", r);
+  await sleep(6000);
+  log("world", JSON.stringify(await W()));
+  await b.close();
+  process.exit(0);
+}
+
+if (MODE === "--red") {
+  // a vault player made red again for the first steps: the vault record is kept aside, a bag is bought into the wallet (no sponsor join)
+  await p.evaluate(() => { const v = localStorage.getItem("qday.vault.v1"); if (v) { localStorage.setItem("qday.vault.v1.aside", v); localStorage.removeItem("qday.vault.v1"); } localStorage.removeItem("qday.guide.v1.testnet"); });
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await waitFor(() => document.querySelector("#field")?.__arena?.ready, 30000);
+  const start = await waitFor(() => document.querySelector("#start:not([hidden]) #m-go") ? "grab" : null, 20000);
+  log("start card:", start, await p.evaluate(() => document.querySelector("#m-go")?.textContent));
+  if (start) {
+    await p.click("#m-go");
+    const r = await waitFor(() => { const s = document.querySelector("#start"); return s && s.hidden ? "ok" : (document.querySelector(".m-msg.bad")?.textContent || null); }, 150000, 1000);
+    log("buy:", r);
+  }
+  let g = await waitAtLeast(1, 20000); log("guide", JSON.stringify(g), await card()); await sleep(800); await shot("01-this-is-you");
+  await p.keyboard.down("d"); await sleep(700); await p.keyboard.up("d");
+  g = await waitAtLeast(2, 10000); await sleep(600); await shot("02-you-are-red");
+  g = await waitAtLeast(3, 20000); log("guide", JSON.stringify(g), await card()); await sleep(800); await shot("03-gold-door-far");
+  // walk toward the gate and stop when it would be under the card: the camera must keep it in the clear
+  await steerTo("gate", 60000, 200);
+  await sleep(400);
+  const gatePos = await A((ar) => { const p2 = { x: ar.gate.x - ar.cam.x, y: ar.gate.y - ar.cam.y }; return { ...p2, inset: ar.topInset, h: ar.h }; });
+  log("gate on screen:", JSON.stringify(gatePos));
+  await shot("03b-gold-door-near");
+  await sleep(9000); // the card goes compact after the first read
+  await shot("03c-gold-door-compact");
+  log("gate on screen (compact):", JSON.stringify(await A((ar) => ({ x: ar.gate.x - ar.cam.x, y: ar.gate.y - ar.cam.y, inset: ar.topInset }))));
+  // a hunter: after the guide is skipped a Qubit turns toward you; the server refuses while you are new
+  await p.evaluate(() => document.querySelector("#g-skip")?.click());
+  const hunter = await waitFor(() => { const ar = document.querySelector("#field").__arena; return ar.hunters.length ? ar.hunters[0] : null; }, 40000, 500);
+  log("hunter after skip:", hunter);
+  await sleep(2500);
+  await shot("15-hunter-turns");
+  const caught = await waitFor(() => [...document.querySelectorAll(".bp-say")].map((e) => e.textContent).find((t) => /new/i.test(t)) || null, 60000, 300);
+  log("caught while new:", caught);
+  await shot("16-bounce-you-are-new");
+  await p.evaluate(() => { const v = localStorage.getItem("qday.vault.v1.aside"); if (v) { localStorage.setItem("qday.vault.v1", v); localStorage.removeItem("qday.vault.v1.aside"); } });
+  log("errors:", JSON.stringify(errors.slice(0, 5)));
+  await b.close();
+  process.exit(0);
+}
+
+if (MODE === "--new") {
+  // a brand new player: grab, skip the guide, get caught while new (bounce), build the vault, wait for a real raid on it, shoot the raider
+  const start = await waitFor(() => document.querySelector("#start:not([hidden]) #m-go") ? "grab" : null, 15000);
+  log("start card:", start);
+  if (start) {
+    await p.click("#m-go");
+    const r = await waitFor(() => { const s = document.querySelector("#start"); return s && s.hidden ? "ok" : (document.querySelector(".m-msg.bad")?.textContent || null); }, 150000, 1000);
+    log("grab:", r);
+    if (r !== "ok") { await shot("00-grab-failed"); await b.close(); process.exit(1); }
+  }
+  await waitAtLeast(1, 20000);
+  await sleep(600);
+  await p.evaluate(() => document.querySelector("#g-skip")?.click());
+  await sleep(800);
+  await shot("15-after-skip");
+  const hunter = await waitFor(() => { const ar = document.querySelector("#field").__arena; return ar.hunters.length ? ar.hunters[0] : null; }, 40000, 400);
+  log("hunter after skip:", hunter);
+  await sleep(2200);
+  await shot("15b-hunter-turns");
+  const caught = await waitFor(() => [...document.querySelectorAll(".bp-say")].map((e) => e.textContent).find((t) => /new/i.test(t)) || null, 70000, 250);
+  log("caught while new:", caught, JSON.stringify((await W()).incoming));
+  await shot("16-bounce-you-are-new");
+  // now the vault
+  await steerTo("gate", 60000, 46);
+  if (await waitFor(() => document.querySelector("#n-go") ? "yes" : null, 8000, 300)) {
+    await p.evaluate(() => document.querySelector("#n-go")?.click());
+    log("vault:", await waitFor(() => document.querySelector("#n-msg.ok, #n-msg.bad")?.textContent || null, 180000, 500));
+    await sleep(2500);
+  }
+  await shot("17-vault");
+  // wait for a real raid on the vault (NPCs may raid once the first minutes are over)
+  const inc = await waitFor(() => { const w = document.querySelector("#field").__world(); return w.incoming && w.incoming.target === w.vault ? w.incoming.attacker : null; }, 9 * 60 * 1000, 2000);
+  log("raid on vault by:", inc, JSON.stringify(await W()));
+  if (inc) {
+    await sleep(1500);
+    await shot("18-raider-fires");
+    await steerTo(inc, 30000, 220);
+    await sleep(300);
+    const aim = await aimAndShoot(inc);
+    log("aim ->", aim);
+    const r = await waitFor(() => document.querySelector("#field").__arena.meInfo.inFlight ? "signing" : null, 5000, 100);
+    log("defend shot:", r);
+    await sleep(300);
+    await shot("19-defend-shot");
+    const done = await waitFor(() => document.querySelector(".fx-banner")?.textContent || null, 30000, 200);
+    log("defend result:", done);
+    await sleep(600);
+    await shot("20-defended");
+  }
+  log("errors:", JSON.stringify(errors.slice(0, 5)));
+  await b.close();
+  process.exit(0);
+}
 
 if (MODE === "--defend") {
   // a raider is charging your vault: shoot it (the real defend)

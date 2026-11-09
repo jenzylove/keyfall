@@ -167,7 +167,7 @@ export function play(root: HTMLElement) {
         <div class="events" id="events" aria-live="polite"></div>
         <div class="field-msg" id="field-msg" hidden></div>
         <div class="start" id="start" hidden></div>
-        <p class="keys" aria-hidden="true">WASD or arrows to move · Space to shoot · Shift to dash</p>
+        <p class="keys" aria-hidden="true" hidden>WASD or arrows to move · Space to shoot · Shift to dash</p>
       </main>
       <nav class="actions" id="actions" aria-label="Moves">
         <button type="button" class="act" data-act="shield"><span class="act-fill"></span><span class="act-ic">${I.shield}</span><span class="act-nm">shield</span><span class="act-st" id="a-shield">·</span></button>
@@ -182,6 +182,7 @@ export function play(root: HTMLElement) {
     </div>`;
 
   const field = root.querySelector<HTMLElement>("#field")!;
+  try { root.querySelector<HTMLElement>(".keys")!.hidden = matchMedia("(pointer: coarse)").matches || !matchMedia("(hover: hover)").matches; } catch {} // keys are desktop words
   const missionEl = root.querySelector<HTMLElement>("#mission")!;
   const startEl = root.querySelector<HTMLElement>("#start")!;
   const game = root.querySelector<HTMLElement>(".game")!;
@@ -308,7 +309,7 @@ export function play(root: HTMLElement) {
     try { localStorage.setItem(LS_T, JSON.stringify([...have, k])); } catch {}
     const [name, why] = TITLES[k];
     // one message channel: a slim gold pill that waits its turn (after the strip collapses)
-    toast({ tone: "gold", cls: "title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}`, open: () => openSettings(), onShow: () => { sfx.play("fanfare"); sfx.vibrate([30, 40, 30, 40, 80]); } });
+    toast({ tone: "gold", cls: "ev-title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}`, open: () => openSettings(), onShow: () => { sfx.play("fanfare"); sfx.vibrate([30, 40, 30, 40, 80]); } });
   }
 
   const sess = () => chain.session();
@@ -698,6 +699,8 @@ export function play(root: HTMLElement) {
   let gVariant = ""; // step 5: "body" | "boss"
   let gTarget = ""; // step 5: the body the arrow points at
   let gNote = ""; let gNoteT = 0;
+  let gExpanded = false; // a tap on a compact card opens it again for a moment
+  let gShownStep = 0;
   let guideRaided = false;
   let guideBossHit = false;
   const guideEl = root.querySelector<HTMLElement>("#guide")!;
@@ -706,12 +709,13 @@ export function play(root: HTMLElement) {
   /** Steps 1 to 5: nobody hunts you and the NPCs are not woken by this client. */
   const guideHolds = () => gstep > 0 && gstep < 6;
 
+  const TOUCH = (() => { try { return matchMedia("(pointer: coarse)").matches || !matchMedia("(hover: hover)").matches; } catch { return true; } })();
   const CARDS: Record<number, { title: string; text: string; tap?: boolean }> = {
-    1: { title: "This is you.", text: "Drag anywhere to move." },
+    1: { title: "This is you.", text: TOUCH ? "Drag anywhere to move." : "WASD or the arrow keys to move." },
     2: { title: "You are red.", text: "Your coins sit behind an old key. A quantum computer can crack it, so anyone can rob you, and red bags leak coins over time.", tap: true },
     3: { title: "Get to the gold door.", text: "It locks your coins behind a quantum key." },
     4: { title: "You are gold now. Safe.", text: "Only gold players can attack.", tap: true },
-    5: { title: "Shoot a target.", text: "Red target marks are players you can hit. Aim by moving, then press SHOOT." },
+    5: { title: "Shoot a target.", text: TOUCH ? "Red target marks are players you can hit. Aim by moving, then press SHOOT." : "Red target marks are players you can hit. Aim by moving, then press SHOOT or Space." },
     6: { title: "Now they hunt you too.", text: "Raiders shoot at your vault. Shoot them back to block, charge a SHIELD so their shots take less, DASH to get away.", tap: true },
     7: { title: "Your goal:", text: "Be the richest vault when Q-Day hits. Red bags freeze forever that day.", tap: true },
   };
@@ -734,6 +738,7 @@ export function play(root: HTMLElement) {
     gstep = step;
     gAt = Date.now();
     gNote = "";
+    gExpanded = false;
     setGuideSave({ step });
     sfx.play("blip");
     renderGuide();
@@ -795,7 +800,9 @@ export function play(root: HTMLElement) {
     const card = CARDS[gstep];
     const variant = gstep === 5 ? gVariant : "";
     const waiting = gstep === 3 && !!busy;
-    const key = `${gstep}|${variant}|${gTarget}|${waiting}|${gNote}|${w.vault?.raids_left ?? ""}`;
+    // after the first read, the cards that point into the world shrink to their title so the target stays in the clear
+    const compact = !card.tap && gstep !== 1 && !gExpanded && Date.now() - gAt > readMs(card.text) + 1500;
+    const key = `${gstep}|${variant}|${gTarget}|${waiting}|${gNote}|${w.vault?.raids_left ?? ""}|${compact}`;
     // the arrow in the world
     arena.setGuide(gstep === 1 || gstep === 2 || gstep === 4 ? { kind: "me" } : gstep === 3 ? { kind: "gate" } : gstep === 5 ? (variant === "boss" ? { kind: "boss" } : gTarget ? { kind: "body", id: gTarget } : null) : null);
     placeGuideArrow();
@@ -808,7 +815,9 @@ export function play(root: HTMLElement) {
     const ammo = ` You have ${shots} shot${shots === 1 ? "" : "s"} this round.`;
     const text = gstep === 5 ? (variant === "boss" ? `Nobody you can rob is near. Satoshi is always there: shoot his core.${ammo}` : card.text + ammo) : card.text;
     const wait = gstep === 1 ? "Waiting for you to move" : gstep === 3 ? (waiting ? esc(busyText) : "Touch the door when you reach it") : gstep === 5 ? (variant === "boss" ? "Aim at Satoshi and press SHOOT" : "Aim at the marked body and press SHOOT") : "";
-    guideEl.innerHTML = `<section class="guide tone-${tone}" data-step="${gstep}" aria-live="polite">
+    const still = gShownStep === gstep; // the same card redrawn: no entrance animation again
+    gShownStep = gstep;
+    guideEl.innerHTML = `<section class="guide tone-${tone}${compact ? " compact" : ""}${still ? " still" : ""}" data-step="${gstep}" aria-live="polite">
       <header class="g-head"><span class="g-step">Step ${gstep} of 7</span><button type="button" class="g-skip" id="g-skip">Skip guide</button></header>
       <h2 class="g-title">${esc(card.title)}</h2>
       <p class="g-text">${esc(text)}</p>
@@ -816,6 +825,8 @@ export function play(root: HTMLElement) {
     </section>`;
     arena.topInset = Math.round(guideEl.getBoundingClientRect().height) + 16; // pointers and labels keep clear of the card
     guideEl.querySelector<HTMLButtonElement>("#g-skip")!.onclick = () => guideFinish();
+    const sec = guideEl.querySelector<HTMLElement>(".guide")!;
+    sec.onclick = (e) => { if ((e.target as HTMLElement).closest("button")) return; if (compact) { gExpanded = true; gKey = ""; renderGuide(); setTimeout(() => { gExpanded = false; gKey = ""; if (alive) renderGuide(); }, 6000); } };
     const next = guideEl.querySelector<HTMLButtonElement>("#g-next");
     if (next) next.onclick = () => { if (gstep === 7) guideFinish(); else guideGo(gstep + 1); };
   }
@@ -874,7 +885,8 @@ export function play(root: HTMLElement) {
         await fetch(apiUrl("/api/tick"), { method: "POST" }).catch(() => {});
       } else {
         const j = await r.json().catch(() => ({}));
-        if (j.skipped) toast({ tone: "ink", who: id, title: `${N(id)} caught you but could not raid: ${esc(String(j.skipped).replace(/\.$/, "").toLowerCase())}.` });
+        if (j.skipped && /new player/i.test(String(j.skipped))) { sfx.play("deny"); arena.say(id, "You're new. Next time I take coins.", 3200, true); } // the server refused: your first minutes are yours
+        else if (j.skipped) toast({ tone: "ink", who: id, title: `${N(id)} caught you but could not raid: ${esc(String(j.skipped).replace(/\.$/, "").toLowerCase())}.` });
         else if (j.error && !j.hash) toast({ tone: "ink", who: id, title: `${N(id)} caught you but the raid did not go through.` });
       }
     } catch {
@@ -2013,6 +2025,7 @@ export function play(root: HTMLElement) {
 
   // debugging and acceptance: fps and world on the element
   (field as any).__arena = arena;
+  (field as any).__toastTitle = (k: TitleKey) => { const [name, why] = TITLES[k]; toast({ tone: "gold", cls: "ev-title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}` }); }; // styling check only: stores nothing
   (field as any).__guide = () => ({ step: gstep, on: guideOn(), holds: guideHolds(), target: gTarget, variant: gVariant });
   (field as any).__world = () => ({ incoming: w.incoming, myRaids: w.myRaids.length, walletBal: String(w.walletBal), vaultBal: String(w.vaultBal), vault: sess().vault?.accountId, wallet: sess().wallet?.accountId, holders: w.holders.length, raidsLeft: w.vault?.raids_left });
 
