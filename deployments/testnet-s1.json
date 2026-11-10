@@ -1,0 +1,15 @@
+{
+  "network": "testnet",
+  "label": "live",
+  "contract": "qday-live-mw6vii9l47s.testnet",
+  "deploy_tx": "A15iTc24ojZRpC1AbuL2W1jj3ydMD8PCLNhivkc8DbS1",
+  "deploy_link": "https://testnet.nearblocks.io/txns/A15iTc24ojZRpC1AbuL2W1jj3ydMD8PCLNhivkc8DbS1",
+  "deployed_at": "2026-11-07T20:46:24.687Z",
+  "start_ms": 1794084433348,
+  "q_day_ms": 1795294033348,
+  "params_file": "sim\\params.json",
+  "wasm_sha256": "0f0f2a5b840660efc90ad0d02c892f2e2333d4e1c218f735d23da7644bf4353c",
+  "wasm_bytes": 276081,
+  "keyless": true,
+  "config_matches_params": true
+}

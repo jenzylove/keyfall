@@ -18,7 +18,14 @@ const N: u128 = ONE_NEAR;
 /// Season shape used for the hosted testnet season.
 const EPOCH_MS: u64 = 6 * 3_600_000; // 6 hours
 const SEASON_EPOCHS: u64 = 56; // 14 days
-const STEP_MS: u64 = 600_000; // 10 minutes
+const STEP_MS_DEFAULT: u64 = 600_000; // 10 minutes
+use std::sync::atomic::{AtomicU64, Ordering};
+/// Step length and raid rate, set once in main (the arcade evaluation uses 30 s steps).
+static STEP: AtomicU64 = AtomicU64::new(STEP_MS_DEFAULT);
+static RAID_RATE_X100: AtomicU64 = AtomicU64::new(100);
+fn step_ms() -> u64 { STEP.load(Ordering::Relaxed) }
+/// Per step raid chance, scaled so a player raids at the same rate per hour whatever the step (times the rate knob).
+fn per_step(p_per_10min: f64) -> f64 { p_per_10min * step_ms() as f64 / 600_000.0 * RAID_RATE_X100.load(Ordering::Relaxed) as f64 / 100.0 }
 
 // ----------------------------------------------------------------- rng
 
@@ -93,16 +100,17 @@ fn scenarios() -> Vec<(&'static str, Mix)> {
     ]
 }
 
-fn build_agents(m: Mix, rng: &mut Rng) -> Vec<Agent> {
+fn build_agents(p: &Params, m: Mix, rng: &mut Rng) -> Vec<Agent> {
     let mut v = vec![];
-    let entry_window = SEASON_EPOCHS * EPOCH_MS / STEP_MS / 4;
+    let season_epochs = p.season_epochs;
+    let entry_window = p.season_epochs * p.epoch_ms / step_ms() / 4;
     let mut push = |arch: Arch, n: usize, rng: &mut Rng| {
         for _ in 0..n {
             let i = v.len();
             let (budget_near, online, raid, shield, boss, mig): (f64, f64, f64, f64, bool, Option<u64>) = match arch {
                 Arch::Whale => (60.0 + rng.f() * 40.0, 0.5, 0.02, 0.6, true, Some(0)),
-                Arch::ActiveSmall => (0.5 + rng.f() * 2.5, 0.25, 0.01, 0.3, true, Some(rng.below(SEASON_EPOCHS / 4))),
-                Arch::Passive => (0.5 + rng.f() * 4.0, 0.03, 0.0, 0.0, false, if rng.f() < 0.6 { Some(SEASON_EPOCHS / 3 + rng.below(SEASON_EPOCHS / 2)) } else { None }),
+                Arch::ActiveSmall => (0.5 + rng.f() * 2.5, 0.25, 0.01, 0.3, true, Some(rng.below(season_epochs / 4))),
+                Arch::Passive => (0.5 + rng.f() * 4.0, 0.03, 0.0, 0.0, false, if rng.f() < 0.6 { Some(season_epochs / 3 + rng.below(season_epochs / 2)) } else { None }),
                 Arch::RaiderBot => (10.0 + rng.f() * 10.0, 1.0, 0.08, 0.5, true, Some(0)),
                 Arch::Sybil => (0.2, 0.5, 0.0, 0.0, true, Some(0)),
                 Arch::NeverMigrates => (0.5 + rng.f() * 4.0, 0.05, 0.0, 0.0, false, None),
@@ -118,7 +126,7 @@ fn build_agents(m: Mix, rng: &mut Rng) -> Vec<Agent> {
                 entry_step: if matches!(arch, Arch::Whale | Arch::RaiderBot | Arch::Sybil) { 0 } else { rng.below(entry_window) },
                 migrate_epoch: mig,
                 online_p: (online * m.activity).min(1.0),
-                raid_p: raid * m.activity,
+                raid_p: per_step(raid) * m.activity,
                 shield_p: shield * m.activity,
                 boss,
                 small: budget_near <= 3.0,
@@ -191,9 +199,9 @@ fn run(p: &Params, m: Mix, seed: u64) -> RunResult {
     let mut rng = Rng(seed | 1);
     let mut s = State::genesis(p, 0);
     let mut st = MemStore::default();
-    let mut agents = build_agents(m, &mut rng);
-    let steps_per_epoch = EPOCH_MS / STEP_MS;
-    let total_steps = SEASON_EPOCHS * steps_per_epoch;
+    let mut agents = build_agents(p, m, &mut rng);
+    let steps_per_epoch = (p.epoch_ms / step_ms()).max(1);
+    let total_steps = p.season_epochs * steps_per_epoch;
     let mut open: Vec<(u64, u64)> = vec![]; // (raid id, deadline)
     let mut out = RunResult::default();
     let mut row = EpochRow::default();
@@ -205,7 +213,7 @@ fn run(p: &Params, m: Mix, seed: u64) -> RunResult {
     }
 
     for step in 0..=total_steps {
-        let now = step * STEP_MS;
+        let now = step * step_ms();
         let epoch = step / steps_per_epoch;
 
         // permissionless crank: harvest, then resolve expired raids
@@ -471,7 +479,42 @@ fn penalty(sum: &BTreeMap<String, ScenarioSummary>) -> f64 {
     pen
 }
 
+/// SIM_EVAL=<params.json>: run every scenario on one parameter file (no grid, nothing written but the report path given in SIM_OUT).
+/// SIM_STEP_MS sets the step, SIM_RAID_RATE scales how often players raid (1.0 = the base season's rate per hour).
+fn eval(path: &str) {
+    let p: Params = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    p.validate().unwrap();
+    let seeds = [11u64, 23, 47];
+    let mut sums = BTreeMap::new();
+    let mut avail = BTreeMap::new();
+    for (name, mix) in scenarios() {
+        let runs: Vec<RunResult> = seeds.iter().map(|&sd| run(&p, mix, sd)).collect();
+        let raids: f64 = runs.iter().map(|r| r.rows.iter().map(|x| x.raids_successful as f64).sum::<f64>()).sum::<f64>() / runs.len() as f64;
+        avail.insert(name.to_string(), raids);
+        sums.insert(name.to_string(), summarize(&runs));
+    }
+    let pen = penalty(&sums);
+    let days = (p.epoch_ms * p.season_epochs) as f64 / 86_400_000.0;
+    let mut md = format!("# Arcade evaluation: {path}
+
+Epoch {} min, season {:.1} days, step {} s, raid rate x{:.2}, {} seeds. Penalty {:.2}.
+
+| Scenario | Satoshi left % | Never-migrated keep % | Small vault worst raid loss % | Small vault median raid loss % | Successful raids on vaults | Top 2 share % | Successful raids per day |
+|---|---|---|---|---|---|---|---|
+",
+        p.epoch_ms / 60_000, days, step_ms() / 1000, RAID_RATE_X100.load(Ordering::Relaxed) as f64 / 100.0, seeds.len(), pen);
+    for (name, v) in &sums {
+        md.push_str(&format!("| {} | {:.1} | {:.1} | {:.1} | {:.1} | {:.0} | {:.1} | {:.0} |
+", name, v.satoshi_left_pct, v.never_migrated_keep_pct, v.small_vault_max_raid_loss_pct, v.small_vault_median_raid_loss_pct, v.successful_raids_on_vaults, v.top2_share_pct, avail[name] / days));
+    }
+    if let Ok(out) = std::env::var("SIM_OUT") { fs::write(out, md.clone()).unwrap(); }
+    println!("{md}");
+}
+
 fn main() {
+    if let Ok(v) = std::env::var("SIM_STEP_MS") { STEP.store(v.parse().unwrap(), Ordering::Relaxed); }
+    if let Ok(v) = std::env::var("SIM_RAID_RATE") { RAID_RATE_X100.store((v.parse::<f64>().unwrap() * 100.0) as u64, Ordering::Relaxed); }
+    if let Ok(path) = std::env::var("SIM_EVAL") { return eval(&path); }
     let seeds = [11u64, 23, 47, 91, 137];
     let mut best: Option<(f64, Params, BTreeMap<String, ScenarioSummary>)> = None;
     let mut grid_log = vec![];
@@ -528,7 +571,7 @@ fn main() {
         series.insert(name.to_string(), run(&p, mix, seeds[0]).rows);
     }
     let report = serde_json::json!({
-        "season": { "epoch_hours": EPOCH_MS / 3_600_000, "season_epochs": SEASON_EPOCHS, "step_minutes": STEP_MS / 60_000, "seeds": seeds },
+        "season": { "epoch_hours": EPOCH_MS / 3_600_000, "season_epochs": SEASON_EPOCHS, "step_minutes": step_ms() / 60_000, "seeds": seeds },
         "penalty": pen,
         "chosen": { "harvest_bps": p.harvest_bps, "take_bps": p.take_bps, "vault_take_bps": p.vault_take_bps, "punch_down_band": p.punch_down_band, "boss_bps": p.boss_bps },
         "scenarios": sums,

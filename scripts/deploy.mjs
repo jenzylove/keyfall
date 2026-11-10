@@ -17,7 +17,7 @@ const code = fs.readFileSync(wasmPath);
 const params = JSON.parse(fs.readFileSync(paramsPath, "utf8"));
 const start_ms = startArg ? String(startArg) : String(Date.now() + 60_000);
 
-const acct = await faucetAccount(`qday-${label}`);
+const acct = await faucetAccount(`keyfall-${label}`);
 console.log("contract account:", acct.accountId);
 
 const r = await send({

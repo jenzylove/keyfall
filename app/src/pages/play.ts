@@ -2054,8 +2054,22 @@ export function play(root: HTMLElement) {
       if (left <= 0 && left > -1200) due = true;
     }
     if (sheetKind === "shield" || sheetKind === "satoshi" || sheetKind === "under") updateSheet();
+    settleDue(now);
     if (due) refresh();
   }, 1000);
+
+  /** A raid of yours (or on you) whose clock ran out: settle it from this browser right away, so the coins
+   * fly at zero instead of whenever the next crank runs. resolve() is permissionless and the contract checks the clock. */
+  const settling = new Set<number>();
+  function settleDue(now: number) {
+    if (!sess().wallet && !sess().vault) return;
+    const due = [...w.myRaids, ...(w.incoming ? [w.incoming] : []), ...(w.escape ? [w.escape] : [])]
+      .filter((r) => r.status === "open" && Number(r.deadline) + 2500 < now && !settling.has(r.id));
+    for (const r of due.slice(0, 2)) {
+      settling.add(r.id);
+      chain.resolve(r.id).then(() => refresh()).catch(() => { setTimeout(() => settling.delete(r.id), 15_000); });
+    }
+  }
 
   const pollT = (() => {
     let stopped = false;
@@ -2074,7 +2088,7 @@ export function play(root: HTMLElement) {
   tick(false);
   // While the game is open, wake the NPCs once a minute: they settle closed raids,
   // run the harvest when it is due, and answer raids on their own vaults.
-  const npcBeat = window.setInterval(() => tick(false), 60_000);
+  const npcBeat = window.setInterval(() => tick(false), 30_000); // rounds are short now: wake the bots every 30 s
 
   const guideT = window.setInterval(() => { if (alive) guideTick(); }, 300);
   holdTicks = () => guideHolds() || (!guideSave().done && !!sess().wallet && !sess().vault); // a red first timer is never pointed at

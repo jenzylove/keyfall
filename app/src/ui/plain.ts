@@ -59,6 +59,7 @@ export function every(ms: number): string {
   return `every ${Math.round(m)} minutes`;
 }
 export function minutes(ms: number): string {
+  if (ms < 120_000) return `${Math.round(ms / 1000)} seconds`;
   const m = Math.round(ms / 60_000);
   if (m >= 60 && m % 60 === 0) return `${m / 60} hour${m === 60 ? "" : "s"}`;
   return `${m} minute${m === 1 ? "" : "s"}`;
