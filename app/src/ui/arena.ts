@@ -138,6 +138,12 @@ export class Arena {
   private w = 1; private h = 1; private dpr = 1;
   W = 1000; H = 1000;
   private cam = { x: 0, y: 0 };
+  /** Hold the minimap to look around: the camera goes to that point while you hold, then back to you. */
+  private peek: { id: number; x: number; y: number } | null = null;
+  /** Mines: touching one zaps you (frozen for a moment, knocked back). Movement only, never money. */
+  private mines: { x: number; y: number; r: number; seed: number; hot: number }[] = [];
+  private stun = 0;
+  onMine: (() => void) | null = null;
   private me: Sim;
   private meInfo: ArenaMe = { kind: "none", bag: "0", balance: 0, shieldBps: 0, raidsLeft: 0, maxRaids: 0, inFlight: "", svg: "" };
   private bodies = new Map<string, Sim>();
@@ -538,6 +544,18 @@ export class Arena {
       }
     }
     this.motes = Array.from({ length: 14 }, (_, i) => ({ x: rnd(9, i) * this.W, y: rnd(10, i) * this.H, s: 1 + Math.round(rnd(11, i) * 2), p: rnd(12, i) * 6.28 }));
+    // mines: away from the spawn, the gate, Satoshi and the blocks
+    this.mines = [];
+    for (let i = 0; i < 12; i++) {
+      for (let k = 0; k < 30; k++) {
+        const x = lerp(90, this.W - 90, rnd(777, i * 60 + k)), y = lerp(90, this.H - 90, rnd(778, i * 60 + k));
+        if (Math.hypot(x - this.w * 0.6, y - (this.H - this.h * 0.6)) < 260) continue;
+        if (Math.hypot(x - this.gate.x, y - this.gate.y) < 200 || Math.hypot(x - this.boss.x, y - this.boss.y) < 240) continue;
+        if (this.inBlock(x, y, 40) || this.mines.some((m) => Math.hypot(m.x - x, m.y - y) < 220)) continue;
+        this.mines.push({ x, y, r: 16, seed: hash32(`m${i}`), hot: 0 });
+        break;
+      }
+    }
   }
   private inBlock(x: number, y: number, pad: number) {
     return this.blocks.some((b) => x > b.x - pad && x < b.x + b.w + pad && y > b.y - pad && y < b.y + b.h + pad);
@@ -603,6 +621,10 @@ export class Arena {
     this.canvas.setPointerCapture(e.pointerId);
     const r = this.canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
+    if (this.mapVisible()) {
+      const g = this.mapGeom();
+      if (Math.hypot(x - g.cx, y - g.cy) <= g.R + 6) { this.peek = { id: e.pointerId, ...this.mapToWorld(x, y) }; return; }
+    }
     this.tap = { id: e.pointerId, x, y, t: performance.now(), moved: 0 };
     if (e.pointerType === "mouse") { this.mouse = { id: e.pointerId, x, y }; return; }
     if (y < this.h * 0.4 || this.stick) return; // the lower 60% is the thumb zone
@@ -611,6 +633,7 @@ export class Arena {
   private onMove = (e: PointerEvent) => {
     const r = this.canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
+    if (this.peek && this.peek.id === e.pointerId) { e.preventDefault(); this.peek = { id: e.pointerId, ...this.mapToWorld(x, y) }; return; }
     if (this.tap && this.tap.id === e.pointerId) this.tap.moved = Math.max(this.tap.moved, Math.hypot(x - this.tap.x, y - this.tap.y));
     if (this.mouse && this.mouse.id === e.pointerId) { this.mouse.x = x; this.mouse.y = y; return; }
     if (!this.stick || this.stick.id !== e.pointerId) return;
@@ -622,6 +645,7 @@ export class Arena {
     this.stick.dx = dx / R; this.stick.dy = dy / R;
   };
   private onUp = (e: PointerEvent) => {
+    if (this.peek && this.peek.id === e.pointerId) { this.peek = null; return; }
     // a quick touch that barely moved is a tap: lock onto what it touched
     const tp = this.tap;
     if (tp && tp.id === e.pointerId) {
@@ -690,8 +714,9 @@ export class Arena {
     const me = this.me;
     const playing = this.meInfo.kind !== "none";
     if (playing) {
-      const d = this.inputDir();
-      const k = 1 - Math.exp(-dt * 9);
+      const d = this.stun > 0 ? { x: 0, y: 0 } : this.inputDir();
+      if (this.stun > 0) this.stun -= dt;
+      const k = 1 - Math.exp(-dt * (this.stun > 0 ? 2 : 9));
       me.vx = lerp(me.vx, d.x * ME_SPEED, k);
       me.vy = lerp(me.vy, d.y * ME_SPEED, k);
       if (Math.hypot(d.x, d.y) > 0.2) { const m = Math.hypot(d.x, d.y); this.facing = { x: d.x / m, y: d.y / m }; if (Math.abs(d.x) > 0.2) me.face = d.x > 0 ? 1 : -1; }
@@ -706,6 +731,16 @@ export class Arena {
       if (this.dashT <= 0) this.travelled += Math.hypot(me.vx, me.vy) * dt;
       this.collide(me);
       me.x = clamp(me.x, me.r, this.W - me.r); me.y = clamp(me.y, me.r, this.H - me.r);
+      for (const m of this.mines) {
+        if (m.hot > 0) { m.hot -= dt; continue; }
+        const dx = me.x - m.x, dy = me.y - m.y, d = Math.hypot(dx, dy) || 1;
+        if (d > m.r + me.r * 0.7) continue;
+        m.hot = 4; this.stun = 1.1;
+        me.vx = (dx / d) * 520; me.vy = (dy / d) * 520;
+        for (let i = 0; i < (this.lowPower ? 8 : 18); i++) { const a = (i / 18) * Math.PI * 2; this.particles.push({ x: m.x, y: m.y, vx: Math.cos(a) * 260, vy: Math.sin(a) * 260, t: 0, life: 0.5, c: RED, s: 5, g: 0 }); }
+        this.say("me", "ZAPPED", 1000, true);
+        this.onMine?.();
+      }
       if (!reducedMotion() && Math.hypot(me.vx, me.vy) > 50) { me.trail.push({ x: me.x, y: me.y + me.r * 0.5 }); if (me.trail.length > 7) me.trail.shift(); } else if (me.trail.length) me.trail.shift();
     }
     // bodies never sit on top of each other: push overlapping pairs apart (cheap at 60 bodies)
@@ -799,13 +834,13 @@ export class Arena {
     }
     if (me.bounce > 0) me.bounce -= dt;
     const k = 1 - Math.exp(-dt * 6);
-    const look = playing ? me : this.boss;
+    const look = this.peek ? this.peek : playing ? me : this.boss;
     // the world edge may show a little (hazard border) rather than push you into a corner:
     // you stay at least a quarter screen from any edge
     const cx0 = clamp(lerp(this.cam.x, look.x - this.w / 2, k), -this.w * 0.25, this.W - this.w * 0.75);
     const cy0 = clamp(lerp(this.cam.y, look.y - this.h / 2, k), -this.h * 0.25, this.H - this.h * 0.75);
-    this.cam.x = playing ? clamp(cx0, look.x - this.w * 0.75, look.x - this.w * 0.25) : cx0;
-    this.cam.y = playing ? clamp(cy0, look.y - this.h * 0.75, look.y - this.h * 0.25) : cy0;
+    this.cam.x = playing && !this.peek ? clamp(cx0, look.x - this.w * 0.75, look.x - this.w * 0.25) : cx0;
+    this.cam.y = playing && !this.peek ? clamp(cy0, look.y - this.h * 0.75, look.y - this.h * 0.25) : cy0;
     // the guide card covers the top: what the step points at must sit in the clear area below it
     if (playing && this.cardOn && this.guide && this.guide.kind !== "me") {
       const g = this.guide;
@@ -952,6 +987,7 @@ export class Arena {
 
     this.drawGate(c);
     for (const b of this.blocks) this.drawBlock(c, b, ox, oy);
+    for (const m of this.mines) this.drawMine(c, m);
     this.drawBoss(c);
     this.drawAim(c);
     this.drawLock(c);
@@ -1602,10 +1638,26 @@ export class Arena {
     c.restore();
   }
 
+  private mapGeom() { const R = 44, cx = this.w - R - 10, cy = R + 10; return { R, cx, cy, sx: (R * 1.8) / Math.max(this.W, this.H) }; }
+  private mapVisible() { return this.meInfo.kind !== "none" && !this.cardOn; }
+  /** A minimap point to world coordinates. */
+  private mapToWorld(x: number, y: number) { const { cx, cy, sx } = this.mapGeom(); return { x: clamp(this.W / 2 + (x - cx) / sx, 0, this.W), y: clamp(this.H / 2 + (y - cy) / sx, 0, this.H) }; }
+  /** A mine: a red pulsing pixel disc with spikes; dim for a few seconds after it fired. */
+  private drawMine(c: CanvasRenderingContext2D, m: { x: number; y: number; r: number; hot: number }) {
+    if (m.x < this.cam.x - 40 || m.x > this.cam.x + this.w + 40 || m.y < this.cam.y - 40 || m.y > this.cam.y + this.h + 40) return;
+    const pulse = m.hot > 0 ? 0.35 : 0.65 + 0.35 * Math.sin(this.t * 5 + m.x);
+    c.save(); c.translate(Math.round(m.x), Math.round(m.y));
+    c.globalAlpha = pulse * 0.35; c.fillStyle = RED; c.beginPath(); c.arc(0, 0, m.r + 8, 0, Math.PI * 2); c.fill();
+    c.globalAlpha = m.hot > 0 ? 0.4 : 1;
+    c.fillStyle = "#1a0b0a"; c.fillRect(-10, -10, 20, 20);
+    c.fillStyle = RED; c.fillRect(-6, -6, 12, 12);
+    for (const [x, y] of [[-3, -16], [-3, 10], [-16, -3], [10, -3]]) c.fillRect(x, y, 6, 6);
+    c.fillStyle = "#ffd0cc"; if (Math.floor(this.t * 3 + m.x) % 2 === 0 && m.hot <= 0) c.fillRect(-2, -2, 4, 4);
+    c.restore();
+  }
   private drawMinimap(c: CanvasRenderingContext2D) {
-    if (this.meInfo.kind === "none" || this.cardOn) return; // the guide card sits where the map goes
-    const R = 34, cx = this.w - R - 10, cy = R + 10;
-    const sx = (R * 1.8) / Math.max(this.W, this.H);
+    if (!this.mapVisible()) return; // the guide card sits where the map goes
+    const { R, cx, cy, sx } = this.mapGeom();
     const map = (x: number, y: number) => ({ x: cx + (x - this.W / 2) * sx, y: cy + (y - this.H / 2) * sx });
     c.save();
     c.fillStyle = this.colors.bg; c.globalAlpha = 0.82; c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.fill();
@@ -1618,7 +1670,11 @@ export class Arena {
     const g = map(this.gate.x, this.gate.y); if (this.places.gate !== "hidden") { c.fillStyle = GOLD; c.fillRect(Math.round(g.x) - 3, Math.round(g.y) - 3, 6, 6); }
     const bp = map(this.boss.x, this.boss.y); c.strokeStyle = GOLD; c.lineWidth = 1.5; c.beginPath(); c.arc(bp.x, bp.y, 4, 0, Math.PI * 2); c.stroke();
     const mp = map(this.me.x, this.me.y); c.fillStyle = this.colors.ink; if (Math.floor(this.t * 4) % 2 === 0) c.fillRect(Math.round(mp.x) - 2, Math.round(mp.y) - 2, 5, 5);
+    const v0 = map(this.cam.x, this.cam.y), v1 = map(this.cam.x + this.w, this.cam.y + this.h);
+    c.strokeStyle = this.peek ? CYAN : this.colors.dim; c.lineWidth = 1; c.strokeRect(Math.round(v0.x) + 0.5, Math.round(v0.y) + 0.5, Math.round(v1.x - v0.x), Math.round(v1.y - v0.y));
     c.restore();
+    c.save(); c.font = this.font(9); c.textAlign = "center"; c.textBaseline = "top"; c.fillStyle = this.peek ? CYAN : this.colors.dim;
+    c.fillText(this.peek ? "LOOKING" : "HOLD TO LOOK", cx, cy + R + 4); c.restore();
   }
 
   private placeBubbles(now: number) {

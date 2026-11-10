@@ -1,0 +1,31 @@
+import puppeteer from "puppeteer-core";
+import fs from "node:fs";
+const OUT = "C:/Users/LENOVO/qday-launch/v7shots"; fs.mkdirSync(OUT, { recursive: true });
+const b = await puppeteer.launch({ userDataDir: `C:/Users/LENOVO/qday-launch/chrome-v7-${Date.now()}`, executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true, args: ["--no-sandbox", "--use-gl=swiftshader", "--enable-unsafe-swiftshader"] });
+const p = await b.newPage(); await p.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const errors = []; p.on("pageerror", (e) => errors.push(String(e)));
+await p.evaluateOnNewDocument(() => { localStorage.setItem("qday.intro.v2", "1"); localStorage.setItem("qday.theme", "light"); });
+await p.goto("http://localhost:5189/play", { waitUntil: "domcontentloaded" });
+const waitFor = async (fn, ms) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await p.evaluate(fn).catch(() => null); if (v) return v; await sleep(400); } return null; };
+const A = (fn, ...a) => p.evaluate((src, ...x) => new Function("ar", ...x.map((_, i) => "a" + i), `return (${src})(ar,${x.map((_, i) => "a" + i).join(",")})`)(document.querySelector("#field").__arena, ...x), fn.toString(), ...a);
+await waitFor(() => document.querySelector("#field")?.__arena?.ready, 30000);
+await waitFor(() => document.querySelector("#start:not([hidden]) #m-go") ? 1 : null, 20000);
+await p.click("#m-go");
+console.log("grab:", await waitFor(() => { const s = document.querySelector("#start"); return s && s.hidden ? "ok" : (document.querySelector(".m-msg.bad")?.textContent || null); }, 150000));
+await p.evaluate(() => document.querySelector("#g-skip")?.click()); await sleep(800);
+console.log("mines:", await A((ar) => ar.mines.length));
+// walk into the nearest mine
+const steer = async (tgt, near, ms) => { const end = Date.now() + ms; const held = new Set(); const set = async (w) => { for (const k of held) if (!w.has(k)) { await p.keyboard.up(k); held.delete(k); } for (const k of w) if (!held.has(k)) { await p.keyboard.down(k); held.add(k); } };
+  while (Date.now() < end) { const d = await A((ar, t) => { const m = t === "mine" ? ar.mines.slice().sort((a, b) => Math.hypot(a.x - ar.me.x, a.y - ar.me.y) - Math.hypot(b.x - ar.me.x, b.y - ar.me.y))[0] : ar.gate; return { dx: m.x - ar.me.x, dy: m.y - ar.me.y, stun: ar.stun }; }, tgt); if (Math.hypot(d.dx, d.dy) < near || d.stun > 0) break; const w = new Set(); if (Math.abs(d.dx) > 8) w.add(d.dx > 0 ? "d" : "a"); if (Math.abs(d.dy) > 8) w.add(d.dy > 0 ? "s" : "w"); await set(w); await sleep(50); } await set(new Set()); };
+await steer("mine", 6, 40000); await sleep(150);
+await p.screenshot({ path: `${OUT}/01-zapped.png` }); console.log("stun after mine:", await A((ar) => ar.stun.toFixed(2)));
+// hold the minimap
+const g = await A((ar) => { const r = ar.canvas.getBoundingClientRect(); const m = ar.mapGeom(); return { cx: m.cx + r.left, cy: m.cy + r.top }; });
+await p.touchscreen.touchStart(g.cx + 25, g.cy - 25); await sleep(1200);
+await p.screenshot({ path: `${OUT}/02-looking.png` });
+console.log("peek:", await A((ar) => !!ar.peek));
+await p.touchscreen.touchEnd(); await sleep(1200);
+await p.screenshot({ path: `${OUT}/03-back.png` });
+console.log("errors:", JSON.stringify(errors));
+await b.close();
