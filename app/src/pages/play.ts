@@ -1131,11 +1131,11 @@ export function play(root: HTMLElement) {
     const pips = root.querySelector<HTMLElement>("#h-pips")!;
     if (inVault() && w.vault) {
       const max = P(c(), "max_raids_per_epoch"), left = w.vault.raids_left;
-      const hv = harvestFlow();
-      const harv = hv ? `<span class="hp-k harv">+${short(hv.amount)} next harvest</span>` : "";
+      // (the next harvest is shown in the goal bar)
+      const harv = ""; // the next harvest lives in the goal bar and the YOUR BAG sheet; the HUD cell is too narrow for it
       const html = left > 0
         ? `${Array.from({ length: max }, (_, i) => `<i class="${i < left ? "on" : ""}"></i>`).join("")}<span class="hp-k">${left} shot${left === 1 ? "" : "s"}</span>${harv}`
-        : `<span class="hp-k none">No shots left</span>${harv}`;
+        : `<span class="hp-k none">0 shots</span>${harv}`;
       pips.hidden = false;
       pips.setAttribute("aria-label", left > 0 ? `${left} of ${max} shots left` : "No shots left");
       if (pips.innerHTML !== html) pips.innerHTML = html;
@@ -1243,7 +1243,7 @@ export function play(root: HTMLElement) {
     const left = v.raids_left;
     // the button always says what a press will do: SIGNING… while a move is out, the round clock when you are out of shots
     const roundIn = st ? `<b data-until="${st.epoch_ends_ms}">${clock(Number(st.epoch_ends_ms) - chainNow())}</b>` : "";
-    const status = over ? "Over" : busy ? "SIGNING…" : left > 0 ? `${left} shot${left === 1 ? "" : "s"}` : arena.targets.size ? "Defend" : `0 shots · new round ${roundIn}`;
+    const status = over ? "Over" : busy ? "SIGNING…" : left > 0 ? `${left} shot${left === 1 ? "" : "s"}` : (w.incoming && w.incoming.target === sess().vault?.accountId) ? "Shoot back" : `0 shots · new round ${roundIn}`;
     set("shoot", status, over, 0, left > 0 && !busy);
     shootBtn.classList.toggle("signing", !!busy && !over);
     shootBtn.classList.toggle("empty", !busy && left <= 0 && !arena.targets.size);
@@ -1560,7 +1560,7 @@ export function play(root: HTMLElement) {
     const fresh = w.feed.filter((f) => Number(f.n) > lastFeed).sort((a, b) => Number(a.n) - Number(b.n));
     lastFeed = top;
     const me = mine();
-    const at = (id: string | null) => (id && arena.screenOf(id)) || arena.screenOf("me") || { x: 50, y: 50 };
+    const at = (id: string | null) => { const p = (id && arena.screenOf(id)) || arena.screenOf("me") || { x: 50, y: 50 }; return id === "me" || !id ? { ...p, y: p.y - 9 } : p; }; // coins you win pop above your head, not on it
     for (const f of fresh) {
       const amt = full(f.amount);
       const won = BigInt(f.amount) > 0n;
@@ -2119,12 +2119,13 @@ export function play(root: HTMLElement) {
   let trkKey = "";
   function renderRaidTracker() {
     const el = root.querySelector<HTMLElement>("#raid-trk")!;
-    const open = w.myRaids.filter((r) => r.status === "open").sort((a, b) => a.deadline - b.deadline).slice(0, 4);
-    const key = open.map((r) => `${r.id}:${r.deadline}`).join("|") + (guideOn() ? "g" : "");
+    const all = w.myRaids.filter((r) => r.status === "open").sort((a, b) => a.deadline - b.deadline);
+    const open = all.slice(0, 2); // two rows at most: the ROBBING badges in the world carry the rest
+    const key = all.map((r) => `${r.id}:${r.deadline}`).join("|") + (guideOn() ? "g" : "");
     if (key === trkKey) return;
     trkKey = key;
     el.hidden = !open.length || guideOn();
-    el.innerHTML = open.map((r) => `<li class="rt${r.target_kind === "vault" ? " v" : ""}"><span class="av">${avatar(r.target)}</span><span class="rt-n">${N(r.target)}</span><b data-until="${r.deadline}">${clock(r.deadline - chainNow())}</b></li>`).join("");
+    el.innerHTML = open.map((r) => `<li class="rt${r.target_kind === "vault" ? " v" : ""}"><span class="av">${avatar(r.target)}</span><span class="rt-n">${N(r.target)}</span><b data-until="${r.deadline}">${clock(r.deadline - chainNow())}</b></li>`).join("") + (all.length > 2 ? `<li class="rt more">+${all.length - 2} more robbing</li>` : "");
   }
 
   function renderPinned() {

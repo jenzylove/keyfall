@@ -217,7 +217,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .hud { grid-area: hud; display: grid; grid-template-columns: auto 1fr 1.3fr 0.9fr auto auto; align-items: center; height: 56px; padding: 0 4px 0 10px; border-bottom: 2px solid var(--line); background: var(--bg2); }
 /* raids left this epoch: pips by your bag, words when none are left */
 .hud-pips { display: inline-flex; align-items: center; gap: 3px; height: 8px; margin-top: 1px; }
-.hud-pips .hp-k { font: 500 8px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
+.hud-pips .hp-k { white-space: nowrap; font: 500 8px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
 .hud-pips .hp-k.none { color: var(--hazard-ink); letter-spacing: 0.06em; }
 .hud-pips i { width: 7px; height: 5px; background: var(--line2); }
 .hud-pips i.on { background: var(--hazard); }
@@ -417,7 +417,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .field > .events .ev.pin { box-shadow: inset 0 0 0 1px var(--hazard), 0 2px 0 var(--press); }
 .field > .events .ev.pin.calm { box-shadow: inset 0 0 0 1px var(--line2), inset 3px 0 0 var(--dim), 0 2px 0 var(--press); }
 .field > .events .ev .av { width: 20px; height: 20px; }
-.field > .events .ev-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.field > .events .ev-t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; } /* two lines, so the number at the end is never cut */
 .field > .events .ev-clock { font-size: 16px; }
 .field > .events .ev:nth-child(n+3) { display: none; }
 .strip-slot { right: 96px; }
@@ -526,8 +526,8 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .fx-pop.red { color: var(--hazard-ink); }
 .fx-pop.ink { color: var(--dim); font-size: 18px; }
 .fx-pop.cyan { color: var(--cyan-ink); }
-.fx-pop.big { font-size: 44px; text-shadow: 0 4px 0 var(--press), 0 0 24px var(--gold-soft); }
-.fx-pop.big.red { text-shadow: 0 4px 0 var(--press), 0 0 24px var(--red-soft); }
+.fx-pop.big { font-size: 40px; padding: 4px 12px 6px; background: #0c0c0b; color: #ffd60a; box-shadow: 0 4px 0 #000; text-shadow: none; } /* a dark pill: reads on light and dark */
+.fx-pop.big.red { color: #ff3d2e; text-shadow: none; }
 /* SHOOT answers: a nudge when a press cannot fire, SIGNING… while a move is out, the round clock when empty */
 .act.nudge { animation: act-nudge 0.3s ease both; }
 @keyframes act-nudge { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
@@ -947,3 +947,4 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .raid-trk .rt-n { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
 .raid-trk .rt b { font: 700 13px/1 var(--display); font-variant-numeric: tabular-nums; color: #27f0ff; min-width: 34px; text-align: right; }
 @media (min-width: 1024px) { .raid-trk { top: 92px; right: 14px; } }
+.raid-trk .rt.more { font-size: 10px; color: var(--dim); height: 20px; }

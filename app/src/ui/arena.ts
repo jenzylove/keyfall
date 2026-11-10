@@ -708,6 +708,17 @@ export class Arena {
       me.x = clamp(me.x, me.r, this.W - me.r); me.y = clamp(me.y, me.r, this.H - me.r);
       if (!reducedMotion() && Math.hypot(me.vx, me.vy) > 50) { me.trail.push({ x: me.x, y: me.y + me.r * 0.5 }); if (me.trail.length > 7) me.trail.shift(); } else if (me.trail.length) me.trail.shift();
     }
+    // bodies never sit on top of each other: push overlapping pairs apart (cheap at 60 bodies)
+    {
+      const list = this.order.map((id) => this.bodies.get(id)).filter(Boolean) as { x: number; y: number; r: number }[];
+      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], c = list[j];
+        const dx = c.x - a.x, dy = c.y - a.y, d = Math.hypot(dx, dy) || 0.01, min = (a.r + c.r) * 1.05;
+        if (d >= min) continue;
+        const push = Math.min((min - d) / 2, 120 * dt + 1), nx = dx / d, ny = dy / d;
+        a.x -= nx * push; a.y -= ny * push; c.x += nx * push; c.y += ny * push;
+      }
+    }
     const nowMs = performance.now();
     for (const id of this.order) {
       const s = this.bodies.get(id)!, b = this.info.get(id)!;
