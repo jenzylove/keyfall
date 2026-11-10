@@ -453,7 +453,7 @@ export function play(root: HTMLElement) {
     if (!inVault()) return "";
     switch (state) {
       case "open": return "Shoot to rob";
-      case "busy": return "Already being raided";
+      case "busy": return w.myRaids.some((r) => r.status === "open" && r.target === h.account) ? "" : "Already being raided"; // your own raid has its ROBBING badge
       case "rest": return `Resting ${span(Number(h.immune_until) - chainNow())}`;
       case "small": return "Too small to rob";
       case "down": return "Too small for you";
@@ -1243,7 +1243,7 @@ export function play(root: HTMLElement) {
     const left = v.raids_left;
     // the button always says what a press will do: SIGNING… while a move is out, the round clock when you are out of shots
     const roundIn = st ? `<b data-until="${st.epoch_ends_ms}">${clock(Number(st.epoch_ends_ms) - chainNow())}</b>` : "";
-    const status = over ? "Over" : busy ? "SIGNING…" : left > 0 ? `${left} shot${left === 1 ? "" : "s"}` : (w.incoming && w.incoming.target === sess().vault?.accountId) ? "Shoot back" : `0 shots · new round ${roundIn}`;
+    const status = over ? "Over" : busy ? "SIGNING…" : left > 0 ? `${left} shot${left === 1 ? "" : "s"}` : (w.incoming && w.incoming.target === sess().vault?.accountId) ? "Shoot back" : `next round ${roundIn}`;
     set("shoot", status, over, 0, left > 0 && !busy);
     shootBtn.classList.toggle("signing", !!busy && !over);
     shootBtn.classList.toggle("empty", !busy && left <= 0 && !arena.targets.size);
