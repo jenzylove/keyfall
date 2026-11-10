@@ -1315,7 +1315,7 @@ export function play(root: HTMLElement) {
     const refundKey = () => `keyfall.refund.${SOURCES.find((x) => x.id === fundSource)!.chain}`;
     const savedRefund = () => { try { return localStorage.getItem(refundKey()) || ""; } catch { return ""; } };
     show("topup", "", "Top up", `
-      <p class="kick gold">Mainnet · step 2 of 2 · paid through NEAR Intents</p>
+      <p class="kick gold">Mainnet · step 2 of 2</p>
       <h2 class="s-title">Get your $KEYFALL</h2>
       <p class="s-text">Pay with USDC, USDT, SOL or ETH from your own wallet. <b>NEAR Intents</b> swaps it into NEAR in this game's wallet for you: no exchange account, no bridge. Then you buy your $KEYFALL bag with it, straight from the contract's price curve. Part of it builds your quantum vault and pays for your moves.</p>
       <div class="pick tu-amt" role="group" aria-label="How much">${[1, 2, 5].map((n) => `<button type="button" data-near="${n}" aria-pressed="${n === fundNear}"><b class="tu-price" data-n="${n}">${n} NEAR</b><small>${n} NEAR</small></button>`).join("")}</div>
