@@ -469,6 +469,26 @@ export async function fundingQuote(source: "usdc-sol" | "usdc-base" | "usdt-sol"
   if (!r.ok) throw new ChainError(j?.error || `funding quote failed (${r.status})`);
   return j as FundingQuote;
 }
+/** Live USD prices from NEAR Intents (1Click), for showing what a top up costs in the coin you pay with. */
+let priceCache: { at: number; byId: Record<string, number> } | null = null;
+export async function intentPrices(): Promise<Record<string, number>> {
+  if (priceCache && Date.now() - priceCache.at < 60_000) return priceCache.byId;
+  const r = await fetch("https://1click.chaindefuser.com/v0/tokens");
+  const list: { assetId: string; price: number }[] = await r.json();
+  const byId: Record<string, number> = {};
+  for (const t of list) if (t.assetId && t.price) byId[t.assetId] = Number(t.price);
+  priceCache = { at: Date.now(), byId };
+  return byId;
+}
+export const FUND_ASSET: Record<string, string> = {
+  "usdc-sol": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+  "usdt-sol": "nep141:sol-c800a4bd850783ccb82c2b2c7e84175443606352.omft.near",
+  sol: "nep141:sol.omft.near",
+  "usdc-base": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+  "eth-base": "nep141:base.omft.near",
+};
+export const NEAR_ASSET = "nep141:wrap.near";
+
 export async function fundingStatus(depositAddress: string): Promise<string> {
   const r = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`).catch(() => null);
   const j: any = r ? await r.json().catch(() => ({})) : {};

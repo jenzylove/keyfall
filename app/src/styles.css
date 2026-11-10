@@ -956,3 +956,6 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .t-copy { position: relative; z-index: 2; }
 .premise { background: color-mix(in srgb, var(--bg) 82%, transparent); padding: 6px 10px; }
 .btn.play-real { background: var(--bg); }
+.tu-amt button { display: grid; gap: 2px; padding: 10px 4px; }
+.tu-amt button b { font: 700 17px/1 var(--display); }
+.tu-amt button small { font: 500 10px/1 var(--mono); opacity: 0.7; letter-spacing: 0.04em; }
