@@ -1,8 +1,8 @@
 // Vercel Node function: a NEAR Intents (1Click) quote that turns a deposit on
 // another chain into NEAR in a player's mainnet wallet. The player sends the
 // quoted amount to the quoted deposit address from any wallet; 1Click swaps
-// and delivers native NEAR to their wallet account. A failed swap is refunded
-// to the same account's Intents balance, which only the player's key controls.
+// and delivers native NEAR to their wallet account. A failed or short swap is
+// refunded on the chain the player paid from, to the address they give.
 //
 // Env: ONECLICK_JWT (optional; without it 1Click charges its public fee).
 
@@ -28,6 +28,9 @@ export default async function handler(req: any, res: any) {
   if (!/^[0-9a-f]{64}$/.test(accountId)) return res.status(400).json({ error: "accountId must be a 64 character implicit account" });
   const src = SOURCES[String(body.source || "")];
   if (!src) return res.status(400).json({ error: `source must be one of ${Object.keys(SOURCES).join(", ")}` });
+  const refundTo = String(body.refundTo || "").trim();
+  const onSolana = src.chain === "Solana";
+  if (onSolana ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(refundTo) : !/^0x[0-9a-fA-F]{40}$/.test(refundTo)) return res.status(400).json({ error: `refundTo must be your ${src.chain} address (refunds go back there)` });
   const near = Number(body.near);
   if (!(near >= 0.5 && near <= 50)) return res.status(400).json({ error: "near must be between 0.5 and 50" });
 
@@ -42,7 +45,7 @@ export default async function handler(req: any, res: any) {
         dry: false, swapType: "EXACT_OUTPUT", slippageTolerance: 100,
         originAsset: src.asset, depositType: "ORIGIN_CHAIN",
         destinationAsset: NEAR_ASSET, amount,
-        refundTo: accountId, refundType: "INTENTS",
+        refundTo, refundType: "ORIGIN_CHAIN",
         recipient: accountId, recipientType: "DESTINATION_CHAIN", deadline,
       }),
     });

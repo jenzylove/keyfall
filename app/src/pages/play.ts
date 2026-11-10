@@ -1282,15 +1282,45 @@ export function play(root: HTMLElement) {
   let fundSource = SOURCES[0].id;
   let fundNear = 1;
   let fundPoll = 0;
+  /** Before any real money goes in: the wallet's recovery code, saved by the player. */
+  async function openWalletBackup(then: () => void) {
+    if (!sess().wallet) chain.mainnetWallet();
+    const code = await chain.walletRecoveryCode();
+    show("topup", "", "Back up your wallet", `
+      <p class="kick gold">Mainnet · step 1 of 2</p>
+      <h2 class="s-title">Save your wallet code first</h2>
+      <p class="s-text">Your NEAR lands in a wallet made on this phone. Its key is sealed in this browser and nobody else has a copy, not even us. If you clear this browser or lose the phone, this code is the only way back to your NEAR.</p>
+      ${code ? `<div class="code">${code.split("-").map((b, i) => `<span><i>${i + 1}</i>${b}</span>`).join("")}</div>
+      <div class="row2"><button type="button" class="btn ghost" id="wb-copy">Copy</button><button type="button" class="btn ghost" id="wb-dl">Download</button></div>` : `<p class="s-msg bad">This browser cannot store a sealed key, so a wallet made here would not survive a reload. Open the game in a normal browser window.</p>`}
+      <label class="m-check"><input type="checkbox" id="wb-ok"/> <span>I saved this code somewhere safe</span></label>
+      <button class="btn wide" id="wb-go" disabled>Continue to top up</button>
+      <p class="s-msg" id="wb-msg" role="status"></p>`, "gold");
+    const B = sheet!.body, out = B.querySelector<HTMLElement>("#wb-msg")!, ok = B.querySelector<HTMLInputElement>("#wb-ok")!, go = B.querySelector<HTMLButtonElement>("#wb-go")!;
+    if (!code) { ok.disabled = true; return; }
+    ok.onchange = () => { go.disabled = !ok.checked; };
+    B.querySelector<HTMLButtonElement>("#wb-copy")!.onclick = async () => { try { await navigator.clipboard.writeText(code); out.className = "s-msg ok"; out.textContent = "Copied. Paste it somewhere safe, like a password manager."; } catch { out.className = "s-msg"; out.textContent = "Copy is blocked here. Write the 8 blocks down or download them."; } };
+    B.querySelector<HTMLButtonElement>("#wb-dl")!.onclick = () => {
+      const text = `${GAME} mainnet wallet recovery code\n\nWallet: ${sess().wallet?.accountId}\nCode: ${code}\n\nThis code opens your wallet and its NEAR on any device: menu, Restore a wallet. Keep it private.\n`;
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" })); a.download = "keyfall-wallet.txt"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      out.className = "s-msg ok"; out.textContent = "Saved as a text file.";
+    };
+    go.onclick = () => { chain.markWalletBackedUp(); then(); };
+  }
+
   function openTopUp() {
     clearInterval(fundPoll);
+    if (MAIN && !chain.walletBackedUp()) { void openWalletBackup(() => openTopUp()); return; }
     const wallet = sess().wallet?.accountId || chain.mainnetWallet().accountId;
+    const refundKey = () => `keyfall.refund.${SOURCES.find((x) => x.id === fundSource)!.chain}`;
+    const savedRefund = () => { try { return localStorage.getItem(refundKey()) || ""; } catch { return ""; } };
     show("topup", "", "Top up", `
       <p class="kick gold">Mainnet</p>
       <h2 class="s-title">Top up your wallet</h2>
       <p class="s-text">Your bag, your vault and every move run on NEAR. 1 NEAR covers a bag, the vault and plenty of moves.</p>
       <div class="pick" role="group" aria-label="How much NEAR">${[1, 2, 5].map((n) => `<button type="button" data-near="${n}" aria-pressed="${n === fundNear}">${n} NEAR</button>`).join("")}</div>
       <label class="m-field"><span>Pay with</span><select id="tu-src">${SOURCES.map((s) => `<option value="${s.id}" ${s.id === fundSource ? "selected" : ""}>${s.label} on ${s.chain}</option>`).join("")}</select></label>
+      <label class="m-field"><span id="tu-rk">Your ${SOURCES.find((x) => x.id === fundSource)!.chain} address, for refunds</span><input id="tu-refund" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(savedRefund())}" placeholder="the wallet you pay from"/></label>
+      <p class="m-hint">If the swap cannot finish, your deposit goes back to this address on the chain you paid from.</p>
       <button class="btn wide" id="tu-go">Get a deposit address</button>
       <p class="s-msg" id="tu-msg" role="status"></p>
       <div id="tu-quote" hidden></div>
@@ -1302,14 +1332,23 @@ export function play(root: HTMLElement) {
       </div>`, "gold");
     const B = sheet!.body;
     for (const b of B.querySelectorAll<HTMLButtonElement>("[data-near]")) b.onclick = () => { fundNear = Number(b.dataset.near); for (const x of B.querySelectorAll<HTMLButtonElement>("[data-near]")) x.setAttribute("aria-pressed", String(x === b)); };
-    B.querySelector<HTMLSelectElement>("#tu-src")!.onchange = (e) => { fundSource = (e.target as HTMLSelectElement).value as typeof fundSource; };
+    const refundIn = B.querySelector<HTMLInputElement>("#tu-refund")!;
+    B.querySelector<HTMLSelectElement>("#tu-src")!.onchange = (e) => {
+      fundSource = (e.target as HTMLSelectElement).value as typeof fundSource;
+      B.querySelector<HTMLElement>("#tu-rk")!.textContent = `Your ${SOURCES.find((x) => x.id === fundSource)!.chain} address, for refunds`;
+      refundIn.value = savedRefund();
+    };
     const out = B.querySelector<HTMLElement>("#tu-msg")!;
     const go = B.querySelector<HTMLButtonElement>("#tu-go")!;
     go.onclick = async () => {
       go.disabled = true; go.classList.add("busy"); go.textContent = "Getting a quote";
       out.className = "s-msg"; out.textContent = "";
       try {
-        const q = await chain.fundingQuote(fundSource, fundNear);
+        const refundTo = refundIn.value.trim();
+        const onSol = SOURCES.find((x) => x.id === fundSource)!.chain === "Solana";
+        if (onSol ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(refundTo) : !/^0x[0-9a-fA-F]{40}$/.test(refundTo)) throw new Error(`Paste your ${onSol ? "Solana" : "Base"} wallet address for refunds.`);
+        try { localStorage.setItem(refundKey(), refundTo); } catch {}
+        const q = await chain.fundingQuote(fundSource, fundNear, refundTo);
         const src = SOURCES.find((s) => s.id === fundSource)!;
         const until = new Date(q.deadline);
         B.querySelector<HTMLElement>("#tu-quote")!.hidden = false;
@@ -1329,13 +1368,13 @@ export function play(root: HTMLElement) {
           const st = await chain.fundingStatus(q.depositAddress);
           const el = B.querySelector<HTMLElement>("#tu-status");
           if (!el) return;
-          const words: Record<string, string> = { PENDING_DEPOSIT: "Waiting for your deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", PROCESSING: "Swapping to NEAR…", SUCCESS: "NEAR delivered. Opening your wallet…", REFUNDED: "The swap was refunded. Try another amount.", FAILED: "The swap failed. Nothing was lost; try again.", INCOMPLETE_DEPOSIT: "The deposit was short. Send the rest to the same address." };
+          const words: Record<string, string> = { PENDING_DEPOSIT: "Waiting for your deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", PROCESSING: "Swapping to NEAR…", SUCCESS: "NEAR delivered. Opening your wallet…", REFUNDED: "The swap could not finish: your deposit went back to your refund address.", FAILED: "The swap failed: your deposit goes back to your refund address.", INCOMPLETE_DEPOSIT: "The deposit was short. Send the rest to the same address." };
           if (st !== last) { last = st; el.innerHTML = `<i class="dot${st === "SUCCESS" ? " safe" : ""}"></i> ${esc(words[st] || "Waiting for your deposit…")}`; }
         }, 5000);
       } catch (e) {
         const msg = String((e as any)?.message || "");
         out.className = "s-msg bad";
-        out.textContent = /404|405|failed \(/.test(msg) ? "Paying from another chain is not switched on yet. Send NEAR to the wallet below instead." : plainError(e);
+        out.textContent = /^Paste your/.test(msg) ? msg : /refundTo/.test(msg) ? "That refund address was not accepted. Paste the wallet address you pay from." : /404|405|failed \(/.test(msg) ? "Paying from another chain is not switched on yet. Send NEAR to the wallet below instead." : plainError(e);
       } finally {
         go.disabled = false; go.classList.remove("busy"); go.textContent = "Get a deposit address";
       }
@@ -2035,6 +2074,10 @@ export function play(root: HTMLElement) {
         ${MAIN && s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out NEAR</span><span>›</span></button>` : ""}
         ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>` : ""}
         <button type="button" class="set-item" id="st-theme"><span>Theme</span><span>${theme === "dark" ? "Dark" : "Light"}</span></button>
+        ${MAIN && s.wallet ? `<button type="button" class="set-item" id="st-wbk"><span>Back up wallet code</span><span>${chain.walletBackedUp() ? "Saved" : "Not saved"}</span></button>` : ""}
+        ${MAIN ? `<details class="set-item det"><summary><span>Restore a wallet from a code</span><span>›</span></summary>
+          <div class="restore"><label class="m-field"><span>Wallet recovery code</span><input id="rw-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
+          <button type="button" class="btn wide ghost" id="rw-go">Restore wallet</button></div></details>` : ""}
         <details class="set-item det"><summary><span>Restore a vault from a code</span><span>›</span></summary>
           <div class="restore"><label class="m-field"><span>Vault name</span><input id="rs-n" autocomplete="off" autocapitalize="off" spellcheck="false"/></label>
           <label class="m-field"><span>Recovery code</span><input id="rs-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
@@ -2088,6 +2131,15 @@ export function play(root: HTMLElement) {
         setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         out.className = "s-msg ok"; out.textContent = "Saved as a text file."; mark();
       };
+    };
+    const wbk = B.querySelector<HTMLButtonElement>("#st-wbk");
+    if (wbk) wbk.onclick = () => void openWalletBackup(() => { sheet?.close(); toast({ tone: "gold", title: "Wallet code saved." }); });
+    const rw = B.querySelector<HTMLButtonElement>("#rw-go");
+    if (rw) rw.onclick = async () => {
+      const code = B.querySelector<HTMLInputElement>("#rw-c")!.value.trim();
+      out.className = "s-msg"; out.textContent = "Opening the wallet…";
+      try { const r = await chain.restoreWallet(code); const bal = await chain.nearBalance(r.accountId); out.className = "s-msg ok"; out.textContent = `Wallet restored: ${chain.fmtNear(bal, 3)} NEAR.`; missionKey = ""; await refresh(); }
+      catch (e) { out.className = "s-msg bad"; out.textContent = plainError(e); }
     };
     B.querySelector<HTMLButtonElement>("#rs-go")!.onclick = async () => {
       const n = B.querySelector<HTMLInputElement>("#rs-n")!.value.trim();

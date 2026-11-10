@@ -9,6 +9,7 @@ import {
   publicKeyFromPrivate,
   signerFromPrivateKey,
   fromBase58,
+  toBase58,
   bytesToBase64,
 } from "@fastnear/utils";
 
@@ -192,7 +193,8 @@ export async function nearBalance(accountId: string): Promise<bigint> {
 const LS_WALLET = NETWORK === "mainnet" ? "keyfall.mainnet.wallet.v1" : "qday.wallet.v1";
 const LS_VAULT = NETWORK === "mainnet" ? "keyfall.mainnet.vault.v1" : "qday.vault.v1";
 
-interface WalletRecord { accountId: string; secretKey: string; contract: string }
+/** The wallet key: sealed like the vault seed (iv + sealed); `secretKey` is only read to migrate an older plain record. */
+interface WalletRecord { accountId: string; contract: string; iv?: string; sealed?: string; secretKey?: string }
 interface VaultRecord { accountId: string; iv: string; sealed: string; contract: string }
 
 function lsGet<T>(k: string): T | null {
@@ -263,6 +265,42 @@ export function codeToSeed(code: string): Uint8Array {
   return Uint8Array.from(hex.match(/.{2}/g)!.map((h) => parseInt(h, 16)));
 }
 
+/** An ed25519 NEAR secret key from its 32 byte seed (the seed alone is the backup). */
+function secretFromSeed(seed: Uint8Array): string {
+  const pub = fromBase58(publicKeyFromPrivate(`ed25519:${toBase58(seed)}`).replace(/^ed25519:/, ""));
+  return `ed25519:${toBase58(new Uint8Array([...seed, ...pub]))}`;
+}
+const seedOfSecret = (secretKey: string) => fromBase58(secretKey.replace(/^ed25519:/, "")).slice(0, 32);
+const implicitOf = (secretKey: string) => [...fromBase58(publicKeyFromPrivate(secretKey).replace(/^ed25519:/, ""))].map((b) => b.toString(16).padStart(2, "0")).join("");
+let walletSecret: string | null = null; // in memory only; on disk the seed is sealed
+let walletSaving: Promise<void> = Promise.resolve();
+async function storeWallet(accountId: string, secretKey: string) {
+  try { lsSet(LS_WALLET, { accountId, ...(await sealSeed(seedOfSecret(secretKey))), contract: CONTRACT } satisfies WalletRecord); }
+  catch { /* no IndexedDB: the wallet lives in memory for this visit only */ }
+}
+function useWallet(accountId: string, secretKey: string) {
+  walletSecret = secretKey;
+  walletSigner = { accountId, signer: signerFromPrivateKey(secretKey) };
+}
+const LS_WALLET_SAVED = `${LS_WALLET}.saved`;
+/** Whether the player confirmed they saved this wallet's recovery code. */
+export const walletBackedUp = () => { try { return !!walletSigner && localStorage.getItem(LS_WALLET_SAVED) === walletSigner.accountId; } catch { return false; } };
+export const markWalletBackedUp = () => { try { if (walletSigner) localStorage.setItem(LS_WALLET_SAVED, walletSigner.accountId); } catch {} };
+/** The wallet's recovery code (its 32 byte seed in 8 blocks), for the player's own backup. */
+export async function walletRecoveryCode(): Promise<string | null> {
+  await walletSaving;
+  return walletSecret ? seedToCode(seedOfSecret(walletSecret)) : null;
+}
+/** Restore a wallet on this device from its recovery code. */
+export async function restoreWallet(code: string): Promise<{ accountId: string }> {
+  const secretKey = secretFromSeed(codeToSeed(code));
+  const accountId = implicitOf(secretKey);
+  await storeWallet(accountId, secretKey);
+  useWallet(accountId, secretKey);
+  try { localStorage.setItem(LS_WALLET_SAVED, accountId); } catch {}
+  return { accountId };
+}
+
 // ------------------------------------------------------------------ session
 
 export interface Session {
@@ -275,7 +313,14 @@ let vaultSigner: { accountId: string; signer: MlDsa65Signer } | null = null;
 
 export async function loadSession(): Promise<Session> {
   const w = lsGet<WalletRecord>(LS_WALLET);
-  if (w && w.contract === CONTRACT) walletSigner = { accountId: w.accountId, signer: signerFromPrivateKey(w.secretKey) };
+  if (w && w.contract === CONTRACT && !walletSigner) {
+    try {
+      if (w.sealed && w.iv) useWallet(w.accountId, secretFromSeed(await openSeed({ accountId: w.accountId, iv: w.iv, sealed: w.sealed, contract: w.contract })));
+      else if (w.secretKey) { useWallet(w.accountId, w.secretKey); await storeWallet(w.accountId, w.secretKey); } // an older plain record: seal it now
+    } catch {
+      walletSigner = null;
+    }
+  }
   const v = lsGet<VaultRecord>(LS_VAULT);
   if (v && v.contract === CONTRACT && !vaultSigner) {
     try {
@@ -295,9 +340,11 @@ export function session(): Session {
 export function forget() {
   try {
     localStorage.removeItem(LS_WALLET);
+    localStorage.removeItem(LS_WALLET_SAVED);
     localStorage.removeItem(LS_VAULT);
   } catch {}
   walletSigner = null;
+  walletSecret = null;
   vaultSigner?.signer.destroy?.();
   vaultSigner = null;
 }
@@ -394,8 +441,8 @@ export async function join(): Promise<{ accountId: string; via: "sponsor" | "fau
   }
   for (let i = 0; i < 30 && (await nearBalance(accountId)) === 0n; i++) await new Promise((r) => setTimeout(r, 1500));
   if ((await nearBalance(accountId)) === 0n) throw new ChainError("The new wallet was not funded. Try again in a minute.");
-  lsSet(LS_WALLET, { accountId, secretKey, contract: CONTRACT } satisfies WalletRecord);
-  walletSigner = { accountId, signer: signerFromPrivateKey(secretKey) };
+  await storeWallet(accountId, secretKey);
+  useWallet(accountId, secretKey);
   return { accountId, via };
 }
 
@@ -405,20 +452,19 @@ export async function join(): Promise<{ accountId: string; via: "sponsor" | "fau
 export function mainnetWallet(): { accountId: string } {
   if (NETWORK !== "mainnet") throw new ChainError("Mainnet only.");
   if (walletSigner) return { accountId: walletSigner.accountId };
-  const secretKey = privateKeyFromRandom();
-  const publicKey = publicKeyFromPrivate(secretKey);
-  const accountId = [...fromBase58(publicKey.replace(/^ed25519:/, ""))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  lsSet(LS_WALLET, { accountId, secretKey, contract: CONTRACT } satisfies WalletRecord);
-  walletSigner = { accountId, signer: signerFromPrivateKey(secretKey) };
+  const secretKey = secretFromSeed(crypto.getRandomValues(new Uint8Array(32)));
+  const accountId = implicitOf(secretKey);
+  useWallet(accountId, secretKey);
+  walletSaving = storeWallet(accountId, secretKey); // sealed on disk; the recovery code is the only copy that leaves the device
   return { accountId };
 }
 
 export interface FundingQuote { depositAddress: string; amountIn: string; amountInFormatted: string; amountOut: string; asset: string; chain: string; deadline: string }
 /** A NEAR Intents quote: send `amountInFormatted` of `asset` on `chain` to
  * `depositAddress`, and `amountOut` NEAR lands in this device's wallet. */
-export async function fundingQuote(source: "usdc-sol" | "usdc-base" | "usdt-sol" | "sol" | "eth-base", near: number): Promise<FundingQuote> {
+export async function fundingQuote(source: "usdc-sol" | "usdc-base" | "usdt-sol" | "sol" | "eth-base", near: number, refundTo: string): Promise<FundingQuote> {
   const w = mainnetWallet();
-  const r = await fetch(apiUrl("/api/fund"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId: w.accountId, source, near }) });
+  const r = await fetch(apiUrl("/api/fund"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ accountId: w.accountId, source, near, refundTo }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new ChainError(j?.error || `funding quote failed (${r.status})`);
   return j as FundingQuote;

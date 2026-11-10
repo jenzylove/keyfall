@@ -948,3 +948,5 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .raid-trk .rt b { font: 700 13px/1 var(--display); font-variant-numeric: tabular-nums; color: #27f0ff; min-width: 34px; text-align: right; }
 @media (min-width: 1024px) { .raid-trk { top: 92px; right: 14px; } }
 .raid-trk .rt.more { font-size: 10px; color: var(--dim); height: 20px; }
+.m-check { display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; font: 500 14px/1.4 var(--mono); color: var(--ink); cursor: pointer; }
+.m-check input { width: 22px; height: 22px; accent-color: var(--gold); flex: none; }
