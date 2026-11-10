@@ -14,7 +14,7 @@ import { explainRaid, npcName } from "../../npc/rules.mjs";
 import * as sfx from "../ui/sound";
 import * as fx from "../ui/fx";
 import { line } from "../ui/lines";
-import { ART_DOOR, ART_QC, ART_SATOSHI, ART_VAULT, MARK } from "../ui/pixels";
+import { ART_DOOR, ART_QC, ART_SATOSHI_RED, ART_VAULT, MARK } from "../ui/pixels";
 import qrcode from "qrcode-generator";
 
 const MAIN = chain.IS_MAINNET;
@@ -152,7 +152,7 @@ export function play(root: HTMLElement) {
       <header class="hud">
         <button type="button" class="hud-net ${NET_LABEL.toLowerCase()}" id="h-net" aria-label="${NET_LABEL} arena. Switch arena">${MARK}<span>${NET_LABEL}</span></button>
         <div class="hud-cell"><span class="hud-k">Q-Day in</span><span class="hud-v" id="h-qday">··</span></div>
-        <div class="hud-cell bag"><span class="hud-k">Your bag</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span><span class="hud-pips" id="h-pips" hidden></span></div>
+        <div class="hud-cell bag" role="button" tabindex="0" aria-label="Your bag. Open the numbers"><span class="hud-k">Your bag ›</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span><span class="hud-pips" id="h-pips" hidden></span></div>
         <div class="hud-cell rank"><span class="hud-k">Rank</span><span class="hud-v" id="h-rank">··</span></div>
         <button class="hud-snd" type="button" id="h-snd" aria-label="Sound"></button>
         <button class="hud-menu" type="button" id="h-menu" aria-label="Menu">${I.menu}<i class="rdot" hidden></i></button>
@@ -200,7 +200,7 @@ export function play(root: HTMLElement) {
   /** One message at a time: a line for you goes on the guide card while it teaches, else as a bubble. */
   const tell = (text: string, ms = 3600) => arena.say("me", text, ms, true); // refusals are bubbles at the body, never text on the guide card
   arena.setGateArt(ART_VAULT);
-  arena.setBossArt(ART_SATOSHI);
+  arena.setBossArt(ART_SATOSHI_RED);
   field.insertBefore(arena.el, field.firstChild);
   arena.onDash = (fill) => dashBtn.style.setProperty("--fill", String(fill));
   const dashBtn = root.querySelector<HTMLButtonElement>("#a-dash")!;
@@ -209,22 +209,45 @@ export function play(root: HTMLElement) {
   dashBtn.addEventListener("click", (e) => e.preventDefault());
   // SHOOT: a shot is local and free; only a hit on an open target reaches the chain
   const shootBtn = root.querySelector<HTMLButtonElement>("#shoot-btn")!;
-  const doShoot = (e?: Event) => {
+  /** Every SHOOT press answers within a frame: a shot, a switch of lock, or a bubble that says why not. */
+  const doShoot = (e?: Event, auto = false) => {
     e?.preventDefault();
     sfx.unlock();
     const s = sess();
+    const nudge = () => { shootBtn.classList.remove("nudge"); void shootBtn.offsetWidth; shootBtn.classList.add("nudge"); };
     if (!s.wallet && !s.vault) { sfx.play("deny"); arena.say("me", "Grab a bag first.", 2400, true); return; }
-    if (!inVault()) { sfx.play("deny"); arena.say("me", "Get gold first. Only gold can shoot.", 2600, true); return; }
-    if (busy) return;
+    if (!inVault()) { sfx.play("deny"); nudge(); arena.say("me", "Get gold first. Only gold can shoot.", 2600, true); return; }
+    if (busy) { if (!auto) nudge(); return; } // the button reads SIGNING… while a move is on its way
     if (!arena.shootReady) return;
-    if ((w.vault?.raids_left || 0) <= 0 && !arena.targets.size) { sfx.play("deny"); arena.say("me", `No shots left. They come back in ${span(Number(w.stats!.epoch_ends_ms) - chainNow())}.`, 3000, true); return; }
+    const open = (id: string) => arena.targets.has(id) && !w.myRaids.some((r) => r.status === "open" && r.target === id);
+    const lock = arena.lockId;
+    const mineOn = lock ? w.myRaids.find((r) => r.status === "open" && r.target === lock) : null;
+    if (lock && mineOn) {
+      // the locked body is already being robbed by you: switch to the next open target in range, else say so
+      const next = [...arena.targets].filter((id) => id !== lock && id !== "satoshi" && open(id) && arena.distTo(id) <= arena.viewSpan).sort((a, b) => arena.distTo(a) - arena.distTo(b))[0];
+      if (next) arena.lockOn(next);
+      else { if (auto) return; sfx.play("deny"); nudge(); arena.say("me", `Already robbing ${nameOf(lock, mine())} · coins in ${clock(mineOn.deadline - chainNow())}`, 3000, true); return; }
+    }
+    const left = w.vault?.raids_left || 0;
+    const canDefend = !!w.incoming && w.incoming.target === s.vault?.accountId;
+    if (left <= 0 && !canDefend && !arena.targets.has("satoshi")) { if (auto) return; sfx.play("deny"); nudge(); arena.say("me", `No shots left · new round in ${clock(Number(w.stats!.epoch_ends_ms) - chainNow())}`, 3000, true); return; }
+    if (!arena.aimTarget()) {
+      if (auto) return;
+      sfx.play("deny"); nudge();
+      arena.say("me", "Nothing to shoot here · red marks are targets", 3000, true);
+      const nearest = [...arena.targets].filter((id) => id !== "satoshi").sort((a, b) => arena.distTo(a) - arena.distTo(b))[0] || (arena.targets.has("satoshi") ? "satoshi" : null);
+      if (nearest) arena.pointAt(nearest, 3500);
+      return;
+    }
     if (arena.shoot()) { sfx.play("zap"); sfx.vibrate(12); shootBtn.classList.add("used"); setTimeout(() => shootBtn.classList.remove("used"), 600); }
   };
   shootBtn.addEventListener("pointerdown", doShoot);
   shootBtn.addEventListener("click", (e) => e.preventDefault());
   arena.onShootKey = () => doShoot();
   // tap a body to lock on: while it can be raided your shots go to it on their own
-  arena.onAutoFire = () => doShoot();
+  arena.onAutoFire = () => doShoot(undefined, true);
+  // a raider's shot landed on you: pin the strip right away so the hit and its words arrive together
+  arena.onHitMe = () => { renderPinned(); };
   arena.onLock = (id) => {
     sfx.unlock();
     if (!id) return;
@@ -316,6 +339,7 @@ export function play(root: HTMLElement) {
   let huntBusy = false;
   let stripT = 0;
   let prevRaider = "";
+  let prevBossKey = "";
   const stripOpen = () => !!root.querySelector(".strip");
 
   // ---------------------------------------------------------------- titles
@@ -372,7 +396,7 @@ export function play(root: HTMLElement) {
     syncClock(stats.now_ms);
     // mainnet only: what the bag would sell for right now, from the contract's own quote
     let sellQuote: bigint | null = null;
-    if (MAIN) {
+    {
       const bag = vault ? BigInt(vault.balance) : wallet ? BigInt(wallet.balance) : 0n;
       if (bag > 0n) { const q = await safe(chain.quoteSell(bag.toString())); sellQuote = q ? BigInt(q) : null; }
     }
@@ -442,8 +466,13 @@ export function play(root: HTMLElement) {
     const v = w.vault, st = w.stats;
     if (!inVault() || !v || !st) return "Get gold first";
     if (w.vaultBal < PB(c(), "boss_min_balance")) return `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins`;
-    if (!v.boss_ready) return `Ready in ${span(Number(st.epoch_ends_ms) - chainNow())}`;
-    return "Shoot his core";
+    if (!v.boss_ready) return `next hit in ${clock(Number(st.epoch_ends_ms) - chainNow())}`;
+    return "SHOOT HIM";
+  }
+  /** What a boss hit takes right now: boss_bps of his stash, capped by boss_cap (the contract's rule). */
+  function bossHitNow(): bigint {
+    const st = w.stats; if (!st) return 0n;
+    return minB(bps(BigInt(st.satoshi_tokens), P(c(), "boss_bps")), PB(c(), "boss_cap"));
   }
 
   function rivals(): Holder[] {
@@ -729,11 +758,11 @@ export function play(root: HTMLElement) {
   const CARDS: Record<number, { title: string; text: string; tap?: boolean }> = {
     1: { title: "This is you.", text: TOUCH ? "Drag anywhere to move." : "WASD or the arrow keys to move." },
     2: { title: "You are red.", text: "Your coins sit behind an old key. A quantum computer can crack it, so anyone can rob you, and red bags leak coins over time.", tap: true },
-    3: { title: "Get to the gold door.", text: "It locks your coins behind a quantum key." },
-    4: { title: "You are gold now. Safe.", text: "Every red bag now leaks coins to you at each harvest, and only gold players can attack.", tap: true },
+    3: { title: "Get to the gold door.", text: "It makes a new account locked by an ML-DSA-65 key, made in your phone. A quantum computer cannot crack it." },
+    4: { title: "You are gold now. Safe.", text: "Every move you make now is signed with that quantum key. Red bags leak coins to you every round.", tap: true },
     5: { title: "Rob a red bag.", text: TOUCH ? "Tap a player with a red target mark to lock on. Get close and your shots fire on their own." : "Click a player with a red target mark to lock on. Get close and your shots fire on their own." },
     6: { title: "Now they hunt you too.", text: "When a raider comes for your vault you lock onto it: shoot it back to win its stake. A SHIELD makes their raids take less, DASH gets you away.", tap: true },
-    7: { title: "Your goal:", text: "Be the richest vault when Q-Day hits. Red bags freeze forever that day.", tap: true },
+    7: { title: "Your goal:", text: "Be the richest vault when Q-Day hits. Red bags freeze forever that day. Satoshi is the boss: every round each vault can shoot his stash once.", tap: true },
   };
 
   /** The nearest real body you can raid right now, or null. */
@@ -946,6 +975,10 @@ export function play(root: HTMLElement) {
     await act("defend", "signing with your quantum key…", () => chain.defend(r.id), () => {
       sfx.play("clang"); sfx.vibrate([40, 30, 40]);
       arena.burst("me", "#27f0ff", 16);
+      arena.badge(r.attacker, "BLOCKED", "#27f0ff", 2000);
+      arena.fly(r.attacker, "me", "#ffd60a", 12);
+      const won = BigInt(r.stake) - bps(BigInt(r.stake), P(c(), "raid_burn_bps"));
+      setTimeout(() => { fx.pop(field, `+${full(won)}`, "gold", arena.screenOf("me") || undefined); sfx.play("coins"); }, 500);
       fx.banner(field, "DEFENDED", `${nameOf(r.attacker, mine())}'s stake is yours`, "gold");
       arena.say(r.attacker, line(r.attacker, "defended"));
       earn("wall");
@@ -990,8 +1023,9 @@ export function play(root: HTMLElement) {
       const dealt = burn > 0n ? (kept * 10000n + (10000n - burn) - 1n) / (10000n - burn) : kept;
       arena.shake(); fx.freeze(game, 120); sfx.play("thud"); sfx.vibrate([90, 30, 50]);
       arena.fly("satoshi", "me", "#ffd60a", 14);
+      arena.badge("satoshi", `−${full(dealt)}`, "#ff3d2e", 2400);
+      setTimeout(() => { fx.pop(field, `+${full(kept)}`, "gold", arena.screenOf("me") || undefined); sfx.play("coins"); }, 600);
       arena.say("satoshi", line("satoshi", "hit", String(Math.random())));
-      fx.banner(field, `YOU DEALT ${full(dealt)}`, `kept ${full(kept)}`, "gold", 3000);
       earn("slayer");
     });
     return { ok: true };
@@ -1008,6 +1042,11 @@ export function play(root: HTMLElement) {
       <label class="m-field"><span>Vault name</span><input id="m-name" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(vaultName)}"/></label>
       <p class="m-hint" id="m-hint"></p>
       <button class="btn wide hot" id="n-go">Build vault & move in</button>
+      <ol class="n-steps" id="n-steps" hidden>
+        <li data-step="1"><i></i><span>Creating your vault account</span><b></b></li>
+        <li data-step="2"><i></i><span>Adding your quantum key</span><b></b></li>
+        <li data-step="3"><i></i><span>Moving your coins in</span><b></b></li>
+      </ol>
       <p class="s-msg" id="n-msg" role="status"></p>`, "gold");
     const B = sheet!.body;
     const name = B.querySelector<HTMLInputElement>("#m-name")!, hint = B.querySelector<HTMLElement>("#m-hint")!, go = B.querySelector<HTMLButtonElement>("#n-go")!;
@@ -1027,19 +1066,38 @@ export function play(root: HTMLElement) {
     };
     name.addEventListener("input", check);
     check();
+    // three named steps that tick as each confirms, with the seconds each one took
+    const steps = B.querySelector<HTMLElement>("#n-steps")!;
+    let stepT = 0, stepTimer = 0;
+    const stepOn = (n: number) => {
+      steps.hidden = false;
+      stepT = Date.now();
+      for (const li of steps.querySelectorAll<HTMLElement>("li")) { const k = Number(li.dataset.step); li.className = k < n ? "done" : k === n ? "now" : ""; }
+      clearInterval(stepTimer);
+      stepTimer = window.setInterval(() => { const li = steps.querySelector<HTMLElement>(`li[data-step="${n}"] b`); if (li) li.textContent = `${((Date.now() - stepT) / 1000).toFixed(0)} s`; }, 250);
+    };
+    const stepDone = (n: number) => { const li = steps.querySelector<HTMLElement>(`li[data-step="${n}"]`); if (li) { li.className = "done"; li.querySelector("b")!.textContent = `${((Date.now() - stepT) / 1000).toFixed(1)} s`; } };
+    const buildT0 = { t: 0 };
     move(go, B.querySelector("#n-msg")!, async () => {
       const nm = vaultName;
-      busy = "build"; busyText = "building your vault…"; renderArena();
+      buildT0.t = Date.now();
+      busy = "build"; busyText = "creating your vault account…"; renderArena();
+      stepOn(1);
       const { seed } = chain.newVaultSeed();
-      const r = await chain.createVault(nm, seed);
+      const r = await chain.createVault(nm, seed, () => { stepDone(1); stepOn(2); busyText = "adding your quantum key…"; renderArena(); });
+      stepDone(2);
       keepReceipt("vault", r.hash);
       setProg({ vault: r.accountId });
       earn("native");
+      stepOn(3);
       busyText = "moving your coins in…"; renderArena();
       const m = await chain.migrate();
+      stepDone(3);
+      clearInterval(stepTimer);
       busy = "";
+      (field as any).__buildMs = Date.now() - buildT0.t; // measured by the spike
       return m;
-    }, () => "You moved in. Your coins are quantum safe.", "migrate", () => { slam(); setTimeout(() => sheet?.close(), 500); }, () => { busy = ""; });
+    }, () => `You moved in. Your coins are quantum safe. ${((Date.now() - buildT0.t) / 1000).toFixed(0)} s all in.`, "migrate", () => { slam(); setTimeout(() => sheet?.close(), 900); }, () => { busy = ""; clearInterval(stepTimer); });
   }
 
   // ---------------------------------------------------------------- HUD, stats, actions
@@ -1073,9 +1131,11 @@ export function play(root: HTMLElement) {
     const pips = root.querySelector<HTMLElement>("#h-pips")!;
     if (inVault() && w.vault) {
       const max = P(c(), "max_raids_per_epoch"), left = w.vault.raids_left;
+      const hv = harvestFlow();
+      const harv = hv ? `<span class="hp-k harv">+${short(hv.amount)} next harvest</span>` : "";
       const html = left > 0
-        ? `${Array.from({ length: max }, (_, i) => `<i class="${i < left ? "on" : ""}"></i>`).join("")}<span class="hp-k">${left} shot${left === 1 ? "" : "s"}</span>`
-        : `<span class="hp-k none">No shots left</span>`;
+        ? `${Array.from({ length: max }, (_, i) => `<i class="${i < left ? "on" : ""}"></i>`).join("")}<span class="hp-k">${left} shot${left === 1 ? "" : "s"}</span>${harv}`
+        : `<span class="hp-k none">No shots left</span>${harv}`;
       pips.hidden = false;
       pips.setAttribute("aria-label", left > 0 ? `${left} of ${max} shots left` : "No shots left");
       if (pips.innerHTML !== html) pips.innerHTML = html;
@@ -1181,7 +1241,12 @@ export function play(root: HTMLElement) {
     set("shield", v.shield_bps ? `${pct(v.shield_bps)} less` : "None", over, v.shield_bps ? leftMs / epochMs : 0, false);
     set("market", "Buy · sell", false);
     const left = v.raids_left;
-    set("shoot", over ? "Over" : left > 0 ? `${left} shot${left === 1 ? "" : "s"}` : arena.targets.size ? "Defend" : "No shots left", over || (left <= 0 && !arena.targets.size), 0, left > 0 && !busy);
+    // the button always says what a press will do: SIGNING… while a move is out, the round clock when you are out of shots
+    const roundIn = st ? `<b data-until="${st.epoch_ends_ms}">${clock(Number(st.epoch_ends_ms) - chainNow())}</b>` : "";
+    const status = over ? "Over" : busy ? "SIGNING…" : left > 0 ? `${left} shot${left === 1 ? "" : "s"}` : arena.targets.size ? "Defend" : `0 shots · new round ${roundIn}`;
+    set("shoot", status, over, 0, left > 0 && !busy);
+    shootBtn.classList.toggle("signing", !!busy && !over);
+    shootBtn.classList.toggle("empty", !busy && left <= 0 && !arena.targets.size);
   }
 
   root.querySelector("#actions")!.addEventListener("click", (e) => {
@@ -1197,6 +1262,7 @@ export function play(root: HTMLElement) {
     if (k === "market") openMarket();
   });
   root.querySelector("#h-menu")!.addEventListener("click", () => openSettings());
+  root.querySelector(".hud-cell.bag")!.addEventListener("click", () => { if (sess().wallet || sess().vault) openBag(); });
   root.querySelector("#h-net")!.addEventListener("click", () => openNetwork());
 
   // ---------------------------------------------------------------- arenas, top up, buy, cash out (mainnet)
@@ -1417,8 +1483,18 @@ export function play(root: HTMLElement) {
     const supply = PB(c(), "satoshi_supply");
     arena.setPlaces({
       gate: kind === "none" ? "hidden" : kind === "exposed" || (s.vault && w.walletBal > 0n) ? "open" : "home",
-      boss: { visible: inVault() || arena.bossDist < 420, hint: kind !== "none" && arena.bossDist < 420, line: bossLine(), ready: !!w.vault?.boss_ready && inVault() && w.vaultBal >= PB(c(), "boss_min_balance"), hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1 },
+      boss: {
+        visible: inVault() || arena.bossDist < 420, hint: kind !== "none" && arena.bossDist < 520, line: bossLine(),
+        ready: bossReadyForMe(),
+        hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1,
+        hpText: st ? `${short(st.satoshi_tokens)} / ${short(supply)}` : "",
+        badge: `SHOOT HIM · +~${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}`,
+      },
     });
+    // the boss is ready for you: say so once per round
+    const bossKey = bossReadyForMe() ? `${st?.epoch}` : "";
+    if (bossKey && bossKey !== prevBossKey) toast({ tone: "hot", who: "satoshi", title: `Satoshi is ready for you: shoot his stash for about +${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}.` });
+    prevBossKey = bossKey;
     guideTick();
 
     // hunters: siren when a new one turns toward you
@@ -1493,11 +1569,12 @@ export function play(root: HTMLElement) {
       else if (f.kind === "resolve" && me.includes(f.actor)) {
         toast({ tone: "gold", who: f.target || undefined, title: won ? `Your raid on ${N(f.target)} landed: took ${amt}` : `Your raid on ${N(f.target)} took nothing` });
         if (won) {
-          if (f.target) arena.fly(f.target, "me", "#ffd60a", 12);
-          setTimeout(() => { fx.pop(field, `+${amt}`, "gold", at("me")); sfx.play("coins"); arena.burst("me", "#ffd60a", 10); }, 600);
+          // the robbed body flies apart, the coins stream to you, the real take pops big at you, then it reforms
+          if (f.target) arena.shatter(f.target, true);
+          setTimeout(() => { fx.pop(field, `+${amt}`, "gold", at("me"), "big"); sfx.play("coins"); arena.burst("me", "#ffd60a", 10); }, 700);
           if (f.target) arena.say(f.target, line(f.target, "defended"));
           earn("raider");
-        } else fx.pop(field, "took nothing", "ink", at(f.target));
+        } else { fx.pop(field, "took nothing", "ink", at(f.target)); if (f.target) arena.badge(f.target, "NOTHING", "#8b90a3", 1600, false); }
       } else if (f.kind === "resolve" && me.includes(f.target || "")) {
         if (won) {
           toast({ tone: "hot", who: f.actor, title: `${N(f.actor)}'s raid took ${amt} from you` });
@@ -1513,8 +1590,13 @@ export function play(root: HTMLElement) {
           earn("escape");
         }
       } else if (f.kind === "defend" && me.includes(f.target || "")) {
-        toast({ tone: "hot", who: f.actor, title: `${N(f.actor)} defended and won ${amt} of your stake` });
-        fx.pop(field, "blocked", "red", at(f.actor)); sfx.play("deny");
+        // they blocked your raid: a counter shot comes back at you, BLOCKED on them, your stake pops red at you
+        const r = w.myRaids.find((x) => x.target === f.actor && (x.status === "defended" || x.status === "open"));
+        const lost = r ? full(r.stake) : amt;
+        toast({ tone: "hot", who: f.actor, title: `${N(f.actor)} blocked your raid and took your ${lost} stake` });
+        arena.npcShot(f.actor, true);
+        arena.badge(f.actor, "BLOCKED", "#ff3d2e", 2200);
+        setTimeout(() => { fx.pop(field, `−${lost}`, "red", at("me"), "big"); sfx.play("deny"); }, 650);
         arena.say(f.actor, line(f.actor, "defends"));
       } else if (f.kind === "defend" && me.includes(f.actor)) {
         if (f.target) arena.fly(f.target, "me", "#ffd60a", 10);
@@ -1645,6 +1727,7 @@ export function play(root: HTMLElement) {
   function updateSheet() {
     if (!sheet || sheet.closed || currentSheet() !== sheet) return;
     if (sheetKind === "shield") updateShield();
+    if (sheetKind === "bag") updateBag();
     if (sheetKind === "satoshi") updateSatoshi();
     if (sheetKind === "under") updateUnderRaid();
     if (sheetKind === "market") updateMarket();
@@ -1706,6 +1789,45 @@ export function play(root: HTMLElement) {
   const cleanWhy = (s: string) =>
     s.replace(/qubit-(\d+)/g, "Qubit $1").replace(/\$(QDAY|KEYFALL)/g, "coins").replace(/ \(0% shield\)/, "");
 
+  // ----- your bag: the memecoin loop in numbers, every one from the chain
+
+  function openBag() {
+    show("bag", "", "Your bag", `
+      <p class="kick gold">${NET_LABEL} arena</p>
+      <h2 class="s-title">Your bag</h2>
+      <div class="bag-grid" id="bag-grid"></div>
+      <div class="set-block"><div class="set-h"><b>Your keys</b></div><div id="bag-keys" class="keys-list"></div></div>
+      <p class="s-text dim">Red bags leak to vaults every round and freeze at Q-Day. The coin is your score, your ammo (stakes) and your armour (shields).</p>`, "gold");
+    updateBag();
+  }
+  function updateBag() {
+    const B = sheet?.body; if (!B || sheetKind !== "bag") return;
+    const s = sess(), st = w.stats;
+    const grid = B.querySelector<HTMLElement>("#bag-grid")!;
+    const me = mine();
+    const bag = myBag();
+    const rows: [string, string, string?][] = [];
+    rows.push(["Coins now", `<b>${full(bag)}</b>`]);
+    rows.push(["Sells for now", w.sellQuote !== null ? `<b>${chain.fmtNear(w.sellQuote, 3)} NEAR</b>` : "…", "the contract's own sell quote for the whole bag"]);
+    if (MAIN && paidNear() > 0) rows.push(["You paid", `${paidNear().toFixed(2)} NEAR`]);
+    const hv = harvestFlow();
+    if (hv && st) rows.push([inVault() ? "Next harvest to you" : "Next harvest leak", `<b class="${hv.gain ? "yel" : "red"}">${hv.gain ? "+" : "−"}${full(hv.amount)}</b> <small>in <span data-until="${st.epoch_ends_ms}">${span(Number(st.epoch_ends_ms) - chainNow())}</span></small>`]);
+    // your raids this session, from the chain's raid records
+    const won = w.myRaids.filter((r) => r.status === "resolved" && BigInt(r.take) > 0n);
+    const blocked = w.myRaids.filter((r) => r.status === "defended");
+    const sum = (xs: string[]) => xs.reduce((a, x) => a + BigInt(x), 0n);
+    rows.push(["Raids won", won.length ? `<b class="yel">+${full(sum(won.map((r) => r.take)))}</b> <small>${won.length} raid${won.length === 1 ? "" : "s"}</small>` : "none yet"]);
+    rows.push(["Raids blocked", blocked.length ? `<b class="red">−${full(sum(blocked.map((r) => r.stake)))}</b> <small>${blocked.length} stake${blocked.length === 1 ? "" : "s"} lost</small>` : "none"]);
+    const onMe = w.feed.filter((f) => f.kind === "resolve" && me.includes(f.target || ""));
+    rows.push(["Raids on you", onMe.length ? `<b class="red">−${full(sum(onMe.map((f) => f.amount)))}</b> <small>${onMe.length} recent</small>` : "none recent"]);
+    grid.innerHTML = rows.map(([k, v, note]) => `<div><dt>${k}${note ? `<small>${note}</small>` : ""}</dt><dd>${v}</dd></div>`).join("");
+    const keys = B.querySelector<HTMLElement>("#bag-keys")!;
+    const signed = receipts().filter((r) => ["raid", "defend", "shield", "boss"].includes(r.kind)).length;
+    keys.innerHTML = `
+      ${s.wallet ? `<a class="key-row" href="${chain.accountLink(s.wallet.accountId)}" target="_blank" rel="noopener"><b class="red">Wallet key: ed25519</b><span>an old key, a quantum computer can crack it</span></a>` : ""}
+      ${s.vault ? `<a class="key-row" href="${chain.accountLink(s.vault.accountId)}" target="_blank" rel="noopener"><b class="yel">Vault key: ML-DSA-65</b><span>quantum safe, it signed ${signed} of your move${signed === 1 ? "" : "s"}</span></a>` : `<p class="m-hint">No vault yet: the gold door makes one with a quantum safe key.</p>`}`;
+  }
+
   // ----- shield
 
   function openShield() {
@@ -1743,7 +1865,7 @@ export function play(root: HTMLElement) {
     show("satoshi", "", "Satoshi boss fight", `
       <div class="boss">
         <p class="kick gold">Boss fight</p>
-        <div class="boss-art" id="bs-art">${ART_SATOSHI}<span class="bp-say boss-say" id="bs-say" hidden></span></div>
+        <div class="boss-art" id="bs-art">${ART_SATOSHI_RED}<span class="bp-say boss-say" id="bs-say" hidden></span></div>
         <h2 class="s-title center">Satoshi</h2>
         <div class="hp"><div class="hp-bar"><i id="bs-hp"></i></div><div class="hp-nums"><b id="bs-stash">··</b><span id="bs-of"></span></div></div>
         <p class="s-text center" id="bs-rule"></p>
@@ -2018,7 +2140,10 @@ export function play(root: HTMLElement) {
       pin.type = "button";
       pin.className = `ev pin ${live ? "tone-hot" : "calm"}`;
       pin.dataset.id = `${r.id}:${live}`;
-      pin.innerHTML = `<span class="av">${avatar(r.attacker)}</span><span class="ev-t">${live ? `${N(r.attacker)} is raiding you` : `${N(r.attacker)}'s raid finds an empty wallet`}</span><b class="ev-clock" data-until="${r.deadline}">${clock(r.deadline - chainNow())}</b>`;
+      const onVault = r.target === sess().vault?.accountId;
+      const shield = onVault && (w.vault?.shield_bps || 0) > 0 ? ` · shield takes ${pct(w.vault!.shield_bps)} off` : "";
+      const what = live ? `${N(r.attacker).toUpperCase()} IS ROBBING YOU${shield} · ${onVault ? "SHOOT BACK" : "RUN TO THE GOLD DOOR"}` : `${N(r.attacker)}'s raid finds an empty wallet`;
+      pin.innerHTML = `<span class="av">${avatar(r.attacker)}</span><span class="ev-t">${what}</span><b class="ev-clock" data-until="${r.deadline}">${clock(r.deadline - chainNow())}</b>`;
       pin.onclick = () => openUnderRaid();
       evHost.appendChild(pin);
     }

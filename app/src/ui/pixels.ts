@@ -129,6 +129,29 @@ export const ART_RAID = grid(
 );
 
 /** The boss, big: a hooded figure over a coin stash. */
+/** The boss as the danger he is: dark cloak, hazard red eyes and a red stash. Gold means safe in this game. */
+export const ART_SATOSHI_RED = grid(
+  [
+    "......####......",
+    ".....######.....",
+    "....########....",
+    "...###....###...",
+    "...##......##...",
+    "..##..y..y..##..",
+    "..##........##..",
+    "..##........##..",
+    "..###......###..",
+    "..####....####..",
+    ".######cc######.",
+    ".#####cggc#####.",
+    ".####cgggGc####.",
+    "#####cgGggc#####",
+    "######cccc######",
+    "################",
+  ],
+  { "#": "#2a1d22", y: "#ff3d2e", c: "#7a1a10", g: "#ff3d2e", G: "#ff8a7a" },
+  { y: "eye" },
+);
 export const ART_SATOSHI = grid(
   [
     "......####......",

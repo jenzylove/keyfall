@@ -41,7 +41,8 @@ export interface ArenaMe {
 }
 export interface ArenaPlaces {
   gate: "hidden" | "open" | "home";
-  boss: { visible: boolean; ready: boolean; hp: number; hint?: boolean; line?: string };
+  /** hp 0..1 from the chain; hpText "843k / 1.1M"; badge pulses when your hit is ready ("SHOOT HIM · +~1,090"); line otherwise ("next hit in 9:12"). */
+  boss: { visible: boolean; ready: boolean; hp: number; hint?: boolean; line?: string; hpText?: string; badge?: string };
 }
 export interface ArenaCallbacks {
   /** A hunter body bumped into you (the server decides whether that is a raid). */
@@ -52,7 +53,8 @@ export interface ArenaCallbacks {
   onPulse(): void;
   chainNow(): number;
 }
-interface Shot { x: number; y: number; vx: number; vy: number; t: number; from: "me" | string; target: string | null; mine: boolean }
+interface Shot { x: number; y: number; vx: number; vy: number; t: number; from: "me" | string; target: string | null; mine: boolean; sure?: boolean; quiet?: boolean }
+interface Badge { text: string; until: number; color: string; big: boolean }
 
 interface Sim {
   id: string;
@@ -173,6 +175,8 @@ export class Arena {
   onAutoFire: (() => void) | null = null;
   /** You tapped a body (or Satoshi, or empty floor: null). */
   onLock: ((id: string | null) => void) | null = null;
+  /** A raider's shot just landed on you (from, counter shot?). The page pins the strip. */
+  onHitMe: ((from: string, counter: boolean) => void) | null = null;
   /** The body you tapped: shots go to it, and while it can be raided they fire on their own. */
   lockId: string | null = null;
   private tap: { id: number; x: number; y: number; t: number; moved: number } | null = null;
@@ -192,6 +196,9 @@ export class Arena {
   private shots: Shot[] = [];
   private shotCool = 0;
   private ringHit = new Map<string, number>(); // shield ring flash per body ("me" for you)
+  private badges = new Map<string, Badge>(); // HIT, BLOCKED and such, over a body for a moment
+  private shattered = new Map<string, number>(); // a robbed body in pieces, reforming (seconds left)
+  private hintPointer: { id: string; until: number } | null = null; // an edge pointer asked for by the page
   private hintIds = new Set<string>(); // bodies whose reason line is drawn this frame
   /** Which bodies a shot may snap to right now (set by the page: raidable, the raider, Satoshi when ready). */
   targets = new Set<string>();
@@ -407,12 +414,38 @@ export class Arena {
     }
     return best;
   }
-  /** A hunter fires at you: the picture of a raid the chain already confirmed. */
-  npcShot(from: string) {
-    const s = this.bodies.get(from); if (!s) return;
-    const dx = this.me.x - s.x, dy = this.me.y - s.y, l = Math.hypot(dx, dy) || 1;
-    this.shots.push({ x: s.x + (dx / l) * (s.r + 6), y: s.y + (dy / l) * (s.r + 6) - 6, vx: (dx / l) * SHOT_SPEED * 0.8, vy: (dy / l) * SHOT_SPEED * 0.8, t: 0, from, target: ME, mine: false });
+  /** A raider fires at you: the picture of a raid the chain already confirmed. It starts at the raider's body, or from the
+   * screen edge in its real direction when it is off screen, and it always lands. `quiet`: a counter shot (the page labels it). */
+  npcShot(from: string, quiet = false) {
+    const s = this.bodies.get(from);
+    let sx: number, sy: number;
+    if (s) { sx = s.x; sy = s.y; }
+    else { // not drawn right now: come in from the top edge of the view
+      sx = this.cam.x + this.w * 0.5; sy = this.cam.y - 40;
+    }
+    const dx = this.me.x - sx, dy = this.me.y - sy, l = Math.hypot(dx, dy) || 1;
+    const r0 = s ? s.r + 6 : 0;
+    this.shots.push({ x: sx + (dx / l) * r0, y: sy + (dy / l) * r0 - 6, vx: (dx / l) * SHOT_SPEED * 0.8, vy: (dy / l) * SHOT_SPEED * 0.8, t: 0, from, target: ME, mine: false, sure: true, quiet });
   }
+  /** A word over a body for a moment: HIT, BLOCKED, a number. "me" for you. */
+  badge(id: string, text: string, color = "#fff", ms = 1600, big = true) {
+    this.badges.set(id === "me" ? ME : id, { text, until: performance.now() + ms, color, big });
+  }
+  /** A robbed body flies apart (shards in its colour, coins scatter and stream to you), then reforms: it is still a holder. */
+  shatter(id: string, toMe = true) {
+    const s = this.bodies.get(id); if (!s) return;
+    const b = this.info.get(id);
+    const col = b?.kind === "vault" ? GOLD : RED;
+    this.shattered.set(id, 1.1);
+    const n = reducedMotion() ? 4 : this.lowPower ? 12 : 22;
+    for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = 120 + Math.random() * 220; this.particles.push({ x: s.x + (Math.random() - 0.5) * s.r, y: s.y + (Math.random() - 0.5) * s.r, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 80, t: 0, life: 0.6 + Math.random() * 0.5, c: i % 3 === 0 ? "#0c0c0b" : col, s: 4 + Math.round(Math.random() * 4), g: 520 }); }
+    const coins = reducedMotion() ? 3 : this.lowPower ? 8 : 14;
+    for (let i = 0; i < coins; i++) { const a = Math.random() * Math.PI * 2, v = 60 + Math.random() * 140; this.particles.push({ x: s.x, y: s.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 160, t: 0, life: 0.5 + Math.random() * 0.3, c: GOLD, s: 6, g: 600 }); }
+    if (toMe) for (let i = 0; i < coins; i++) this.particles.push({ x: s.x + (Math.random() - 0.5) * 40, y: s.y + (Math.random() - 0.5) * 40, vx: 0, vy: 0, t: -0.35 - i * 0.05, life: 0.7, c: GOLD, s: 6, tx: this.me.x, ty: this.me.y });
+    this.hitstop(90);
+  }
+  /** Point at a body from the screen edge for a moment (SHOOT with nothing in range). */
+  pointAt(id: string, ms = 3000) { this.hintPointer = { id, until: performance.now() + ms }; }
   /** The shield ring takes a hit: flash and cyan shards. */
   shieldHit(id: string) {
     const key = id === "me" ? ME : id;
@@ -834,15 +867,17 @@ export class Arena {
     for (const [k, v] of this.ringHit) { if (v - dt <= 0) this.ringHit.delete(k); else this.ringHit.set(k, v - dt); }
     const me = this.me;
     const keep: Shot[] = [];
+    for (const [k, v] of this.shattered) { if (v - dt <= 0) this.shattered.delete(k); else this.shattered.set(k, v - dt); }
     for (const p of this.shots) {
       p.t += dt;
       if (p.target) {
         const s = this.simOf(p.target === ME ? "me" : p.target);
-        if (s) { const dx = s.x - p.x, dy = s.y - p.y, l = Math.hypot(dx, dy) || 1, sp = Math.hypot(p.vx, p.vy); const k = 1 - Math.exp(-dt * 6); p.vx = lerp(p.vx, (dx / l) * sp, k); p.vy = lerp(p.vy, (dy / l) * sp, k); }
+        // a shot that must land (a raid already on chain) steers hard; yours steers a little
+        if (s) { const dx = s.x - p.x, dy = s.y - p.y, l = Math.hypot(dx, dy) || 1, sp = Math.hypot(p.vx, p.vy); const k = 1 - Math.exp(-dt * (p.sure ? 16 : 6)); p.vx = lerp(p.vx, (dx / l) * sp, k); p.vy = lerp(p.vy, (dy / l) * sp, k); }
       }
       p.x += p.vx * dt; p.y += p.vy * dt;
-      if (p.t > SHOT_LIFE || p.x < 0 || p.y < 0 || p.x > this.W || p.y > this.H) { this.deflectAt(p.x, p.y, this.colors.dim); continue; }
-      if (this.inBlock(p.x, p.y, 0)) { this.deflectAt(p.x, p.y, "#c8c8d0"); continue; }
+      // shots fly over blocks: cover cannot change the chain
+      if (!p.sure && (p.t > SHOT_LIFE || p.x < 0 || p.y < 0 || p.x > this.W || p.y > this.H)) { this.deflectAt(p.x, p.y, this.colors.dim); continue; }
       let hit = false;
       if (p.mine) {
         // Satoshi's core
@@ -862,10 +897,12 @@ export class Arena {
           hit = true;
           break;
         }
-      } else if (Math.hypot(p.x - me.x, p.y - me.y) < me.r * 0.95) {
-        // a hunter's shot lands on you
+      } else if (Math.hypot(p.x - me.x, p.y - me.y) < me.r * 1.1 || (p.sure && p.t > 2.5)) {
+        // a raider's shot lands on you (always: the raid is real)
         if (this.meInfo.shieldBps > 0) this.shieldHit("me"); else this.burst("me", RED, 8);
-        me.bounce = 0.3; this.shake(); this.flash();
+        me.bounce = 0.3; this.shake(); this.flash(); this.hitstop(70);
+        if (!p.quiet) this.badge("me", "HIT", RED, 1400);
+        this.onHitMe?.(p.from, !!p.quiet);
         hit = true;
       }
       if (!hit) keep.push(p);
@@ -905,7 +942,6 @@ export class Arena {
     this.drawGate(c);
     for (const b of this.blocks) this.drawBlock(c, b, ox, oy);
     this.drawBoss(c);
-    this.drawLines(c);
     this.drawAim(c);
     this.drawLock(c);
     // reason lines: the nearest two bodies with a reason, and the one your aim is on
@@ -925,6 +961,7 @@ export class Arena {
     }
     if (meDrawn && !drewMe) this.drawMe(c, now);
     this.flushLabels(c);
+    this.drawRaidBadges(c);
     this.drawShots(c);
     this.drawParticles(c);
     this.drawGuideArrow(c);
@@ -1050,6 +1087,16 @@ export class Arena {
   private drawBody(c: CanvasRenderingContext2D, s: Sim, b: ArenaBody) {
     const { x, y, r } = s;
     if (x < this.cam.x - 90 || x > this.cam.x + this.w + 90 || y < this.cam.y - 90 || y > this.cam.y + this.h + 90) return;
+    // robbed: in pieces for a moment, then it reforms from small to full
+    const sh = this.shattered.get(b.id);
+    if (sh !== undefined) {
+      if (sh > 0.5) return;
+      const f = 1 - sh / 0.5;
+      c.save(); c.translate(x, y); c.scale(0.2 + 0.8 * f, 0.2 + 0.8 * f); c.translate(-x, -y); c.globalAlpha = 0.4 + 0.6 * f;
+      this.sprite(c, b.id, x, y, r, s.face, 0, 0);
+      c.restore();
+      return;
+    }
     const dimmed = b.state === "busy" || b.state === "down" || b.state === "small" || b.state === "frozen";
     // bystanders are small, faint and quiet; they come up to full only right next to you
     const near = Math.hypot(x - this.me.x, y - this.me.y);
@@ -1310,62 +1357,100 @@ export class Arena {
   private drawBoss(c: CanvasRenderingContext2D) {
     if (!this.places.boss.visible) return;
     const { x, y, angle } = this.boss;
+    const B = this.places.boss;
     c.save();
-    const R = 90;
-    c.strokeStyle = GOLD; c.globalAlpha = 0.06; c.lineWidth = 18; c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.stroke();
-    c.globalAlpha = 0.55; c.beginPath(); c.arc(x, y, R, angle - 0.95, angle + 0.95); c.stroke();
-    c.globalAlpha = 1; c.lineWidth = 3; c.strokeStyle = GOLD3; c.beginPath(); c.arc(x, y, R, angle - 0.95, angle + 0.95); c.stroke();
-    // boss sprite, about 3.5x a player
-    const S = 160, bob = Math.sin(this.t * 1.6) * 3;
-    c.fillStyle = "rgba(0,0,0,0.5)"; c.fillRect(x - 60, y + 70, 120, 8);
-    if (this.lowPower) { c.fillStyle = GOLD; c.globalAlpha = this.places.boss.ready ? 0.09 : 0.03; c.fillRect(x - 100, y - 100, 200, 200); c.globalAlpha = 1; }
+    // the boss is the danger in the room: hazard red, never gold (gold means safe here)
+    const R = 100;
+    c.strokeStyle = RED; c.globalAlpha = 0.07; c.lineWidth = 18; c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.stroke();
+    c.globalAlpha = 0.6; c.beginPath(); c.arc(x, y, R, angle - 0.95, angle + 0.95); c.stroke();
+    c.globalAlpha = 1; c.lineWidth = 3; c.strokeStyle = "#7a1a10"; c.beginPath(); c.arc(x, y, R, angle - 0.95, angle + 0.95); c.stroke();
+    // boss sprite, about 4.5x a player
+    const S = 200, bob = Math.sin(this.t * 1.6) * 3;
+    c.fillStyle = "rgba(0,0,0,0.5)"; c.fillRect(x - 76, y + 88, 152, 9);
+    if (this.lowPower) { c.fillStyle = RED; c.globalAlpha = B.ready ? 0.1 : 0.04; c.fillRect(x - 120, y - 120, 240, 240); c.globalAlpha = 1; }
     else {
-      const gr = c.createRadialGradient(x, y, 30, x, y, 130);
-      gr.addColorStop(0, this.places.boss.ready ? "rgba(255,214,10,0.22)" : "rgba(255,214,10,0.08)"); gr.addColorStop(1, "rgba(255,214,10,0)");
-      c.fillStyle = gr; c.fillRect(x - 130, y - 130, 260, 260);
+      const gr = c.createRadialGradient(x, y, 30, x, y, 150);
+      gr.addColorStop(0, B.ready ? "rgba(255,61,46,0.26)" : "rgba(255,61,46,0.1)"); gr.addColorStop(1, "rgba(255,61,46,0)");
+      c.fillStyle = gr; c.fillRect(x - 150, y - 150, 300, 300);
     }
     const im = this.imgs.get("__boss__");
     if (im && im.complete && im.naturalWidth) c.drawImage(im, x - S / 2, y - S / 2 + bob, S, S);
-    if (this.places.boss.ready) { c.strokeStyle = GOLD; c.lineWidth = 3; c.globalAlpha = 0.5 + 0.5 * Math.sin(this.t * 5); c.strokeRect(x - 40.5, y - 10.5 + bob, 81, 60); c.globalAlpha = 1; }
-    const bw = 150, bh = 12;
-    c.fillStyle = this.colors.bg; c.fillRect(x - bw / 2 - 2, y - S / 2 - 22, bw + 4, bh + 4);
-    c.fillStyle = this.colors.line; c.fillRect(x - bw / 2, y - S / 2 - 20, bw, bh);
-    const hp = clamp(this.places.boss.hp, 0, 1);
-    c.fillStyle = GOLD; c.fillRect(x - bw / 2, y - S / 2 - 20, Math.round(bw * hp), bh);
-    c.fillStyle = GOLD3; for (let i = 1; i < 10; i++) c.fillRect(x - bw / 2 + Math.round((bw * i) / 10), y - S / 2 - 20, 1, bh);
-    c.textAlign = "center"; c.textBaseline = "bottom"; c.font = this.font(15); c.fillStyle = GOLD;
-    this.label(c, "SATOSHI", x, y - S / 2 - 26, 4);
-    c.textBaseline = "top"; c.font = this.mono(10.5); c.fillStyle = this.places.boss.ready ? GOLD : this.colors.dim;
-    if (this.places.boss.hint) this.label(c, this.places.boss.line || (this.places.boss.ready ? "Touch his core" : "Dodge the pulse"), x, y + S / 2 + 8, 3);
+    if (B.ready) { c.strokeStyle = RED; c.lineWidth = 3; c.globalAlpha = 0.5 + 0.5 * Math.sin(this.t * 5); c.strokeRect(x - 50.5, y - 12.5 + bob, 101, 74); c.globalAlpha = 1; }
+    // health bar: his stash over his starting stash, from the chain
+    const bw = 190, bh = 14, by = y - S / 2 - 24;
+    c.fillStyle = this.colors.bg; c.fillRect(x - bw / 2 - 2, by - 2, bw + 4, bh + 4);
+    c.fillStyle = this.colors.line; c.fillRect(x - bw / 2, by, bw, bh);
+    const hp = clamp(B.hp, 0, 1);
+    c.fillStyle = RED; c.fillRect(x - bw / 2, by, Math.round(bw * hp), bh);
+    c.fillStyle = "#7a1a10"; for (let i = 1; i < 10; i++) c.fillRect(x - bw / 2 + Math.round((bw * i) / 10), by, 1, bh);
+    if (B.hpText) { c.textAlign = "center"; c.textBaseline = "middle"; c.font = this.font(11); c.fillStyle = "#fff"; c.fillText(B.hpText, Math.round(x), by + bh / 2 + 1); }
+    // BOSS tag and name
+    c.textAlign = "center"; c.textBaseline = "bottom";
+    c.font = this.font(12); c.fillStyle = "#fff";
+    const tag = "BOSS", tw = c.measureText(tag).width + 12;
+    c.fillStyle = RED; c.fillRect(Math.round(x - tw / 2), by - 46, Math.round(tw), 16);
+    c.fillStyle = "#fff"; c.fillText(tag, Math.round(x), by - 33);
+    c.font = this.font(16); c.fillStyle = RED;
+    c.fillText("SATOSHI", Math.round(x), by - 50);
+    // under him: the pulsing SHOOT HIM badge when your hit is ready, else when the next one comes
+    if (B.hint || B.ready) {
+      const text = B.ready ? (B.badge || "SHOOT HIM") : (B.line || "");
+      if (text) {
+        c.textBaseline = "top"; c.font = this.font(B.ready ? 15 : 12);
+        const w = c.measureText(text).width + 16, ty = y + S / 2 + 10;
+        const p = B.ready ? 0.5 + 0.5 * Math.sin(this.t * 6) : 0;
+        c.fillStyle = B.ready ? RED : this.colors.bg; c.globalAlpha = B.ready ? 0.75 + 0.25 * p : 0.9;
+        c.fillRect(Math.round(x - w / 2), ty, Math.round(w), B.ready ? 24 : 20);
+        c.globalAlpha = 1; c.fillStyle = B.ready ? "#fff" : this.colors.dim;
+        c.fillText(text, Math.round(x), ty + (B.ready ? 5 : 4));
+      }
+    }
     c.restore();
   }
 
-  private drawLines(c: CanvasRenderingContext2D) {
-    const me = this.me, now = this.cb.chainNow();
+  /** Raid badges: a big ROBBING + countdown over the body you are robbing (cyan), ROBBING YOU over the one robbing you (red).
+   * Drawn after the labels so they always read. */
+  private drawRaidBadges(c: CanvasRenderingContext2D) {
+    const now = this.cb.chainNow(), pnow = performance.now();
+    const box = (x: number, y: number, top: string, sub: string, col: string, big: boolean) => {
+      c.save();
+      c.textAlign = "center"; c.textBaseline = "middle";
+      c.font = this.font(big ? 15 : 12);
+      const w1 = c.measureText(top).width;
+      c.font = this.font(big ? 20 : 15);
+      const w2 = sub ? c.measureText(sub).width : 0;
+      const w = Math.max(w1, w2) + 16, h = sub ? (big ? 44 : 34) : (big ? 26 : 20);
+      const bx = Math.round(x - w / 2), by = Math.round(y - h);
+      c.fillStyle = this.colors.bg; c.globalAlpha = 0.92; c.fillRect(bx, by, Math.round(w), h);
+      c.globalAlpha = 1; c.strokeStyle = col; c.lineWidth = 2; c.strokeRect(bx + 0.5, by + 0.5, Math.round(w), h);
+      c.fillStyle = col; c.font = this.font(big ? 15 : 12); c.fillText(top, Math.round(x), by + (sub ? 12 : h / 2 + 1));
+      if (sub) { c.font = this.font(big ? 20 : 15); c.fillStyle = col; c.fillText(sub, Math.round(x), by + h - 13); }
+      // the little stem to the body
+      c.fillStyle = col; c.fillRect(Math.round(x) - 2, by + h, 4, 6);
+      c.restore();
+    };
+    const clockText = (until: number) => { const left = until - now; const sec = Math.max(0, Math.ceil(left / 1000)); return left > 0 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : "settling"; };
     for (const id of this.order) {
       const b = this.info.get(id)!, s = this.bodies.get(id)!;
-      if (!b || !s || !(b.raidingMe || b.raidedByMe)) continue;
-      const out = b.raidedByMe && !b.raidingMe;
+      if (!b || !s) continue;
+      if (this.shattered.has(id)) continue;
+      const top = s.y - s.r - 14;
+      if (b.raidedByMe && !b.raidingMe) box(s.x, top, "ROBBING", b.until ? clockText(b.until) : "…", CYAN, true);
+      else if (b.raidingMe) box(s.x, top, "ROBBING YOU", b.until ? clockText(b.until) : "", RED, true);
+    }
+    // moment badges: HIT, BLOCKED, numbers
+    for (const [key, bd] of [...this.badges]) {
+      if (pnow > bd.until) { this.badges.delete(key); continue; }
+      const s = this.simOf(key === ME ? "me" : key); if (!s) continue;
+      const r = "r" in s ? (s as Sim).r : 70;
+      const f = clamp((bd.until - pnow) / 1600, 0, 1);
+      const rise = (1 - f) * 18;
       c.save();
-      c.strokeStyle = out ? CYAN : RED; c.lineWidth = 2.5; c.setLineDash([7, 6]); c.lineDashOffset = -((this.t * 40) % 13);
-      c.globalAlpha = 0.9;
-      c.beginPath(); c.moveTo(me.x, me.y); c.lineTo(s.x, s.y); c.stroke();
-      c.setLineDash([]);
-      if (b.raidingMe && this.meInfo.kind === "exposed") {
-        c.fillStyle = RED;
-        for (let i = 0; i < 4; i++) { const f = (this.t * 0.5 + i / 4) % 1; c.globalAlpha = 0.9 - f * 0.5; c.fillRect(Math.round(lerp(me.x, s.x, f)) - 2, Math.round(lerp(me.y, s.y, f)) - 2, 4, 4); }
-      }
-      if (b.until) {
-        const left = b.until - now;
-        const sec = Math.max(0, Math.ceil(left / 1000));
-        const txt = left > 0 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : "settling";
-        const mx = lerp(me.x, s.x, 0.5), my = lerp(me.y, s.y, 0.5);
-        c.globalAlpha = 1; c.textAlign = "center"; c.textBaseline = "middle"; c.font = this.font(13);
-        const w = c.measureText(txt).width + 10;
-        c.fillStyle = this.colors.bg; c.fillRect(Math.round(mx - w / 2), Math.round(my - 9), Math.round(w), 18);
-        c.strokeStyle = out ? CYAN : RED; c.lineWidth = 2; c.strokeRect(Math.round(mx - w / 2) + 0.5, Math.round(my - 9) + 0.5, Math.round(w), 18);
-        c.fillStyle = out ? CYAN : RED; c.fillText(txt, Math.round(mx), Math.round(my) + 1);
-      }
+      c.globalAlpha = Math.min(1, f * 3);
+      c.textAlign = "center"; c.textBaseline = "bottom"; c.font = this.font(bd.big ? 26 : 16);
+      const tx = Math.round(s.x), ty = Math.round(s.y - r - 30 - rise);
+      c.fillStyle = "#0c0c0b"; for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) c.fillText(bd.text, tx + ox, ty + oy);
+      c.fillStyle = bd.color; c.fillText(bd.text, tx, ty);
       c.restore();
     }
   }
@@ -1451,7 +1536,11 @@ export class Arena {
     const targets: { x: number; y: number; color: string; label: string; pulse: boolean }[] = [];
     if (this.places.gate !== "hidden") targets.push({ x: this.gate.x, y: this.gate.y, color: GOLD, label: this.places.gate === "open" ? "GATE" : "VAULT", pulse: false });
     for (const id of this.order) { const b = this.info.get(id)!, s = this.bodies.get(id)!; if (b && s && (b.hunting || b.raidingMe)) targets.push({ x: s.x, y: s.y, color: RED, label: b.name.toUpperCase(), pulse: true }); }
-    if (this.places.boss.ready) targets.push({ x: this.boss.x, y: this.boss.y, color: GOLD, label: "SATOSHI", pulse: false });
+    if (this.places.boss.ready) targets.push({ x: this.boss.x, y: this.boss.y, color: RED, label: "SHOOT HIM", pulse: true });
+    if (this.hintPointer) {
+      if (performance.now() > this.hintPointer.until) this.hintPointer = null;
+      else { const s = this.simOf(this.hintPointer.id); if (s && !targets.some((t) => t.x === s.x && t.y === s.y)) targets.push({ x: s.x, y: s.y, color: RED, label: (this.hintPointer.id === "satoshi" ? "SATOSHI" : this.info.get(this.hintPointer.id)?.name.toUpperCase()) || "TARGET", pulse: true }); }
+    }
     const g = this.guide;
     if (g && g.kind !== "me") {
       const s = g.kind === "gate" ? this.gate : g.kind === "boss" ? this.boss : g.id ? this.bodies.get(g.id) : null;
