@@ -965,3 +965,4 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .tu-direct { margin-top: 18px; font: 500 13px/1.4 var(--mono); color: var(--dim); }
 .tu-direct summary { cursor: pointer; padding: 6px 0; }
 .tu-direct .addr { margin-top: 8px; }
+.pick.tu-amt button { height: auto; min-height: 68px; align-content: center; }

@@ -1347,7 +1347,7 @@ export function play(root: HTMLElement) {
         for (const el of B.querySelectorAll<HTMLElement>(".tu-gets")) {
           const spend = Math.max(0, Number(el.dataset.n) - VAULT_RESERVE); // the rest builds your vault and pays for moves
           const q = spend > 0 ? await chain.quoteBuy(chain.nearToYocto(spend)).catch(() => null) : null;
-          el.textContent = q ? `≈ ${short(BigInt(q))} $KEYFALL` : `${el.dataset.n} NEAR`;
+          el.textContent = q ? `${short(BigInt(q))} $KEYFALL` : `${el.dataset.n} NEAR`;
         }
       } catch { /* prices not loading: the buttons keep their NEAR amounts and the deposit address shows the exact sum */ }
     };
