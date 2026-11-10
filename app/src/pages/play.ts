@@ -1381,14 +1381,15 @@ export function play(root: HTMLElement) {
             <p class="s-calc" id="tu-status"><i class="dot"></i> Waiting for your deposit…</p>
           </div>`;
         wireCopy(B);
-        let last = "";
+        let last = "", shortFor = 0;
         clearInterval(fundPoll);
         fundPoll = window.setInterval(async () => {
           if (!B.isConnected) { clearInterval(fundPoll); return; }
           const st = await chain.fundingStatus(q.depositAddress);
           const el = B.querySelector<HTMLElement>("#tu-status");
           if (!el) return;
-          const words: Record<string, string> = { PENDING_DEPOSIT: "Waiting for your deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", PROCESSING: "Swapping to NEAR…", SUCCESS: "NEAR delivered. Opening your wallet…", REFUNDED: "The swap could not finish: your deposit went back to your refund address.", FAILED: "The swap failed: your deposit goes back to your refund address.", INCOMPLETE_DEPOSIT: "The deposit was short. Send the rest to the same address." };
+          const words: Record<string, string> = { PENDING_DEPOSIT: "Waiting for your deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", PROCESSING: "Swapping to NEAR…", SUCCESS: "NEAR delivered. Opening your wallet…", REFUNDED: "The swap could not finish: your deposit went back to your refund address.", FAILED: "The swap failed: your deposit goes back to your refund address.", INCOMPLETE_DEPOSIT: "Deposit seen. Confirming…" };
+          if (st === "INCOMPLETE_DEPOSIT") { shortFor += 5; if (shortFor >= 180) { el.innerHTML = `<i class="dot"></i> The deposit looks short. If you sent less than asked, send the rest to the same address; anything extra comes back to your refund address.`; return; } } else shortFor = 0;
           if (st !== last) { last = st; el.innerHTML = `<i class="dot${st === "SUCCESS" ? " safe" : ""}"></i> ${esc(words[st] || "Waiting for your deposit…")}`; }
         }, 5000);
       } catch (e) {
@@ -1423,31 +1424,40 @@ export function play(root: HTMLElement) {
   }
 
   /** Mainnet: how much of the wallet's NEAR goes into the first bag. */
-  function openBuy() {
-    const have = Number(chain.fmtNear(w.walletNear ?? 0n, 3).replace(/,/g, ""));
-    const max = Math.max(0.1, Math.floor((have - VAULT_RESERVE) * 100) / 100);
-    show("buy", "", "Buy your bag", `
+  /** Mainnet: the NEAR you paid in becomes your bag at once. No second choice: you already picked the amount
+   * on the top up. Everything but the vault reserve buys $KEYFALL, then the arena takes over (run to the gate). */
+  let buying = false;
+  async function openBuy() {
+    if (buying) return;
+    const have = w.walletNear ?? 0n;
+    const spendY = have - BigInt(chain.nearToYocto(VAULT_RESERVE));
+    if (spendY < BigInt(chain.nearToYocto(0.1))) { openTopUp(); return; }
+    const spend = Math.floor(Number(spendY / 10n ** 21n)) / 1000; // NEAR, 3 decimals, rounded down
+    buying = true;
+    const q = await chain.quoteBuy(chain.nearToYocto(spend)).catch(() => null);
+    show("buy", "", "Your bag", `
       <p class="kick gold">Mainnet</p>
-      <h2 class="s-title">Buy your bag</h2>
-      <p class="s-text">Your wallet holds <b>${have.toFixed(2)} NEAR</b>. ${VAULT_RESERVE} NEAR stays back for your vault and gas.</p>
-      <label class="s-range"><span>NEAR into the bag</span><input type="range" id="by-r" min="0.1" max="${max}" step="0.05" value="${Math.min(max, 0.5)}"/></label>
-      <p class="s-calc" id="by-calc"></p>
-      <button class="btn wide" id="by-go">Buy</button>
-      <p class="s-msg" id="by-msg" role="status"></p>`, "gold");
-    const B = sheet!.body;
-    const r = B.querySelector<HTMLInputElement>("#by-r")!;
-    let t = 0;
-    const update = async () => {
-      const n = Number(r.value);
-      const calc = B.querySelector<HTMLElement>("#by-calc")!;
-      calc.innerHTML = `Spend <b>${n.toFixed(2)} NEAR</b>, keep ${(have - n).toFixed(2)} NEAR.`;
-      const q = await chain.quoteBuy(chain.nearToYocto(n)).catch(() => null);
-      if (B.isConnected && Number(r.value) === n) calc.innerHTML = `Spend <b>${n.toFixed(2)} NEAR</b> for about <b class="yel">${q ? full(q) : "…"}</b> $KEYFALL. Keep ${(have - n).toFixed(2)} NEAR for the vault and moves.`;
-      B.querySelector<HTMLButtonElement>("#by-go")!.textContent = `Buy for ${n.toFixed(2)} NEAR`;
-    };
-    r.addEventListener("input", () => { clearTimeout(t); t = window.setTimeout(update, 200); });
-    move(B.querySelector("#by-go")!, B.querySelector("#by-msg")!, async () => { const res = await chain.buy(Number(r.value)); addPaid(Number(r.value)); tick(); return res; }, () => "Your bag landed. Run to the gate.", "buy", () => { sfx.play("coins"); setTimeout(() => sheet?.close(), 700); });
-    update();
+      <h2 class="s-title">Buying your $KEYFALL</h2>
+      <p class="s-text"><b class="yel">${q ? full(q) : "Your"} $KEYFALL</b> for ${spend.toFixed(2)} NEAR, straight from the contract. ${VAULT_RESERVE} NEAR stays for your vault and moves.</p>
+      <p class="s-calc" id="by-msg"><i class="dot"></i> Signing…</p>`, "gold");
+    const msg = sheet!.body.querySelector<HTMLElement>("#by-msg")!;
+    try {
+      await chain.buy(spend);
+      addPaid(spend);
+      tick();
+      sfx.play("coins");
+      msg.innerHTML = `<i class="dot safe"></i> Your bag landed. Now run to the gold door.`;
+      await refresh();
+      setTimeout(() => { if (sheetKind === "buy") sheet?.close(); }, 1400);
+    } catch (e) {
+      msg.className = "s-msg bad";
+      msg.textContent = plainError(e);
+      const again = document.createElement("button"); again.className = "btn wide"; again.textContent = "Try again";
+      again.onclick = () => { sheet?.close(); buying = false; void openBuy(); };
+      msg.after(again);
+    } finally {
+      buying = false;
+    }
   }
 
   /** Mainnet: send NEAR from the vault to any NEAR account. */
