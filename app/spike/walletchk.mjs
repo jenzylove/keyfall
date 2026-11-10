@@ -29,7 +29,7 @@ console.log("continue disabled before tick:", await p.evaluate(() => document.qu
 await p.click("#wb-ok"); await p.click("#wb-go");
 await waitFor(p, () => document.querySelector("#tu-refund") ? 1 : null, 8000);
 await p.screenshot({ path: `${OUT}/02-topup.png` });
-await p.click("#tu-go"); await sleep(800);
+await sleep(3500); await p.screenshot({ path: `${OUT}/02-topup.png` }); await p.click("#tu-go"); await sleep(800);
 console.log("no refund address:", await p.evaluate(() => document.querySelector("#tu-msg")?.textContent));
 await p.type("#tu-refund", "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
 await p.click("#tu-go");

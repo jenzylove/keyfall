@@ -934,8 +934,7 @@ export function play(root: HTMLElement) {
       } else {
         const j = await r.json().catch(() => ({}));
         if (j.skipped && /new player/i.test(String(j.skipped))) { sfx.play("deny"); arena.say(id, "You're new. Next time I take coins.", 3200, true); } // the server refused: your first minutes are yours
-        else if (j.skipped) toast({ tone: "ink", who: id, title: `${N(id)} caught you but could not raid: ${esc(String(j.skipped).replace(/\.$/, "").toLowerCase())}.` });
-        else if (j.error && !j.hash) toast({ tone: "ink", who: id, title: `${N(id)} caught you but the raid did not go through.` });
+        else if (j.skipped || (j.error && !j.hash)) arena.say(id, /resting|under raid|already/i.test(String(j.skipped || "")) ? "Lucky. Not this time." : "Missed you.", 2200, true); // the rules said no: a line from the bot, not a server message
       }
     } catch {
       await fetch(apiUrl("/api/tick"), { method: "POST" }).catch(() => {});
