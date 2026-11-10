@@ -152,7 +152,7 @@ export function play(root: HTMLElement) {
       <header class="hud">
         <button type="button" class="hud-net ${NET_LABEL.toLowerCase()}" id="h-net" aria-label="${NET_LABEL} arena. Switch arena">${MARK}<span>${NET_LABEL}</span></button>
         <div class="hud-cell"><span class="hud-k">Q-Day in</span><span class="hud-v" id="h-qday">··</span></div>
-        <div class="hud-cell bag" role="button" tabindex="0" aria-label="Your bag. Open the numbers"><span class="hud-k">Your bag ›</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span><span class="hud-pips" id="h-pips" hidden></span></div>
+        <div class="hud-cell bag" role="button" tabindex="0" aria-label="Your bag. Open the numbers"><span class="hud-k">$KEYFALL ›</span><span class="hud-v"><span id="h-bag">··</span><span class="chip" id="h-chip"></span></span><span class="hud-pips" id="h-pips" hidden></span></div>
         <div class="hud-cell rank"><span class="hud-k">Rank</span><span class="hud-v" id="h-rank">··</span></div>
         <button class="hud-snd" type="button" id="h-snd" aria-label="Sound"></button>
         <button class="hud-menu" type="button" id="h-menu" aria-label="Menu">${I.menu}<i class="rdot" hidden></i></button>
