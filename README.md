@@ -7,7 +7,7 @@
 <p align="center"><b>A memecoin where the only way to keep your bag is to move it behind a quantum safe key.<br/>The game is hunting everyone who didn't.</b></p>
 
 <p align="center">
-  <a href="https://playkeyfall.vercel.app"><img alt="Play" src="https://img.shields.io/badge/play-playkeyfall.vercel.app-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
+  <a href="https://keyfall.jdollar.site"><img alt="Play" src="https://img.shields.io/badge/play-keyfall.jdollar.site-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://nearblocks.io/address/keyfall.near"><img alt="Mainnet contract" src="https://img.shields.io/badge/NEAR%20mainnet-keyfall.near-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://testnet.nearblocks.io/address/qday-live-mw6vii9l47s.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice-NEAR%20testnet-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://github.com/jenzylove/keyfall/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/ci.yml?branch=main&style=flat-square&label=ci&labelColor=0C0C0B"></a>
@@ -44,7 +44,7 @@ Every NEAR contract call carries the signer's public key, and its first byte is 
 
 ## Play it in two minutes
 
-Open **https://playkeyfall.vercel.app** on a phone or desktop and press **PLAY**. First visits start in the free **practice** arena: no wallet, no sign up, no popups.
+Open **https://keyfall.jdollar.site** on a phone or desktop and press **PLAY**. First visits start in the free **practice** arena: no wallet, no sign up, no popups.
 
 1. **We make you a practice wallet and buy your first bag.** It lands red: your coins sit behind an old key, they leak over time and the hunters turn toward you.
 2. **Run to the gold gate.** Steer with your thumb (or WASD and the arrow keys). Touch the gate and your vault is built: your coins move into an account whose only key is quantum safe. If a raider caught you first and you escape in time, the raid takes nothing.
@@ -52,7 +52,7 @@ Open **https://playkeyfall.vercel.app** on a phone or desktop and press **PLAY**
 4. **Stay alive and climb.** Charge a SHIELD so raids take less, DASH away from raiders, and shoot Satoshi's core when it glows. The richest vault at Q-Day wins. Every move is signed in your browser with ML-DSA-65.
 5. **Play for real.** After the first mission, switch to the **mainnet** arena: buy $KEYFALL with your own NEAR on `keyfall.near` and play the same rules for real money.
 
-Prefer to check without playing? Open **Under the hood** (https://playkeyfall.vercel.app/proof): every check there reads the chain from your browser.
+Prefer to check without playing? Open **Under the hood** (https://keyfall.jdollar.site/proof): every check there reads the chain from your browser.
 
 ## Two arenas, one contract code
 
