@@ -1,6 +1,7 @@
 name: fund
 
-# Top up the sponsor account (funds new players and NPC gas) from the testnet faucet.
+# Top up the sponsor account (funds the free wallet each new testnet player gets) from the testnet faucet.
+# NPCs never draw on it: an NPC low on gas sells 10% of its own bag (app/npc/rules.mjs, FUEL_SELL_BPS).
 on:
   workflow_dispatch:
     inputs:

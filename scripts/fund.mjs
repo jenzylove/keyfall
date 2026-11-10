@@ -1,5 +1,5 @@
-// Pour a fresh testnet faucet account into `to`: the sponsor that funds new
-// players and NPC gas. Runs from GitHub Actions. The faucet key lives only in
+// Pour a fresh testnet faucet account into `to`: the sponsor that funds each
+// new player's free wallet (NPCs pay their own gas). Runs from GitHub Actions. The faucet key lives only in
 // memory for the length of this run.
 //
 // Usage: node fund.mjs <to-account> [rounds]

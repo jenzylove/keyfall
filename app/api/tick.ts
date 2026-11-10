@@ -1,7 +1,10 @@
 // Vercel Node function. POST runs one NPC tick, GET returns the last result.
 // Arena from ?net (see _net.ts): seeds from NPC_SEEDS / NPC_SEEDS_MAINNET,
 // contract from VITE_CONTRACT / CONTRACT_MAINNET. Throttled: a tick within 20 s of the previous
-// one in this instance returns the cached result.
+// one in this instance returns the cached result. Abuse bound: POST needs the
+// site Origin (_origin.ts), and a tick only sends moves app/npc/rules.mjs finds
+// the contract would accept (raids left, immunity, busy, stake caps), so
+// repeated ticks against the same chain state send nothing new.
 
 // @ts-ignore plain ES module
 import { tick } from "../npc/tick.mjs";
@@ -21,7 +24,7 @@ export default async function handler(req: any, res: any) {
   const net = netOf(req);
   if (req.method === "GET") return res.status(200).json(last[net] ?? { at: null, moves: [] });
   if (req.method !== "POST") return res.status(405).json({ error: "use GET or POST" });
-  if (!originOk(req)) return res.status(403).json({ error: "ticks come from the Q-DAY site or the crank" });
+  if (!originOk(req)) return res.status(403).json({ error: "ticks come from the KEYFALL site only (the crank runs the NPCs directly)" });
 
   let a;
   try {
