@@ -101,7 +101,7 @@ export const FALLBACK = "That did not go through. Try again.";
 export function plainError(e: unknown): string {
   const raw = String((e as any)?.message || e || "");
   if (raw) console.warn("[keyfall] move failed:", raw.slice(0, 400)); // the plain sentence goes on screen; the raw reason stays in the console
-  if (raw && !/E_TARGET_BUSY|E_IMMUNE|Join first|Create your quantum vault/.test(raw)) { try { fetch(apiUrl("/api/clientlog"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ net: NETWORK, err: raw.slice(0, 600), who: session().vault?.accountId || session().wallet?.accountId || "" }) }).catch(() => {}); } catch {} }
+  if (raw && !/E_TARGET_BUSY|E_IMMUNE|Join first|Create your quantum vault/.test(raw)) { try { fetch(apiUrl("/api/clientlog"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ net: NETWORK, err: raw.slice(0, 4000), who: session().vault?.accountId || session().wallet?.accountId || "" }) }).catch(() => {}); } catch {} }
   const code = e instanceof ChainError ? e.code : (raw.match(/E_[A-Z_]+/) || [""])[0];
   if (PLAIN[code]) return PLAIN[code];
   if (/No free testnet wallet|faucet|sponsor|not funded|Could not create a testnet wallet/i.test(raw)) return "No free wallet is available right now. Try again in a minute.";
