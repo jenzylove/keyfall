@@ -2,7 +2,7 @@
 // they chose, everyone else by a codename made from the account id.
 
 import { CONTRACT } from "../chain";
-import { isNpc as npcRule, npcName } from "../../npc/rules.mjs";
+import { isNpc as npcRule, npcName, bagholderNo } from "../../npc/rules.mjs";
 
 const ADJ = [
   "Amber", "Ashen", "Azure", "Bitter", "Blazing", "Bold", "Brass", "Brave",
@@ -45,6 +45,8 @@ export const isGameVault = (account: string) => account.endsWith(`.${CONTRACT}`)
 
 /** The character name of an NPC: Shor, Grover, Qubit 01 ... Qubit 08. */
 export function npcTitle(account: string): string {
+  const bag = bagholderNo(account, CONTRACT);
+  if (bag > 0) return `Bagholder ${String(bag).padStart(2, "0")}`;
   const n = npcName(account);
   if (n === "shor") return "Shor";
   if (n === "grover") return "Grover";

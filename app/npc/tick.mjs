@@ -4,7 +4,8 @@
 
 import * as near from "@fastnear/api";
 import { signerFromSeed } from "@fastnear/ml-dsa-65";
-import { decide, decideHunt, ROSTER } from "./rules.mjs";
+import { signerFromPrivateKey } from "@fastnear/utils";
+import { decide, decideHunt, ROSTER, bagholdersOf } from "./rules.mjs";
 
 const TGAS = (n) => (BigInt(n) * 10n ** 12n).toString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -26,14 +27,14 @@ function failure(res) {
   return null;
 }
 
-async function sendCall({ network, signerId, signer, contract, methodName, args, gas = 100 }) {
+async function sendCall({ network, signerId, signer, contract, methodName, args, gas = 100, deposit = "0" }) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       const res = await near.sendTx({
         signerId,
         signer,
         receiverId: contract,
-        actions: [near.actions.functionCall({ methodName, args, gas: TGAS(gas), deposit: "0" })],
+        actions: [near.actions.functionCall({ methodName, args, gas: TGAS(gas), deposit })],
         waitUntil: "EXECUTED_OPTIMISTIC",
         network,
       });
@@ -79,10 +80,13 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
   const names = ROSTER.map((r) => r.name).filter((n) => seeds[n]);
   const npcViews = (await Promise.all(names.map((n) => view("holder", { account_id: `${n}.${contract}` })))).filter(Boolean);
   const firstSeen = await firstSeenFromFeed(view).catch(() => ({}));
+  // red bots: their own accounts (not vaults); seeds keyed by the full account id, "ed25519:..."
+  const bagIds = bagholdersOf(contract).filter((id) => seeds[id]);
+  const bagViews = (await Promise.all(bagIds.map((id) => view("holder", { account_id: id }).then((h) => h || { account: id, balance: "0", kind: "exposed" })))).filter(Boolean);
 
   const fuel = {};
   await Promise.all(
-    npcViews.map(async (n) => {
+    [...npcViews, ...bagViews].map(async (n) => {
       try {
         fuel[n.account] = BigInt(unwrap(await near.queryAccount({ accountId: n.account, network })).amount);
       } catch {
@@ -95,10 +99,11 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
   const season = stats.after_q_day ? await view("season").catch(() => null) : null;
   const plannedExtra = stats.after_q_day && !season ? [{ npc: "*", action: "finalize", reason: "Q-Day has passed and the season result is not written yet." }] : [];
 
-  const planned = [...plannedExtra, ...decide({ now: Number(stats.now_ms), config, stats, npcs: npcViews, holders, openRaids, firstSeen, contract, fuel })];
+  const planned = [...plannedExtra, ...decide({ now: Number(stats.now_ms), config, stats, npcs: npcViews, holders, openRaids, firstSeen, contract, fuel, bags: bagViews })];
 
   const signers = {};
-  const signerFor = (name) => (signers[name] ||= signerFromSeed(hexToBytes(seeds[name])));
+  const signerFor = (name) => (signers[name] ||= String(seeds[name]).startsWith("ed25519:") ? signerFromPrivateKey(seeds[name]) : signerFromSeed(hexToBytes(seeds[name])));
+  const signerIdOf = (name) => (name.includes(".") ? name : `${name}.${contract}`); // bagholders are named by their full account id
   // Cranks (harvest, resolve) are paid by the NPC with the most NEAR left.
   const richest = [...npcViews].sort((a, b) => ((fuel[b.account] ?? 0n) > (fuel[a.account] ?? 0n) ? 1 : -1))[0];
   const crankNpc = richest ? richest.account.split(".")[0] : null;
@@ -120,7 +125,8 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
           m.action === "defend" || m.action === "resolve" ? { raid_id: m.raidId } :
           m.action === "sell" ? { amount: m.amount } : {};
         const methodName = m.action === "boss" ? "boss_raid" : m.action;
-        const r = await sendCall({ network, signerId: `${who}.${contract}`, signer: signerFor(who), contract, methodName, args, gas: m.action === "finalize" ? 250 : 100 });
+        const deposit = m.action === "buy" ? (BigInt(m.near) * 10n ** 24n).toString() : "0";
+        const r = await sendCall({ network, signerId: signerIdOf(who), signer: signerFor(who), contract, methodName, args, gas: m.action === "finalize" ? 250 : m.action === "buy" ? 50 : 100, deposit });
         if (r.hash) out.hash = r.hash;
         if (r.error) out.error = r.error;
       }

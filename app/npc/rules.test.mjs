@@ -36,12 +36,16 @@ test("cranks first: harvest then resolve closed raids, never resolve an open win
   assert.match(m[1].reason, /40 s ago/);
 });
 
-test("defend: NPC target defends when roll is under 2/3, skips otherwise", () => {
+test("defend: NPC target defends 1 in 3, only in the second half of the clock", () => {
   const g = npc("grover");
-  const openRaids = [{ id: "9", attacker: "human.testnet", target: g.account, deadline: NOW + 60000 }];
-  const yes = decide(base({ npcs: [g], openRaids, random: () => 0.41 }));
+  const openRaids = [{ id: "9", attacker: "human.testnet", target: g.account, opened_at: NOW - 60000, deadline: NOW + 30000 }];
+  const yes = decide(base({ npcs: [g], openRaids, random: () => 0.21 }));
   assert.equal(yes.filter((x) => x.action === "defend").length, 1);
-  assert.match(yes[0].reason, /rolled 0\.41/);
+  assert.match(yes[0].reason, /rolled 0\.21/);
+  const mid = decide(base({ npcs: [g], openRaids, random: () => 0.41 }));
+  assert.equal(mid.filter((x) => x.action === "defend").length, 0);
+  const early = decide(base({ npcs: [g], openRaids: [{ ...openRaids[0], opened_at: NOW - 10000, deadline: NOW + 80000 }], random: () => 0 }));
+  assert.equal(early.filter((x) => x.action === "defend").length, 0);
   const no = decide(base({ npcs: [g], openRaids, random: () => 0.9 }));
   assert.equal(no.filter((x) => x.action === "defend").length, 0);
   // a raid on a human is never defended by an NPC
@@ -243,4 +247,17 @@ test("no NPC raids a holder in its first minutes, by tick or by hunt", () => {
   assert.equal(m.filter((x) => x.action === "raid").length, 0);
   const h = decideHunt(base({ npcs: all, holders: [holder("fresh.testnet")], target: "fresh.testnet", hunter: "qubit-01", firstSeen: seen }));
   assert.ok(h.skipped);
+});
+
+test("bagholders: buy back in when low, never raid, never raided by NPCs", () => {
+  const bag = { account: "kfbag01-x.testnet", kind: "exposed", balance: Q(100000) };
+  const fuel = { [bag.account]: (5n * 10n ** 24n).toString() };
+  const m = decide(base({ npcs: [npc("shor")], holders: [bag], bags: [bag], fuel }));
+  const buy = m.filter((x) => x.action === "buy");
+  assert.equal(buy.length, 1);
+  assert.equal(buy[0].npc, bag.account);
+  const full = decide(base({ npcs: [], holders: [], bags: [{ ...bag, balance: Q(500000) }], fuel }));
+  assert.equal(full.filter((x) => x.action === "buy").length, 0);
+  const broke = decide(base({ npcs: [], holders: [], bags: [bag], fuel: { [bag.account]: (10n ** 24n).toString() } }));
+  assert.equal(broke.filter((x) => x.action === "buy").length, 0);
 });

@@ -82,7 +82,7 @@ while (Date.now() < end) {
   const w = await W();
   const bal = BigInt(w.vaultBal || "0");
   timeline.push([T(), String(bal / 10n ** 18n), w.raidsLeft]);
-  const targets = await A((ar) => [...ar.targets].filter((id) => id !== "satoshi").map((id) => { const s = ar.bodies.get(id); return s ? { id, d: Math.hypot(s.x - ar.me.x, s.y - ar.me.y) } : null; }).filter(Boolean).sort((a, b) => a.d - b.d));
+  const targets = await A((ar) => [...ar.targets].filter((id) => id !== "satoshi").map((id) => { const s = ar.bodies.get(id); return s ? { id, red: ar.info.get(id)?.kind === "exposed", d: Math.hypot(s.x - ar.me.x, s.y - ar.me.y) } : null; }).filter(Boolean).sort((a, b) => (b.red - a.red) || a.d - b.d));
   const boss = await A((ar) => ar.targets.has("satoshi"));
   const pick = targets[0]?.id || (boss ? "satoshi" : null);
   if (pick && w.raidsLeft > 0) {

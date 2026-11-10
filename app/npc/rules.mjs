@@ -6,9 +6,12 @@
 // exactly as on players; decide() mirrors the raid checks (core/src/game.rs)
 // only so an NPC never sends a move the contract would refuse.
 
+import bagholderList from "./bagholders.json" with { type: "json" };
+
 export const MAX_MOVES = 6; // per tick
 export const MAX_BOSS = 2; // boss raids per tick
-export const DEFEND_CHANCE = 2 / 3; // an NPC defends 2 raids in 3
+export const DEFEND_CHANCE = 1 / 3; // an NPC defends 1 raid in 3 (2 in 3 made every raid on a bot a sure loss)
+export const DEFEND_AFTER = 0.5; // ...and only in the second half of the clock, so a raid on a bot is a real gamble
 export const GREET_WINDOW_MS = 30 * 60 * 1000; // qubits greet holders newer than this
 export const GREET_DELAY_MS = 3 * 60 * 1000; // ...but never in a holder's first minutes: the arena guide runs then
 export const GREET_TAIL = 10; // with no registration times, "newest" = last N holders
@@ -32,8 +35,20 @@ export const BAGS_NEAR = { shor: 2, grover: 2, qubit: 0.4 };
 
 const rosterNames = new Set(ROSTER.map((r) => r.name));
 export const npcName = (accountId) => String(accountId).split(".")[0];
+
+/** Bagholders: the game's red bots. Ordinary NEAR accounts (not vaults) that hold a big bag behind an
+ * old key and never move it, so there is always red prey: they cannot defend, they leak to vaults at
+ * every harvest, and they buy back in when their bag runs low. Listed per contract in bagholders.json. */
+export const BAGHOLDERS = bagholderList;
+export const bagholdersOf = (contract) => BAGHOLDERS[contract] || [];
+export const isBagholder = (accountId, contract) => bagholdersOf(contract).includes(String(accountId));
+export const bagholderNo = (accountId, contract) => bagholdersOf(contract).indexOf(String(accountId)) + 1;
+export const BAG_REFILL_BELOW = 300000n * 10n ** 18n; // buy back in under 300k coins
+export const BAG_REFILL_NEAR = "1"; // with 1 NEAR
+export const BAG_FUEL_FLOOR = 15n * 10n ** 23n; // keep 1.5 NEAR for gas and storage
+
 export const isNpc = (accountId, contract) =>
-  rosterNames.has(npcName(accountId)) && String(accountId) === `${npcName(accountId)}.${contract}`;
+  (rosterNames.has(npcName(accountId)) && String(accountId) === `${npcName(accountId)}.${contract}`) || isBagholder(accountId, contract);
 
 const big = (x) => BigInt(x ?? 0);
 const bps = (amount, b) => (big(amount) * big(b)) / 10000n;
@@ -58,7 +73,7 @@ function pickStake(take, npcBalance, config) {
   return stake;
 }
 
-export function decide({ now, config, stats, npcs = [], holders = [], openRaids = [], random = Math.random, firstSeen = {}, contract, fuel = {} }) {
+export function decide({ now, config, stats, npcs = [], holders = [], openRaids = [], random = Math.random, firstSeen = {}, contract, fuel = {}, bags = [] }) {
   const moves = [];
   const push = (m) => {
     if (moves.length < MAX_MOVES) moves.push(m);
@@ -92,6 +107,15 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     }
   }
 
+  // 1b. Bagholders buy back in when their red bag runs low, so there is always prey. One per tick.
+  for (const bg of bags) {
+    const f = fuel[bg.account];
+    if (f === undefined || big(f) < BAG_FUEL_FLOOR + 10n ** 24n) continue;
+    if (big(bg.balance) >= BAG_REFILL_BELOW) continue;
+    push({ npc: bg.account, action: "buy", near: BAG_REFILL_NEAR, reason: `Bagholder down to ${fmt(bg.balance)} coins: buys back in with ${BAG_REFILL_NEAR} NEAR, red as ever.` });
+    break;
+  }
+
   // 2. Defend: an NPC under an open raid defends with probability 2/3.
   const busyNpc = new Set();
   for (const r of openRaids) {
@@ -99,9 +123,11 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     const t = npcs.find((n) => n.account === r.target);
     if (!t) continue;
     busyNpc.add(t.account);
+    const window = Number(r.deadline) - Number(r.opened_at || 0);
+    if (r.opened_at && now < Number(r.opened_at) + window * DEFEND_AFTER) continue; // too early to answer
     const roll = random();
     if (roll < DEFEND_CHANCE) {
-      push({ npc: npcName(t.account), action: "defend", raidId: String(r.id), reason: `Raided by ${short(r.attacker)}; defends 2 in 3 times (rolled ${roll.toFixed(2)}).` });
+      push({ npc: npcName(t.account), action: "defend", raidId: String(r.id), reason: `Raided by ${short(r.attacker)}; defends 1 in 3 times, late in the clock (rolled ${roll.toFixed(2)}).` });
     }
   }
 
