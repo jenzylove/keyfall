@@ -169,6 +169,16 @@ export class Arena {
   onDash: ((cool: number) => void) | null = null;
   /** Space on desktop: the page decides whether a shot may go (gold only). */
   onShootKey: (() => void) | null = null;
+  /** Auto fire at the locked target: the page runs the same checks as the SHOOT button. */
+  onAutoFire: (() => void) | null = null;
+  /** You tapped a body (or Satoshi, or empty floor: null). */
+  onLock: ((id: string | null) => void) | null = null;
+  /** The body you tapped: shots go to it, and while it can be raided they fire on their own. */
+  lockId: string | null = null;
+  private tap: { id: number; x: number; y: number; t: number; moved: number } | null = null;
+  private autoCool = 0;
+  private leakT = 0;
+  private incomeT = 0;
   /** World distance you have steered since the last spawn (the guide's first step). */
   travelled = 0;
   private guide: GuideTarget = null;
@@ -343,8 +353,43 @@ export class Arena {
   }
   /** The target your next shot would snap to, or null. */
   aimTarget(dir = this.facing): string | null {
-    // the tight cone first; when nothing is in it, a wider one (a thumb is not a crosshair)
-    return this.aimIn(dir, AIM_HALF) ?? this.aimIn(dir, AIM_HALF * 2.6);
+    // what you tapped comes first
+    if (this.lockId && this.targets.has(this.lockId) && this.distTo(this.lockId) <= this.viewSpan) return this.lockId;
+    // then the tight cone; when nothing is in it, a wider one; then the nearest target on screen (a thumb is not a crosshair)
+    return this.aimIn(dir, AIM_HALF) ?? this.aimIn(dir, AIM_HALF * 2.6) ?? this.nearestTarget();
+  }
+  /** The closest body a shot may go to within about a screen; the one charging you comes first. */
+  private nearestTarget(): string | null {
+    let best: string | null = null, bd = Infinity;
+    const range = this.viewSpan * 0.7;
+    for (const id of this.targets) {
+      const d = this.distTo(id);
+      if (d > range) continue;
+      const score = id !== "satoshi" && this.info.get(id)?.raidingMe ? d - 10000 : d;
+      if (score < bd) { bd = score; best = id; }
+    }
+    return best;
+  }
+  /** Lock onto a body from the page (the raider when a raid on your vault opens). */
+  lockOn(id: string | null) { this.lockId = id; }
+  /** What a tap at this screen point hits: the nearest body, Satoshi, or nothing. */
+  private pick(sx: number, sy: number): string | null {
+    const x = sx + this.cam.x, y = sy + this.cam.y;
+    let best: string | null = null, bd = Infinity;
+    for (const [id, s] of this.bodies) {
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < s.r + 26 && d < bd) { bd = d; best = id; }
+    }
+    if (!best && this.places.boss.visible && Math.hypot(this.boss.x - x, this.boss.y - y) < 86) best = "satoshi";
+    return best;
+  }
+  private tapAt(sx: number, sy: number) {
+    if (this.meInfo.kind === "none") return;
+    const id = this.pick(sx, sy);
+    this.lockId = id;
+    if (id) { const s = this.simOf(id); if (s) this.deflectAt(s.x, s.y, GOLD); }
+    this.autoCool = 0;
+    this.onLock?.(id);
   }
   private aimIn(dir: { x: number; y: number }, half0: number): string | null {
     let best: string | null = null, bd = Infinity;
@@ -525,6 +570,7 @@ export class Arena {
     this.canvas.setPointerCapture(e.pointerId);
     const r = this.canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
+    this.tap = { id: e.pointerId, x, y, t: performance.now(), moved: 0 };
     if (e.pointerType === "mouse") { this.mouse = { id: e.pointerId, x, y }; return; }
     if (y < this.h * 0.4 || this.stick) return; // the lower 60% is the thumb zone
     this.stick = { id: e.pointerId, ox: x, oy: y, dx: 0, dy: 0 };
@@ -532,6 +578,7 @@ export class Arena {
   private onMove = (e: PointerEvent) => {
     const r = this.canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
+    if (this.tap && this.tap.id === e.pointerId) this.tap.moved = Math.max(this.tap.moved, Math.hypot(x - this.tap.x, y - this.tap.y));
     if (this.mouse && this.mouse.id === e.pointerId) { this.mouse.x = x; this.mouse.y = y; return; }
     if (!this.stick || this.stick.id !== e.pointerId) return;
     e.preventDefault();
@@ -542,6 +589,12 @@ export class Arena {
     this.stick.dx = dx / R; this.stick.dy = dy / R;
   };
   private onUp = (e: PointerEvent) => {
+    // a quick touch that barely moved is a tap: lock onto what it touched
+    const tp = this.tap;
+    if (tp && tp.id === e.pointerId) {
+      this.tap = null;
+      if (e.type === "pointerup" && tp.moved < 14 && performance.now() - tp.t < 350) this.tapAt(tp.x, tp.y);
+    }
     if (this.stick && this.stick.id === e.pointerId) this.stick = null;
     if (this.mouse && this.mouse.id === e.pointerId) this.mouse = null;
   };
@@ -638,6 +691,9 @@ export class Arena {
         else { want = dist > 110 ? CHASE.follow : 0; s.speed = want; tx = dx / dist; ty = dy / dist; }
       } else if (b.raidedByMe && b.kind === "exposed" && playing) {
         want = dist < 480 ? CHASE.flee : 0; s.speed = want; tx = -dx / dist; ty = -dy / dist;
+      } else if (this.meInfo.kind === "vault" && b.kind === "exposed" && b.state === "open" && dist < 280) {
+        // a red bag you can rob runs when a gold hunter comes close (slower than you: you can catch it)
+        want = CHASE.flee * 0.85; s.speed = Math.min(want, s.speed + dt * 140); tx = -dx / dist; ty = -dy / dist;
       } else {
         s.speed = 0;
         const a = 40 + rnd(s.seed, 1) * 60, f1 = 0.12 + rnd(s.seed, 2) * 0.12, f2 = 0.09 + rnd(s.seed, 3) * 0.1, ph = rnd(s.seed, 4) * 6.28;
@@ -676,6 +732,8 @@ export class Arena {
       }
     }
     this.stepShots(dt);
+    this.stepLock(dt);
+    if (playing) this.stepCoins(dt);
     if (playing && this.places.gate !== "hidden") {
       const d = Math.hypot(me.x - this.gate.x, me.y - this.gate.y);
       if (d < 50 + me.r * 0.5 && nowMs - this.lastGate > 4000) { this.lastGate = nowMs; this.cb.onGate(); }
@@ -725,6 +783,49 @@ export class Arena {
     if (!this.lowPower) for (const m of this.motes) { m.y -= dt * (6 + m.s * 3); m.x += Math.sin(this.t * 0.5 + m.p) * dt * 8; if (m.y < -4) { m.y = this.H + 4; m.x = Math.random() * this.W; } }
     if (this.shakeT > 0) this.shakeT -= dt;
     if (this.flashT > 0) this.flashT -= dt;
+  }
+
+  /** The tapped target: drop it when it is gone or your raid on it is on; fire on your own while it can be raided. */
+  private stepLock(dt: number) {
+    if (this.autoCool > 0) this.autoCool -= dt;
+    const id = this.lockId;
+    if (!id) return;
+    if (id !== "satoshi") {
+      const b = this.info.get(id);
+      if (!b || !this.bodies.has(id) || (b.raidedByMe && !b.raidingMe)) { this.lockId = null; return; }
+    }
+    if (this.meInfo.kind !== "vault" || this.autoCool > 0 || !this.shootReady) return;
+    if (!this.targets.has(id) || this.distTo(id) > this.viewSpan * 0.6) return;
+    this.autoCool = 1.1; // one try a second: the page refuses while a move is signing
+    this.onAutoFire?.();
+  }
+
+  /** Coins you can see: an exposed bag leaks behind you; a vault draws a thin stream from the exposed bags around it.
+   * A picture of the harvest rule (2.5% of every exposed bag each epoch, half to vaults), not money: the HUD numbers come from the chain. */
+  private stepCoins(dt: number) {
+    if (reducedMotion()) return;
+    const me = this.me;
+    if (this.meInfo.kind === "exposed" && this.meInfo.balance > 0) {
+      this.leakT += dt;
+      const every = this.lowPower ? 0.4 : 0.22;
+      if (this.leakT > every) {
+        this.leakT = 0;
+        this.particles.push({ x: me.x + (Math.random() - 0.5) * me.r, y: me.y + me.r * 0.7, vx: -me.vx * 0.25 + (Math.random() - 0.5) * 50, vy: -70 - Math.random() * 50, t: 0, life: 1.2, c: GOLD, s: 6, g: 300 });
+      }
+    }
+    if (this.meInfo.kind === "vault") {
+      this.incomeT += dt;
+      const every = this.lowPower ? 1.1 : 0.55;
+      if (this.incomeT > every) {
+        this.incomeT = 0;
+        const span = this.viewSpan;
+        const from = this.order.filter((id) => { const b = this.info.get(id); return b && b.kind === "exposed" && b.state !== "frozen" && b.balance > 0 && this.distTo(id) < span; });
+        if (from.length) {
+          const s = this.bodies.get(from[Math.floor(Math.random() * from.length)])!;
+          for (let i = 0; i < 2; i++) this.particles.push({ x: s.x, y: s.y, vx: 0, vy: 0, t: -i * 0.08, life: 1.4, c: GOLD, s: 5, tx: me.x, ty: me.y });
+        }
+      }
+    }
   }
 
   /** Projectiles: fly, home a little onto their snapped target, stop on blocks, land on bodies. */
@@ -806,6 +907,7 @@ export class Arena {
     this.drawBoss(c);
     this.drawLines(c);
     this.drawAim(c);
+    this.drawLock(c);
     // reason lines: the nearest two bodies with a reason, and the one your aim is on
     this.hintIds.clear();
     if (this.meInfo.kind === "vault") {
@@ -1295,6 +1397,31 @@ export class Arena {
     const p = 0.5 + 0.5 * Math.sin(this.t * 8), R = r + p * 3;
     c.strokeRect(Math.round(s.x - R) + 0.5, Math.round(s.y - R) + 0.5, Math.round(R * 2), Math.round(R * 2));
     c.restore();
+  }
+  /** The body you tapped: four turning gold brackets (grey while it cannot be raided). */
+  private drawLock(c: CanvasRenderingContext2D) {
+    const id = this.lockId;
+    if (!id) return;
+    const s = this.simOf(id); if (!s) return;
+    const live = this.meInfo.kind === "vault" && this.targets.has(id);
+    const r = (id === "satoshi" ? 70 : ("r" in s ? (s as Sim).r : 24) + 14);
+    c.save();
+    c.translate(Math.round(s.x), Math.round(s.y));
+    c.rotate(this.t * (live ? 1.6 : 0.5));
+    c.fillStyle = live ? GOLD : this.colors.dim;
+    const L = 12;
+    for (let i = 0; i < 4; i++) {
+      c.rotate(Math.PI / 2);
+      c.fillRect(r - 3, -L / 2, 4, L);
+    }
+    c.restore();
+    if (live) {
+      c.save();
+      c.font = this.font(11); c.textAlign = "center"; c.textBaseline = "bottom";
+      c.fillStyle = GOLD;
+      this.label(c, "LOCKED", s.x, s.y - r - 6, 4);
+      c.restore();
+    }
   }
   /** Shield ring: one cyan ring per 10%, brighter while it takes a hit. */
   private shieldRing(c: CanvasRenderingContext2D, key: string, x: number, y: number, r: number, bps: number) {
