@@ -46,11 +46,11 @@ Every NEAR contract call carries the signer's public key, and its first byte is 
 
 Open **https://keyfall.jdollar.site** on a phone or desktop and press **PLAY**. First visits start in the free **practice** arena: no wallet, no sign up, no popups.
 
-1. **We make you a practice wallet and buy your first bag.** It lands red: your coins sit behind an old key, they leak over time and the hunters turn toward you.
+1. **We make you a practice wallet and buy your first bag.** It lands red: your coins sit behind an old key and they leak over time. A short guide walks you through the first minute, and no bot raids you in your first three minutes; after that the hunters come for you.
 2. **Run to the gold gate.** Steer with your thumb (or WASD and the arrow keys). Touch the gate and your vault is built: your coins move into an account whose only key is quantum safe. If a raider caught you first and you escape in time, the raid takes nothing.
 3. **Now you're gold, and only gold can shoot.** Shoot a marked rival to raid it. Exposed bags run, so chase them. Vaults fight back.
 4. **Stay alive and climb.** Charge a SHIELD so raids take less, DASH away from raiders, and shoot Satoshi's core when it glows. The richest vault at Q-Day wins. Every move is signed in your browser with ML-DSA-65.
-5. **Play for real.** After the first mission, switch to the **mainnet** arena: buy $KEYFALL with your own NEAR on `keyfall.near` and play the same rules for real money.
+5. **Play for real.** After the first mission, switch to the **mainnet** arena: buy $KEYFALL with NEAR on `keyfall.near` and play the same rules for real money. No NEAR yet? Top up from USDC or SOL on Solana, or USDC or ETH on Base, through NEAR Intents straight to your in browser wallet (QR code included), and cash out to any NEAR account from the menu.
 
 Prefer to check without playing? Open **Under the hood** (https://keyfall.jdollar.site/proof): every check there reads the chain from your browser.
 
