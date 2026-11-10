@@ -29,7 +29,7 @@
 import { sha256, signerFromPrivateKey, serializeTransaction, serializeSignedTransaction, bytesToBase64, toBase58 } from "@fastnear/utils";
 import { cors, originOk } from "./_origin.js";
 
-const GRANT = (14n * 10n ** 23n).toString(); // 1.4 NEAR: a 1 NEAR buy, a 0.3 NEAR vault, storage and gas
+const GRANT = (15n * 10n ** 23n).toString(); // 1.5 NEAR: a 1 NEAR buy, then create_vault costs 0.3 deposit + 100 Tgas prepaid (0.401 NEAR measured Nov 10), then migrate gas. 1.4 left a player 0.0016 short.
 const NONCE_PER_BLOCK = 1_000_000n; // nearcore ACCESS_KEY_NONCE_RANGE_MULTIPLIER
 const COST_BLOCKS = 600n; // testnet makes a block about every 0.6 s: one grant per ~6 minutes
 const BURST = 5n; // grants that may go out at once after a quiet spell

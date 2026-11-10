@@ -99,6 +99,7 @@ export const FALLBACK = "That did not go through. Try again.";
 /** One friendly sentence for any failure. Never a raw string. */
 export function plainError(e: unknown): string {
   const raw = String((e as any)?.message || e || "");
+  if (raw) console.warn("[keyfall] move failed:", raw.slice(0, 400)); // the plain sentence goes on screen; the raw reason stays in the console
   const code = e instanceof ChainError ? e.code : (raw.match(/E_[A-Z_]+/) || [""])[0];
   if (PLAIN[code]) return PLAIN[code];
   if (/No free testnet wallet|faucet|sponsor|not funded|Could not create a testnet wallet/i.test(raw)) return "No free wallet is available right now. Try again in a minute.";
