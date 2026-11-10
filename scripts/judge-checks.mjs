@@ -2,7 +2,7 @@
 // no keys needed, nothing is signed or sent.
 //
 // Usage: node judge-checks.mjs [testnet|mainnet] [contract]
-//   testnet (default): the practice arena in deployments/testnet-live.json, rules in sim/params.json
+//   testnet (default): the practice arena in deployments/testnet-live.json, rules in its params_file (sim/params-arcade.json for season 2)
 //   mainnet:           keyfall.near from deployments/mainnet.json, rules in sim/params-mainnet.json
 
 import fs from "node:fs";
@@ -15,7 +15,7 @@ const { near, view, keyList, explorer, unwrap } = await import("./lib.mjs");
 
 const read = (p) => JSON.parse(fs.readFileSync(new URL(p, import.meta.url), "utf8"));
 const deployment = read(target === "mainnet" ? "../deployments/mainnet.json" : "../deployments/testnet-live.json");
-const paramsFile = target === "mainnet" ? "sim/params-mainnet.json" : "sim/params.json";
+const paramsFile = String(deployment.params_file || (target === "mainnet" ? "sim/params-mainnet.json" : "sim/params.json")).split("\\").join("/"); // the file this season was deployed with
 const params = read(`../${paramsFile}`);
 const contract = args[0] || deployment.contract;
 const results = [];
