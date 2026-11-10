@@ -17,7 +17,7 @@
 
 <p align="center"><img src="docs/img/hero.png" alt="KEYFALL: the live arena of every player around the share of coins held in quantum vaults" width="900" /></p>
 
-Built at **NEAR HACKATHON** (November 2026). Tracks: **Memecoins With Mechanics** and **Games With Real Economies**. KEYFALL was called Q-DAY during development, so some code, the repo name and the practice contract still use that name.
+Built at **NEAR HACKATHON** (November 2026). Tracks: **Memecoins With Mechanics** and **Games With Real Economies**. The repo, the practice contract and some code use the codename `qday`.
 
 ## The mechanic in one line
 
