@@ -9,7 +9,7 @@ import path from "node:path";
 import {
   near, send, call, view, keyList, explorer, faucetAccount, subAccount, generateSigner, rawMlDsaPublicKey,
   bytesToBase64, successValue, gasBurnt, sleep, NEAR, TGAS, privateKeyFromRandom, publicKeyFromPrivate,
-  signerFromPrivateKey, waitForAccount,
+  signerFromPrivateKey, waitForAccount, network,
 } from "./lib.mjs";
 
 const contract = process.argv[2];
@@ -40,8 +40,9 @@ async function makeVault(owner, name) {
 
 async function waitUntil(ms) {
   for (;;) {
-    const s = await view(contract, "stats");
-    if (Number(s.now_ms) >= ms) return s;
+    // A long wait polls for up to an hour: ride out a flaky RPC instead of dying.
+    const s = await view(contract, "stats").catch(() => null);
+    if (s && Number(s.now_ms) >= ms) return s;
     await sleep(3000);
   }
 }
@@ -155,7 +156,7 @@ for (const [w, v, n] of [[alice, va, "alice"], [bob, vb, "bob"]]) {
   const add = await send({ signerId: vb.accountId, signer: vb.signer, receiverId: vb.accountId, actions: [near.actions.addFullAccessKey({ publicKey: pub })] });
   const classical = signerFromPrivateKey(secret);
   const r = await call(contract, vb.accountId, classical, "boss_raid", {});
-  check("a vault move signed with a classical key is refused (E_NOT_QUANTUM)", !add.error && /E_NOT_QUANTUM/.test(r.error || ""), { hash: r.hash, add_tx: add.hash, error: r.error?.slice(0, 220) });
+  check("a vault move signed with a classical key is refused (E_NOT_QUANTUM)", !add.error && /E_NOT_QUANTUM/.test(r.error || ""), { hash: r.hash, signer: vb.accountId, add_tx: add.hash, error: r.error?.slice(0, 220) });
   const t = await send({
     signerId: vb.accountId, signer: classical, receiverId: contract,
     actions: [near.actions.functionCall({ methodName: "ft_transfer", args: { receiver_id: bob.accountId, amount: tok(1) }, gas: TGAS(50), deposit: "1" })],
@@ -242,13 +243,16 @@ if (process.env.SKIP_QDAY !== "1") {
 for (const v of [va, vb, vd]) v.signer.destroy();
 
 const pass = checks.every((c) => c.pass);
-const result = { contract, ran_at: new Date().toISOString(), all_pass: pass, checks };
+// The code that was tested, as the chain reports it (base58 sha256 of the wasm),
+// so it can be compared with the mainnet contract's code_hash.
+const code_hash = (await near.queryAccount({ accountId: contract, network }).then((r) => r?.result ?? r).catch(() => null))?.code_hash || null;
+const result = { contract, code_hash, ran_at: new Date().toISOString(), all_pass: pass, checks };
 fs.mkdirSync(outDir, { recursive: true });
 fs.writeFileSync(path.join(outDir, "latest.json"), JSON.stringify(result, null, 2) + "\n");
 const md = [
   "# End-to-end run (testnet, fast season)",
   "",
-  `Contract \`${contract}\` · ${result.ran_at} · **${pass ? "ALL PASS" : "FAILURES"}**`,
+  `Contract \`${contract}\` · code_hash \`${code_hash}\` · ${result.ran_at} · **${pass ? "ALL PASS" : "FAILURES"}**`,
   "",
   "| Check | Result | Transaction |",
   "|---|---|---|",

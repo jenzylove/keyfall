@@ -62,7 +62,7 @@ export async function send({ signerId, signer, receiverId, actions }) {
     } catch (e) {
       const msg = String(e?.message || e);
       // Retry only transport problems, never a transaction the chain refused.
-      if (attempt < 2 && /fetch|ECONN|timeout|503|502|429/i.test(msg)) {
+      if (attempt < 2 && /fetch|abort|ECONN|timeout|503|502|429/i.test(msg)) {
         await sleep(2000 * (attempt + 1));
         continue;
       }
@@ -86,7 +86,7 @@ export async function view(contractId, methodName, args = {}) {
       return await near.view({ contractId, methodName, args, network });
     } catch (e) {
       // Retry transport problems only; a view the contract refused is real.
-      if (attempt >= 5 || !/fetch|transport|ECONN|timeout|503|502|429/i.test(String(e?.message || e))) throw e;
+      if (attempt >= 5 || !/fetch|transport|abort|ECONN|timeout|503|502|429/i.test(String(e?.message || e))) throw e;
       await sleep(2000 * (attempt + 1));
     }
   }
