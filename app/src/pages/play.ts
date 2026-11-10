@@ -1377,19 +1377,25 @@ export function play(root: HTMLElement) {
             <p class="s-text">Send exactly <b class="yel">${esc(q.amountInFormatted)} ${esc(src.label)}</b> on <b>${esc(src.chain)}</b> to this address. ${chain.fmtNear(q.amountOut, 2)} NEAR lands in your wallet, usually within a few minutes.</p>
             <div class="qr">${qrSvg(q.depositAddress)}</div>
             <div class="addr"><code>${esc(q.depositAddress)}</code><button type="button" class="btn ghost small" data-copy="${esc(q.depositAddress)}">Copy</button></div>
-            <p class="m-hint">Good until ${until.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}. Send the exact amount in one transfer.</p>
+            <p class="m-hint"><b>${esc(q.amountInFormatted)} ${esc(src.label)} must arrive.</b> If your wallet takes its network fee in ${esc(src.label)}, add the fee on top. Anything extra comes back to your refund address. Good until ${until.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })}.</p>
             <p class="s-calc" id="tu-status"><i class="dot"></i> Waiting for your deposit…</p>
           </div>`;
         wireCopy(B);
-        let last = "", shortFor = 0;
+        let last = "";
         clearInterval(fundPoll);
         fundPoll = window.setInterval(async () => {
           if (!B.isConnected) { clearInterval(fundPoll); return; }
-          const st = await chain.fundingStatus(q.depositAddress);
+          const fs = await chain.fundingStatus(q.depositAddress);
+          const st = fs.status;
           const el = B.querySelector<HTMLElement>("#tu-status");
           if (!el) return;
-          const words: Record<string, string> = { PENDING_DEPOSIT: "Waiting for your deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", PROCESSING: "Swapping to NEAR…", SUCCESS: "NEAR delivered. Opening your wallet…", REFUNDED: "The swap could not finish: your deposit went back to your refund address.", FAILED: "The swap failed: your deposit goes back to your refund address.", INCOMPLETE_DEPOSIT: "Deposit seen. Confirming…" };
-          if (st === "INCOMPLETE_DEPOSIT") { shortFor += 5; if (shortFor >= 180) { el.innerHTML = `<i class="dot"></i> The deposit looks short. If you sent less than asked, send the rest to the same address; anything extra comes back to your refund address.`; return; } } else shortFor = 0;
+          const words: Record<string, string> = { PENDING_DEPOSIT: "Waiting for your deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", PROCESSING: "Swapping to NEAR…", SUCCESS: "NEAR delivered. Opening your wallet…", REFUNDED: "The swap could not finish: your deposit went back to your refund address.", FAILED: "The swap failed: your deposit goes back to your refund address.", INCOMPLETE_DEPOSIT: "Deposit seen. Checking the amount…" };
+          if (st === "INCOMPLETE_DEPOSIT" && fs.deposited) {
+            const got = Number(fs.deposited), need = Number(q.amountInFormatted), miss = Math.max(0, need - got);
+            el.innerHTML = `<i class="dot hot"></i> <b>${got.toFixed(6)} ${esc(src.label)}</b> arrived, <b>${miss.toFixed(6)}</b> short. Your wallet probably took its network fee out of the transfer. Send <b class="yel">${(Math.ceil(miss * 100) / 100).toFixed(2)} ${esc(src.label)}</b> more to the same address; anything extra comes back to your refund address.`;
+            last = st; return;
+          }
+          if (st === "SUCCESS" && fs.refunded && Number(fs.refunded) > 0) { el.innerHTML = `<i class="dot safe"></i> NEAR delivered. ${esc(fs.refunded)} ${esc(src.label)} extra went back to your refund address.`; last = st; return; }
           if (st !== last) { last = st; el.innerHTML = `<i class="dot${st === "SUCCESS" ? " safe" : ""}"></i> ${esc(words[st] || "Waiting for your deposit…")}`; }
         }, 5000);
       } catch (e) {

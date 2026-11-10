@@ -489,10 +489,12 @@ export const FUND_ASSET: Record<string, string> = {
 };
 export const NEAR_ASSET = "nep141:wrap.near";
 
-export async function fundingStatus(depositAddress: string): Promise<string> {
+export interface FundingStatus { status: string; deposited: string | null; refunded: string | null }
+export async function fundingStatus(depositAddress: string): Promise<FundingStatus> {
   const r = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`).catch(() => null);
   const j: any = r ? await r.json().catch(() => ({})) : {};
-  return String(j?.status || "UNKNOWN");
+  const d = j?.swapDetails || {};
+  return { status: String(j?.status || "UNKNOWN"), deposited: d.depositedAmountFormatted ?? null, refunded: d.refundedAmountFormatted ?? null };
 }
 
 /** Cash out: send NEAR from the vault (signed with its quantum key) to any NEAR account. */
