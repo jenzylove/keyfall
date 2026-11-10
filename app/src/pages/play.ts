@@ -1316,22 +1316,18 @@ export function play(root: HTMLElement) {
     const savedRefund = () => { try { return localStorage.getItem(refundKey()) || ""; } catch { return ""; } };
     show("topup", "", "Top up", `
       <p class="kick gold">Mainnet · step 2 of 2</p>
-      <h2 class="s-title">Get your $KEYFALL</h2>
-      <p class="s-text">Pay with USDC, USDT, SOL or ETH from your own wallet. <b>NEAR Intents</b> swaps it into NEAR in this game's wallet for you: no exchange account, no bridge. Then you buy your $KEYFALL bag with it, straight from the contract's price curve. Part of it builds your quantum vault and pays for your moves.</p>
-      <div class="pick tu-amt" role="group" aria-label="How much">${[1, 2, 5].map((n) => `<button type="button" data-near="${n}" aria-pressed="${n === fundNear}"><b class="tu-price" data-n="${n}">${n} NEAR</b><small>${n} NEAR</small></button>`).join("")}</div>
-      <p class="m-hint" id="tu-gets">Working out what you get…</p>
+      <h2 class="s-title">Get $KEYFALL</h2>
+      <p class="s-text">Pay from any wallet. <b>NEAR Intents</b> swaps it for you.</p>
+      <div class="pick tu-amt" role="group" aria-label="How much">${[1, 2, 5].map((n) => `<button type="button" data-near="${n}" aria-pressed="${n === fundNear}"><b class="tu-price" data-n="${n}">${n} NEAR</b><small class="tu-gets" data-n="${n}">&nbsp;</small></button>`).join("")}</div>
       <label class="m-field"><span>Pay with</span><select id="tu-src">${SOURCES.map((s) => `<option value="${s.id}" ${s.id === fundSource ? "selected" : ""}>${s.label} on ${s.chain}</option>`).join("")}</select></label>
-      <label class="m-field"><span id="tu-rk">Your ${SOURCES.find((x) => x.id === fundSource)!.chain} address, for refunds</span><input id="tu-refund" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(savedRefund())}" placeholder="the wallet you pay from"/></label>
-      <p class="m-hint">If the swap cannot finish, your deposit goes back to this address on the chain you paid from.</p>
+      <label class="m-field"><span id="tu-rk">Your ${SOURCES.find((x) => x.id === fundSource)!.chain} address (for refunds)</span><input id="tu-refund" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(savedRefund())}" placeholder="the wallet you pay from"/></label>
       <button class="btn wide" id="tu-go">Get a deposit address</button>
       <p class="s-msg" id="tu-msg" role="status"></p>
       <div id="tu-quote" hidden></div>
-      <div class="set-block">
-        <div class="set-h"><b>Or send NEAR directly</b></div>
-        <p class="s-text">From any NEAR wallet or exchange, send NEAR to this device's wallet:</p>
+      <details class="tu-direct"><summary>Already have NEAR? Send it here</summary>
         <div class="addr"><code id="tu-wallet">${esc(wallet)}</code><button type="button" class="btn ghost small" data-copy="${esc(wallet)}">Copy</button></div>
-        <p class="m-hint" id="tu-bal">Waiting for NEAR to arrive…</p>
-      </div>`, "gold");
+      </details>
+      <p class="m-hint" id="tu-bal"></p>`, "gold");
     const B = sheet!.body;
     for (const b of B.querySelectorAll<HTMLButtonElement>("[data-near]")) b.onclick = () => { fundNear = Number(b.dataset.near); for (const x of B.querySelectorAll<HTMLButtonElement>("[data-near]")) x.setAttribute("aria-pressed", String(x === b)); void prices(); };
     const refundIn = B.querySelector<HTMLInputElement>("#tu-refund")!;
@@ -1348,16 +1344,17 @@ export function play(root: HTMLElement) {
           const usd = src.label === "USDC" || src.label === "USDT";
           el.textContent = usd ? `≈ $${amt.toFixed(2)}` : `≈ ${amt.toFixed(amt < 0.1 ? 4 : 3)} ${src.label}`;
         }
-        const spend = Math.max(0, fundNear - VAULT_RESERVE);
-        const q = spend > 0 ? await chain.quoteBuy(chain.nearToYocto(spend)).catch(() => null) : null;
-        const gets = B.querySelector<HTMLElement>("#tu-gets");
-        if (gets) gets.innerHTML = `${fundNear} NEAR${np ? ` (about $${(fundNear * np).toFixed(2)})` : ""}: about <b class="yel">${q ? full(q) : "…"} $KEYFALL</b> after ${VAULT_RESERVE} NEAR for your vault and moves. Prices are live from NEAR Intents; the deposit address shows the exact amount.`;
-      } catch { const gets = B.querySelector<HTMLElement>("#tu-gets"); if (gets) gets.textContent = "Prices are not loading right now. The deposit address shows the exact amount."; }
+        for (const el of B.querySelectorAll<HTMLElement>(".tu-gets")) {
+          const spend = Math.max(0, Number(el.dataset.n) - VAULT_RESERVE); // the rest builds your vault and pays for moves
+          const q = spend > 0 ? await chain.quoteBuy(chain.nearToYocto(spend)).catch(() => null) : null;
+          el.textContent = q ? `≈ ${short(BigInt(q))} $KEYFALL` : `${el.dataset.n} NEAR`;
+        }
+      } catch { /* prices not loading: the buttons keep their NEAR amounts and the deposit address shows the exact sum */ }
     };
     void prices();
     B.querySelector<HTMLSelectElement>("#tu-src")!.onchange = (e) => {
       fundSource = (e.target as HTMLSelectElement).value as typeof fundSource;
-      B.querySelector<HTMLElement>("#tu-rk")!.textContent = `Your ${SOURCES.find((x) => x.id === fundSource)!.chain} address, for refunds`;
+      B.querySelector<HTMLElement>("#tu-rk")!.textContent = `Your ${SOURCES.find((x) => x.id === fundSource)!.chain} address (for refunds)`;
       refundIn.value = savedRefund();
       void prices();
     };
@@ -1408,7 +1405,7 @@ export function play(root: HTMLElement) {
       if (!B.isConnected) { clearInterval(balPoll); clearInterval(fundPoll); return; }
       const bal = await chain.nearBalance(wallet);
       const el = B.querySelector<HTMLElement>("#tu-bal");
-      if (el) el.textContent = bal > 0n ? `Wallet holds ${chain.fmtNear(bal, 2)} NEAR.` : "Waiting for NEAR to arrive…";
+      if (el) el.textContent = bal > 0n ? `Wallet holds ${chain.fmtNear(bal, 2)} NEAR.` : "";
       if (bal >= BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1))) {
         clearInterval(balPoll); clearInterval(fundPoll);
         sfx.play("coins");
