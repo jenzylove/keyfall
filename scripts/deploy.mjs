@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { near, send, view, keyList, explorer, faucetAccount, TGAS, network } from "./lib.mjs";
+import { near, send, view, keyList, explorer, faucetAccount, TGAS, network, sleep } from "./lib.mjs";
 
 const [wasmPath, paramsPath, label, startArg] = process.argv.slice(2);
 if (!wasmPath || !paramsPath || !label) throw new Error("usage: node deploy.mjs <wasm> <params.json> <label> [start_ms]");
@@ -19,6 +19,8 @@ const start_ms = startArg ? String(startArg) : String(Date.now() + 60_000);
 
 const acct = await faucetAccount(`keyfall-${label}`);
 console.log("contract account:", acct.accountId);
+// The faucet's account can be visible a moment before its key is: wait for the key.
+for (let i = 0; i < 20 && !(await keyList(acct.accountId)).some((k) => k.public_key === acct.publicKey); i += 1) await sleep(1500);
 
 const r = await send({
   signerId: acct.accountId,
@@ -50,7 +52,7 @@ const out = {
   deployed_at: new Date().toISOString(),
   start_ms: Number(start_ms),
   q_day_ms: Number(stats.q_day_ms),
-  params_file: path.relative(path.resolve(".."), path.resolve(paramsPath)),
+  params_file: path.relative(path.resolve(".."), path.resolve(paramsPath)).split(path.sep).join("/"),
   wasm_sha256: crypto.createHash("sha256").update(code).digest("hex"),
   wasm_bytes: code.length,
   keyless,
