@@ -1,0 +1,15 @@
+{
+  "network": "testnet",
+  "label": "arcade3",
+  "contract": "keyfall-arcade3-mwaruamc57.testnet",
+  "deploy_tx": "CEvhJErui19vkqLeDRH1rTUdTHScVDZ2dd3HUcvLdGJt",
+  "deploy_link": "https://testnet.nearblocks.io/txns/CEvhJErui19vkqLeDRH1rTUdTHScVDZ2dd3HUcvLdGJt",
+  "deployed_at": "2026-11-10T14:14:45.514Z",
+  "start_ms": 1794320202887,
+  "q_day_ms": 1795377702887,
+  "params_file": "sim/params-arcade.json",
+  "wasm_sha256": "9095039bd36c6f1646911b6aaa5a97371428441e05124a04dfd583e9a4ac2ccf",
+  "wasm_bytes": 276073,
+  "keyless": true,
+  "config_matches_params": true
+}

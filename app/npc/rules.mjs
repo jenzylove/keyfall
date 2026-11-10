@@ -190,6 +190,10 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
   let boss = 0;
   for (const n of npcs) {
     if (boss >= MAX_BOSS) break;
+    // bots hit Satoshi at most once every 6 hours of play whatever the round length, so on a short clock
+    // his stash is left for players (on the 6 hour mainnet clock that is every round)
+    const every = Math.max(1, Math.round(6 * 3600_000 / Number(config.epoch_ms || 21600000)));
+    if (Number(stats?.epoch || 0) % every !== 0) break;
     if (n.boss_ready && big(n.balance) >= big(config.boss_min_balance)) {
       boss += 1;
       push({ npc: npcName(n.account), action: "boss", reason: "Satoshi is ready this epoch." });

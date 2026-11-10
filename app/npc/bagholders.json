@@ -6,5 +6,13 @@
     "kfbag04-mwanjy5i.testnet",
     "kfbag05-mwanltfr.testnet",
     "kfbag06-mwannaeu.testnet"
+  ],
+  "keyfall-arcade3-mwaruamc57.testnet": [
+    "kfbag01-mwas80ji.testnet",
+    "kfbag02-mwas9zlu.testnet",
+    "kfbag03-mwasbhqx.testnet",
+    "kfbag04-mwasdg19.testnet",
+    "kfbag05-mwasex8y.testnet",
+    "kfbag06-mwasgfpw.testnet"
   ]
 }
