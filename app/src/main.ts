@@ -94,6 +94,7 @@ document.addEventListener("click", (e) => {
   const url = new URL(a.href, location.href);
   if (url.origin !== location.origin) return;
   if (url.pathname === location.pathname && url.hash) return; // in-page anchor
+  if (url.searchParams.has("net")) return; // switching arena: a full page load, so the chain layer starts on that network
   e.preventDefault();
   go(url.pathname + url.search + url.hash);
 });

@@ -13,9 +13,15 @@ export interface SimReport { chosen: Record<string, number>; season: { epoch_hou
 const one = (m: Record<string, unknown>) => Object.values(m)[0] as any;
 
 export const e2e: E2E | null = one(import.meta.glob("../../../docs/e2e/latest.json", { eager: true, import: "default" })) ?? null;
-export const deploy: Deploy | null = one(import.meta.glob("../../../deployments/testnet-live.json", { eager: true, import: "default" })) ?? null;
+import { NETWORK } from "../chain";
+const DEPLOYS = import.meta.glob("../../../deployments/{testnet-live,mainnet}.json", { eager: true, import: "default" }) as Record<string, Deploy>;
+const PARAMS = import.meta.glob("../../../sim/params*.json", { eager: true, import: "default" }) as Record<string, Record<string, string | number>>;
+/** The deployment record of the network this page is on, and the params file that season was deployed with. */
+export const deploy: Deploy | null = Object.entries(DEPLOYS).find(([k]) => k.endsWith(NETWORK === "mainnet" ? "/mainnet.json" : "/testnet-live.json"))?.[1] ?? null;
+const paramsName = String(deploy?.params_file || (NETWORK === "mainnet" ? "sim/params-mainnet.json" : "sim/params.json")).split("\\").join("/").split("/").pop()!;
+export const simParamsFile = `sim/${paramsName}`;
 export const sim: SimReport | null = one(import.meta.glob("../../../sim/out/report.json", { eager: true, import: "default" })) ?? null;
-export const simParams: Record<string, string | number> | null = one(import.meta.glob("../../../sim/params.json", { eager: true, import: "default" })) ?? null;
+export const simParams: Record<string, string | number> | null = Object.entries(PARAMS).find(([k]) => k.endsWith("/" + paramsName))?.[1] ?? null;
 
 export const findCheck = (re: RegExp) => e2e?.checks.find((c) => re.test(c.name)) ?? null;
 

@@ -1,7 +1,7 @@
 import * as chain from "../chain";
 import { CONTRACT, accountLink, txLink, type Holder } from "../chain";
 import { $, $$, FAIL, REPO, esc, isNpc, maybe, reducedMotion, short } from "../ui/dom";
-import { deploy, e2e, findCheck, guardAccepted, guardRefused, sim, simParams, type SimPoint } from "../ui/evidence";
+import { deploy, e2e, findCheck, guardAccepted, guardRefused, sim, simParams, simParamsFile, type SimPoint } from "../ui/evidence";
 import { fmtParam } from "../ui/params";
 
 const V = (state: "pass" | "fail" | "wait", label?: string) => `<span class="verdict ${state}">${label ?? (state === "pass" ? "Pass" : state === "fail" ? "Fail" : "Checking")}</span>`;
@@ -16,11 +16,11 @@ export function proof(root: HTMLElement) {
     <section class="wrap page-title">
       <p class="eyebrow"><span class="dot safe"></span>Judge checks · run live in your browser</p>
       <h1 class="display h1" style="font-size:clamp(64px,15vw,160px)">Proof</h1>
-      <p class="lede">Every check below reads NEAR testnet now, from this page, or shows a recorded run with its date and transaction links. Contract <a class="break" href="${accountLink(CONTRACT)}" target="_blank" rel="noopener">${esc(CONTRACT)} ↗</a></p>
+      <p class="lede">Every check below reads NEAR ${chain.NETWORK === "mainnet" ? "mainnet" : "testnet (the free practice arena)"} now, from this page, or shows a recorded run with its date and transaction links. Contract <a class="break" href="${accountLink(CONTRACT)}" target="_blank" rel="noopener">${esc(CONTRACT)} ↗</a></p>
     </section>
     <section class="wrap" style="padding-bottom:80px"><ol class="checks">
       ${item(1, "p-keys", "No keys on the contract", "Read live: the contract's access key list. Empty means nobody can upgrade or change it.")}
-      ${item(2, "p-config", "Rules equal the simulation", "Read live: config(), compared field by field with sim/params.json, bundled with this page.")}
+      ${item(2, "p-config", "Rules equal the simulation", `Read live: config(), compared field by field with ${simParamsFile}, the file this season was deployed with, bundled with this page.`)}
       ${item(3, "p-census", "Vault census", "Read live: every vault and its key list. A quantum only vault has exactly one key, and it is ML-DSA-65.")}
       ${item(4, "p-guard", "The quantum guard", "Recorded run: the same kind of vault move, refused with a classical key and accepted with ML-DSA-65.")}
       ${item(5, "p-gas", "Harvest gas stays flat", "Recorded run: gas of harvest() at a small and a large number of exposed holders.")}
@@ -61,7 +61,7 @@ export function proof(root: HTMLElement) {
         return `<tr><td class="mono">${esc(k)}</td><td>${b === undefined ? "missing" : esc(fmtParam(k, b))}</td><td>${a === undefined ? "missing" : esc(fmtParam(k, a))}</td><td class="r">${same ? '<span class="okmark">same</span>' : '<span class="badmark">differs</span>'}</td></tr>`;
       });
       verdict("p-config", bad === 0 ? "pass" : "fail");
-      body("p-config").innerHTML = `<p>${keys.length - bad} of ${keys.length} fields match.</p><div class="scroll-x"><table class="tbl"><thead><tr><th>Field</th><th>Live, config()</th><th>sim/params.json</th><th class="r">Match</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
+      body("p-config").innerHTML = `<p>${keys.length - bad} of ${keys.length} fields match.</p><div class="scroll-x"><table class="tbl"><thead><tr><th>Field</th><th>Live, config()</th><th>${simParamsFile}</th><th class="r">Match</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
     } catch {
       verdict("p-config", "wait", "Unreachable");
       body("p-config").innerHTML = `<p class="fail-inline">${FAIL}</p>`;

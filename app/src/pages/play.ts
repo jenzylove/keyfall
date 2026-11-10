@@ -771,7 +771,8 @@ export function play(root: HTMLElement) {
     let best: string | null = null, bd = Infinity;
     for (const h of rivals()) {
       if (blocker(h).state !== "open") continue;
-      const d = arena.distTo(h.account);
+      // a red bag first, always: it cannot block, so the first robbery a new player makes pays
+      const d = arena.distTo(h.account) + (h.kind === "exposed" ? 0 : 1e6);
       if (d < bd) { bd = d; best = h.account; }
     }
     return best;
@@ -830,7 +831,7 @@ export function play(root: HTMLElement) {
       case 5: {
         if (guideRaided || guideBossHit) { guideGo(6); break; }
         const t = guideRaidTarget();
-        if (t) { gVariant = "body"; gTarget = t; }
+        if (t) { gVariant = "body"; if (gTarget !== t) arena.lockOn(t); gTarget = t; } // locked, so the shot goes to the red bag and not the nearest gold bot
         else if (bossReadyForMe()) { gVariant = "boss"; gTarget = ""; }
         else { guideGo(6); break; }
         break;
