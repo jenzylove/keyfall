@@ -368,7 +368,15 @@ function failureOf(r: any): string | null {
   return null;
 }
 
-async function send(who: { accountId: string; signer: any }, receiverId: string, actions: any[]): Promise<TxResult> {
+/** One move at a time per key: two transactions signed at once fight over the key's nonce and one is refused. */
+const lanes = new Map<string, Promise<unknown>>();
+function send(who: { accountId: string; signer: any }, receiverId: string, actions: any[]): Promise<TxResult> {
+  const prev = lanes.get(who.accountId) || Promise.resolve();
+  const run = prev.catch(() => {}).then(() => sendNow(who, receiverId, actions));
+  lanes.set(who.accountId, run.catch(() => {}));
+  return run;
+}
+async function sendNow(who: { accountId: string; signer: any }, receiverId: string, actions: any[]): Promise<TxResult> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -382,6 +390,7 @@ async function send(who: { accountId: string; signer: any }, receiverId: string,
       if (e instanceof ChainError) throw e;
       lastErr = e;
       const msg = String(e?.message || e);
+      if (/nonce/i.test(msg) && attempt < 2) { await new Promise((r) => setTimeout(r, 800)); continue; } // a nonce race: the library refetches it
       if (/fetch|network|timeout|503|502|429/i.test(msg)) {
         nextRpc();
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
