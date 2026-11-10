@@ -1,3 +1,4 @@
+import { IS_MAINNET } from "../chain";
 // Plain words for the game: short amounts, human times, friendly errors.
 
 import { ChainError, type Params } from "../chain";
@@ -107,7 +108,7 @@ export function plainError(e: unknown): string {
   if (/does not control this vault/i.test(raw)) return "That code does not open this vault.";
   if (/not created/i.test(raw)) return "The vault did not appear in time. Try again.";
   if (/Nothing to migrate/i.test(raw)) return "There is nothing left to move in.";
-  if (/NotEnoughBalance|LackBalanceForState|balance/i.test(raw)) return "Not enough testnet NEAR for that.";
+  if (/NotEnoughBalance|LackBalanceForState|balance/i.test(raw)) return IS_MAINNET ? "Not enough NEAR in your wallet for that." : "Not enough practice NEAR for that.";
   if (/fetch|network|timeout|429|50[234]/i.test(raw)) return "NEAR is not answering right now. Try again in a moment.";
   return FALLBACK;
 }

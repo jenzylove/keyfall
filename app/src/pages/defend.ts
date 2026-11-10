@@ -85,7 +85,7 @@ export function defendPage(root: HTMLElement, params: Record<string, string>) {
     if (!open) {
       host.innerHTML = `<a class="btn wide" href="/play" data-link>Play KEYFALL</a>`;
     } else if (closed) {
-      host.innerHTML = `<p class="s-text">Anyone can settle the raid now${s.wallet || s.vault ? "" : ". We'll make you a free testnet wallet first"}.</p><button class="btn wide hot" id="d-go">Settle it</button>`;
+      host.innerHTML = `<p class="s-text">Anyone can settle the raid now${s.wallet || s.vault ? "" : chain.IS_MAINNET ? ". Open the game first to set up your wallet" : ". We'll make you a free practice wallet first"}.</p><button class="btn wide hot" id="d-go">Settle it</button>`;
       run($<HTMLButtonElement>("#d-go"), async () => { if (!chain.session().wallet && !chain.session().vault) await chain.join(); return chain.resolve(r.id); }, (v) => `Settled. The raid took ${full(String(v ?? "0"))}.`);
     } else if (myVault) {
       host.innerHTML = `<p class="s-text">Defend now and their stake is yours, less a ${pct(P(config, "raid_burn_bps"))} burn.</p><button class="btn wide" id="d-go">Defend</button>`;

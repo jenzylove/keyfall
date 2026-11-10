@@ -18,7 +18,8 @@ import { ART_DOOR, ART_QC, ART_SATOSHI_RED, ART_VAULT, MARK } from "../ui/pixels
 import qrcode from "qrcode-generator";
 
 const MAIN = chain.IS_MAINNET;
-const VAULT_RESERVE = 0.35; // NEAR kept back for the vault account and gas
+const VAULT_RESERVE = 0.45; // NEAR kept back: 0.3 funds the vault, about 0.1 is prepaid gas for create_vault (mostly refunded), the rest moves your coins in
+const VAULT_NEEDS = 0.42; // what the wallet must hold for create_vault to be accepted (measured: 0.4009 on testnet)
 const SOURCES: { id: Parameters<typeof chain.fundingQuote>[0]; label: string; chain: string }[] = [
   { id: "usdc-sol", label: "USDC", chain: "Solana" },
   { id: "usdt-sol", label: "USDT", chain: "Solana" },
@@ -1085,6 +1086,19 @@ export function play(root: HTMLElement) {
       buildT0.t = Date.now();
       busy = "build"; busyText = "creating your vault account…"; renderArena();
       stepOn(1);
+      // not enough NEAR left for the vault (an older reserve, or a big buy): sell just enough $KEYFALL back first
+      if (MAIN && (w.walletNear ?? 0n) < BigInt(chain.nearToYocto(VAULT_NEEDS)) && w.walletBal > 0n) {
+        busyText = "selling a little $KEYFALL to pay for the vault…"; renderArena();
+        const needY = BigInt(chain.nearToYocto(VAULT_NEEDS + 0.02)) - (w.walletNear ?? 0n);
+        let amt = w.walletBal / 20n; // start at 5% of the bag and grow until the contract's own quote covers it
+        for (let i = 0; i < 8; i++) {
+          const q = await chain.quoteSell(amt.toString()).catch(() => null);
+          if (q && BigInt(q) >= needY) break;
+          amt = amt * 3n / 2n > w.walletBal ? w.walletBal : amt * 3n / 2n;
+        }
+        await chain.sell(amt.toString(), "wallet");
+        await refresh();
+      }
       const { seed } = chain.newVaultSeed();
       const r = await chain.createVault(nm, seed, () => { stepDone(1); stepOn(2); busyText = "adding your quantum key…"; renderArena(); });
       stepDone(2);
