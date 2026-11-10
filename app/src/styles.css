@@ -217,7 +217,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .hud { grid-area: hud; display: grid; grid-template-columns: auto 1fr 1.3fr 0.9fr auto auto; align-items: center; height: 56px; padding: 0 4px 0 10px; border-bottom: 2px solid var(--line); background: var(--bg2); }
 /* raids left this epoch: pips by your bag, words when none are left */
 .hud-pips { display: inline-flex; align-items: center; gap: 3px; height: 8px; margin-top: 1px; }
-.hud-pips .hp-k { font: 500 8px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
+.hud-pips .hp-k { white-space: nowrap; font: 500 8px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin-right: 2px; }
 .hud-pips .hp-k.none { color: var(--hazard-ink); letter-spacing: 0.06em; }
 .hud-pips i { width: 7px; height: 5px; background: var(--line2); }
 .hud-pips i.on { background: var(--hazard); }
@@ -417,7 +417,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .field > .events .ev.pin { box-shadow: inset 0 0 0 1px var(--hazard), 0 2px 0 var(--press); }
 .field > .events .ev.pin.calm { box-shadow: inset 0 0 0 1px var(--line2), inset 3px 0 0 var(--dim), 0 2px 0 var(--press); }
 .field > .events .ev .av { width: 20px; height: 20px; }
-.field > .events .ev-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.field > .events .ev-t { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; } /* two lines, so the number at the end is never cut */
 .field > .events .ev-clock { font-size: 16px; }
 .field > .events .ev:nth-child(n+3) { display: none; }
 .strip-slot { right: 96px; }
@@ -526,6 +526,35 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .fx-pop.red { color: var(--hazard-ink); }
 .fx-pop.ink { color: var(--dim); font-size: 18px; }
 .fx-pop.cyan { color: var(--cyan-ink); }
+.fx-pop.big { font-size: 40px; padding: 4px 12px 6px; background: #0c0c0b; color: #ffd60a; box-shadow: 0 4px 0 #000; text-shadow: none; } /* a dark pill: reads on light and dark */
+.fx-pop.big.red { color: #ff3d2e; text-shadow: none; }
+/* SHOOT answers: a nudge when a press cannot fire, SIGNING… while a move is out, the round clock when empty */
+.act.nudge { animation: act-nudge 0.3s ease both; }
+@keyframes act-nudge { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.act.shoot.signing { background: var(--panel); color: var(--ink); box-shadow: inset 0 0 0 2px var(--line2), 0 5px 0 var(--press); }
+.act.shoot.signing .act-st { color: var(--gold-ink); font-weight: 700; letter-spacing: 0.1em; }
+.act.shoot.empty .act-st { color: #ffd9d4; }
+.act.shoot .act-st b { font: inherit; font-variant-numeric: tabular-nums; }
+/* the vault build: three named steps that tick */
+.n-steps { margin: 0; padding: 10px 12px; list-style: none; display: grid; gap: 8px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); }
+.n-steps li { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 10px; font: 500 13px/1.3 var(--mono); color: var(--dim); }
+.n-steps li i { width: 12px; height: 12px; box-shadow: inset 0 0 0 2px var(--line2); }
+.n-steps li.now { color: var(--ink); } .n-steps li.now i { background: var(--gold); box-shadow: none; animation: blink 0.9s steps(2) infinite; }
+.n-steps li.done { color: var(--ink); } .n-steps li.done i { background: var(--gold); box-shadow: none; }
+.n-steps li b { font: 600 12px/1 var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; }
+.n-steps li.done b { color: var(--gold-ink); }
+/* your bag sheet */
+.hud-cell.bag { cursor: pointer; }
+.hud-pips .hp-k.harv { color: var(--gold-ink); margin-left: 6px; }
+.bag-grid { display: grid; }
+.bag-grid > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.bag-grid dt { color: var(--dim); display: grid; gap: 2px; } .bag-grid dt small { font-size: 10.5px; color: var(--dim); opacity: 0.8; }
+.bag-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; } .bag-grid dd b { font-weight: 600; } .bag-grid dd small { color: var(--dim); font-size: 11px; display: block; }
+.keys-list { display: grid; gap: 8px; }
+.key-row { display: grid; gap: 3px; padding: 10px 12px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); text-decoration: none; color: var(--ink); font: 500 12.5px/1.35 var(--mono); }
+.key-row b { font: 700 13px/1 var(--display); letter-spacing: 0.04em; text-transform: uppercase; }
+.key-row span { color: var(--dim); }
+.s-text.dim { color: var(--dim); font-size: 12.5px; }
 @keyframes fx-pop { 0% { opacity: 0; transform: translate(-50%, -30%) scale(0.6); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); } 30% { transform: translate(-50%, -55%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -140%) scale(1); } }
 .fx-coin, .fx-fly { position: absolute; z-index: 11; width: 7px; height: 7px; margin: -3px 0 0 -3px; background: var(--gold); pointer-events: none; box-shadow: inset -2px -2px 0 rgba(0,0,0,0.35); }
 .fx-coin.red, .fx-fly.red { background: var(--hazard); }
@@ -918,3 +947,4 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .raid-trk .rt-n { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
 .raid-trk .rt b { font: 700 13px/1 var(--display); font-variant-numeric: tabular-nums; color: #27f0ff; min-width: 34px; text-align: right; }
 @media (min-width: 1024px) { .raid-trk { top: 92px; right: 14px; } }
+.raid-trk .rt.more { font-size: 10px; color: var(--dim); height: 20px; }

@@ -7,6 +7,7 @@ import puppeteer from "puppeteer-core";
 import fs from "node:fs";
 const BASE = process.env.BASE || "http://localhost:5189";
 const OUT = process.env.OUT || "C:/Users/LENOVO/qday-launch/v5shots";
+const THEME = process.env.THEME || "dark";
 const MIN = Number(process.argv[2] || 8);
 const PROFILE = process.argv[3] || `C:/Users/LENOVO/qday-launch/chrome-v5-${Date.now()}`;
 fs.mkdirSync(OUT, { recursive: true });
@@ -44,7 +45,7 @@ async function steerTo(target, ms = 25000, near = 30) {
   await setKeys(new Set());
 }
 
-await p.evaluateOnNewDocument(() => { localStorage.setItem("qday.theme", "dark"); localStorage.setItem("qday.intro.v2", "1"); });
+await p.evaluateOnNewDocument((THEME_) => { localStorage.setItem("qday.theme", THEME_); localStorage.setItem("qday.intro.v2", "1"); }, THEME);
 await p.goto(`${BASE}/play`, { waitUntil: "domcontentloaded" });
 await waitFor(() => document.querySelector("#field")?.__arena?.ready, 30000);
 await waitFor(() => (document.querySelector("#field")?.__world?.().holders || 0) > 0 ? "ok" : null, 40000);
@@ -93,6 +94,7 @@ while (Date.now() < end) {
     if (fired) { raids.set(pick, { at: Date.now() }); await waitFor(() => document.querySelector("#field").__arena.meInfo.inFlight ? null : 1, 60000, 300); if (n++ < 3) await shot(`10-shot-${n}`); }
   } else {
     await sleep(4000);
+    if (n >= 1 && n < 9) await shot(`15-wait-${n++}`); // the settle bursts and pops land while we wait
   }
   await sleep(1500);
 }

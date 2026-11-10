@@ -464,13 +464,16 @@ function rawPq(signer: MlDsa65Signer): Uint8Array {
 
 /** Creates `<name>.<contract>`, born with only the ML-DSA-65 key. Paid by the
  * exposed wallet (0.3 NEAR funds the vault's own gas). */
-export async function createVault(name: string, seed: Uint8Array): Promise<TxResult & { accountId: string }> {
+export async function createVault(name: string, seed: Uint8Array, onSent?: () => void): Promise<TxResult & { accountId: string }> {
   const w = needWallet();
   const signer = signerFromSeed(seed);
   const r = await send(w, CONTRACT, [fc("create_vault", { name, pq_public_key: bytesToBase64(rawPq(signer)) }, nearToYocto(0.3), 100)]);
+  onSent?.(); // the account tx is in; now the key shows up on it
   const accountId = `${name}.${CONTRACT}`;
-  for (let i = 0; i < 20 && !(await getHolder(accountId)); i++) await new Promise((r) => setTimeout(r, 1500));
-  if (!(await getHolder(accountId))) throw new ChainError("The vault account was not created.", r.hash);
+  // the tx returned executed (optimistic); the holder view usually answers at once, so poll fast and briefly
+  let seen = await getHolder(accountId).catch(() => null);
+  for (let i = 0; i < 40 && !seen; i++) { await new Promise((r) => setTimeout(r, 400)); seen = await getHolder(accountId).catch(() => null); }
+  if (!seen) throw new ChainError("The vault account was not created.", r.hash);
   lsSet(LS_VAULT, { accountId, ...(await sealSeed(seed)), contract: CONTRACT } satisfies VaultRecord);
   vaultSigner = { accountId, signer };
   return { ...r, accountId };

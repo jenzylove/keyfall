@@ -22,9 +22,9 @@ export function freeze(el: HTMLElement, ms = 90) {
 }
 
 /** A number that floats up from a point (percent of host or px). */
-export function pop(host: HTMLElement, text: string, tone: "gold" | "red" | "ink" | "cyan" = "gold", at?: { x: number; y: number; unit?: "%" | "px" }) {
+export function pop(host: HTMLElement, text: string, tone: "gold" | "red" | "ink" | "cyan" = "gold", at?: { x: number; y: number; unit?: "%" | "px" }, size: "" | "big" = "") {
   const el = document.createElement("span");
-  el.className = `fx-pop ${tone}`;
+  el.className = `fx-pop ${tone}${size ? ` ${size}` : ""}`;
   el.textContent = text;
   const u = at?.unit || "%";
   el.style.left = `${at?.x ?? 50}${u}`;
