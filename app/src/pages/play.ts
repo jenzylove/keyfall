@@ -165,6 +165,7 @@ export function play(root: HTMLElement) {
         <div class="strip-slot" id="mission"></div>
         <div class="guide-slot" id="guide"></div>
         <div class="events" id="events" aria-live="polite"></div>
+        <ul class="raid-trk" id="raid-trk" aria-label="Your raids" hidden></ul>
         <div class="field-msg" id="field-msg" hidden></div>
         <div class="start" id="start" hidden></div>
         <p class="keys" aria-hidden="true" hidden>WASD or arrows to move · Space to shoot · Shift to dash</p>
@@ -222,6 +223,21 @@ export function play(root: HTMLElement) {
   shootBtn.addEventListener("pointerdown", doShoot);
   shootBtn.addEventListener("click", (e) => e.preventDefault());
   arena.onShootKey = () => doShoot();
+  // tap a body to lock on: while it can be raided your shots go to it on their own
+  arena.onAutoFire = () => doShoot();
+  arena.onLock = (id) => {
+    sfx.unlock();
+    if (!id) return;
+    sfx.play("blip"); sfx.vibrate(8);
+    if (!inVault()) { arena.say("me", "Get gold first. Only gold can shoot.", 2400, true); return; }
+    if (arena.targets.has(id)) return; // it fires on its own
+    if (id === "satoshi") { arena.say("satoshi", bossLine(), 2400, true); return; }
+    const h = w.holders.find((x) => x.account === id);
+    if (!h) return;
+    const bl = blocker(h);
+    const why = hintFor(h, bl.state) || bl.why;
+    if (why) arena.say(id, why, 2400, true);
+  };
 
   // sound toggle in the HUD
   const sndBtn = root.querySelector<HTMLButtonElement>("#h-snd")!;
@@ -571,18 +587,18 @@ export function play(root: HTMLElement) {
         break;
       }
       case "safe": {
-        let text = "Safe from bleed and freeze. <b>Shoot a marked rival</b> to raid it.";
+        let text = "Safe from bleed and freeze, and red bags now pay you. <b>Tap a marked rival</b> to rob it.";
         if (esc2 && esc2.target === sess().wallet?.accountId) {
           if (esc2.status === "open") text = `Safe. ${N(esc2.attacker)}'s raid finds nothing. Clock: <b data-until="${esc2.deadline}">${clock(esc2.deadline - chainNow())}</b>.`;
-          else if (BigInt(esc2.take) === 0n) { text = `Escaped: the raid took 0. <b>Shoot a marked rival</b> to raid it.`; earn("escape"); }
-          else text = `The raid took ${full(esc2.take)} before you moved in. <b>Shoot a marked rival</b> to raid it.`;
+          else if (BigInt(esc2.take) === 0n) { text = `Escaped: the raid took 0. <b>Tap a marked rival</b> to rob it.`; earn("escape"); }
+          else text = `The raid took ${full(esc2.take)} before you moved in. <b>Tap a marked rival</b> to rob it.`;
         }
         html = strip("gold", `${pips("safe")}<span class="m-count">Quantum safe</span>`, text);
         break;
       }
       case "strike":
         html = strip("gold", `${pips("strike")}<span class="m-count">Strike back</span>`,
-          pendingRaid ? `Your shot is in flight to ${N(pendingRaid)}. Waiting for the chain to confirm.` : `Shoot a marked rival to raid it. Exposed bags run; chase them. Vaults may defend.`);
+          pendingRaid ? `Your shot is in flight to ${N(pendingRaid)}. Waiting for the chain to confirm.` : `Tap a marked rival to lock on, then chase it: red bags run. Each raid you land ticks in the corner until the coins fly to you.`);
         break;
       case "done":
         html = strip("gold", `<span class="m-count">Free play</span>`, !MAIN && chain.MAINNET_READY ? `You know the arena. Play for real on mainnet with your own NEAR, or keep practising.` : `Shoot Satoshi's core when it glows, shield up before others raid you, and climb the board.`,
@@ -714,9 +730,9 @@ export function play(root: HTMLElement) {
     1: { title: "This is you.", text: TOUCH ? "Drag anywhere to move." : "WASD or the arrow keys to move." },
     2: { title: "You are red.", text: "Your coins sit behind an old key. A quantum computer can crack it, so anyone can rob you, and red bags leak coins over time.", tap: true },
     3: { title: "Get to the gold door.", text: "It locks your coins behind a quantum key." },
-    4: { title: "You are gold now. Safe.", text: "Only gold players can attack.", tap: true },
-    5: { title: "Shoot a target.", text: TOUCH ? "Red target marks are players you can hit. Aim by moving, then press SHOOT." : "Red target marks are players you can hit. Aim by moving, then press SHOOT or Space." },
-    6: { title: "Now they hunt you too.", text: "Raiders shoot at your vault. Shoot them back to block, charge a SHIELD so their shots take less, DASH to get away.", tap: true },
+    4: { title: "You are gold now. Safe.", text: "Every red bag now leaks coins to you at each harvest, and only gold players can attack.", tap: true },
+    5: { title: "Rob a red bag.", text: TOUCH ? "Tap a player with a red target mark to lock on. Get close and your shots fire on their own." : "Click a player with a red target mark to lock on. Get close and your shots fire on their own." },
+    6: { title: "Now they hunt you too.", text: "When a raider comes for your vault you lock onto it: shoot it back to win its stake. A SHIELD makes their raids take less, DASH gets you away.", tap: true },
     7: { title: "Your goal:", text: "Be the richest vault when Q-Day hits. Red bags freeze forever that day.", tap: true },
   };
 
@@ -813,8 +829,8 @@ export function play(root: HTMLElement) {
     const tone = gstep === 2 || gstep === 5 ? "red" : gstep === 1 || gstep === 6 ? "cyan" : "gold";
     const shots = w.vault?.raids_left ?? 0;
     const ammo = ` You have ${shots} shot${shots === 1 ? "" : "s"} this round.`;
-    const text = gstep === 5 ? (variant === "boss" ? `Nobody you can rob is near. Satoshi is always there: shoot his core.${ammo}` : card.text + ammo) : card.text;
-    const wait = gstep === 1 ? "Waiting for you to move" : gstep === 3 ? (waiting ? esc(busyText) : "Touch the door when you reach it") : gstep === 5 ? (variant === "boss" ? "Aim at Satoshi and press SHOOT" : "Aim at the marked body and press SHOOT") : "";
+    const text = gstep === 5 ? (variant === "boss" ? `Nobody you can rob is near. Satoshi is always there: tap him to lock on, then get close.${ammo}` : card.text + ammo) : card.text;
+    const wait = gstep === 1 ? "Waiting for you to move" : gstep === 3 ? (waiting ? esc(busyText) : "Touch the door when you reach it") : gstep === 5 ? (variant === "boss" ? "Tap Satoshi to lock on" : "Tap the marked player to lock on") : "";
     const still = gShownStep === gstep; // the same card redrawn: no entrance animation again
     gShownStep = gstep;
     guideEl.innerHTML = `<section class="guide tone-${tone}${compact ? " compact" : ""}${still ? " still" : ""}" data-step="${gstep}" aria-live="polite">
@@ -1067,6 +1083,27 @@ export function play(root: HTMLElement) {
     renderGoal();
   }
 
+  /** The next harvest for you. Exposed: it takes harvest_bps of your bag. In a vault: half of what it takes
+   * from every exposed bag (Satoshi included) is shared across vaults by size. Same arithmetic as core harvest(). */
+  function harvestFlow(): { gain: boolean; amount: bigint } | null {
+    const st = w.stats, cfg = c();
+    if (!st || !cfg || st.after_q_day) return null;
+    const hb = BigInt(P(cfg, "harvest_bps"));
+    if (inVault()) {
+      const q = BigInt(st.vault_tokens);
+      if (q <= 0n || w.vaultBal <= 0n) return null;
+      const h = bps(BigInt(st.exposed_tokens), Number(hb));
+      const toVaults = h - h / 2n;
+      const amount = (toVaults * w.vaultBal) / q;
+      return amount > 0n ? { gain: true, amount } : null;
+    }
+    if (sess().wallet && w.walletBal > 0n) {
+      const amount = bps(w.walletBal, Number(hb));
+      return amount > 0n ? { gain: false, amount } : null;
+    }
+    return null;
+  }
+
   /** The goal bar under the HUD: the win condition and where you stand, every number from the chain. */
   let goalKey = "";
   function renderGoal() {
@@ -1081,6 +1118,9 @@ export function play(root: HTMLElement) {
       const i = list.findIndex((h) => h.account === s.vault!.accountId);
       text = i >= 0 ? `you are #${i + 1} of ${list.length}` : `${list.length} vaults on the board`;
     }
+    // what the next harvest does to you, from the chain's own numbers (the contract's harvest rule, worked out here)
+    const hv = harvestFlow();
+    if (hv) text += hv.gain ? ` · +${short(hv.amount)} next harvest` : ` · −${short(hv.amount)} next harvest`;
     // mainnet: what you paid (your own confirmed buys in this browser) against what the bag sells for now (the contract's quote)
     if (MAIN && (s.wallet || s.vault)) {
       const paid = paidNear();
@@ -1348,7 +1388,7 @@ export function play(root: HTMLElement) {
         raidedByMe: !!mineRaid,
         until: h.account === raider ? w.incoming!.deadline : mineRaid?.deadline || undefined,
         svg: avatar(h.account),
-        focus, showBag: tied,
+        focus, showBag: tied || (inVault() && b.state === "open"), // what you can rob shows what it holds
         hint: hintFor(h, b.state),
       };
     });
@@ -1361,8 +1401,11 @@ export function play(root: HTMLElement) {
       if (w.vault?.boss_ready && w.vaultBal >= PB(c(), "boss_min_balance")) targets.add("satoshi");
     }
     arena.targets = targets;
-    // a new raid on you: the raider fires (the raid is already on chain)
-    if (raider && raider !== prevRaider && kind !== "none") arena.npcShot(raider);
+    // a new raid on you: the raider fires (the raid is already on chain); in a vault you lock straight onto it, so your shots defend on their own
+    if (raider && raider !== prevRaider && kind !== "none") {
+      arena.npcShot(raider);
+      if (kind === "vault" && w.incoming?.target === s.vault?.accountId) arena.lockOn(raider);
+    }
     prevRaider = raider || "";
     const idForArt = s.vault?.accountId || s.wallet?.accountId || "you";
     arena.setMe({
@@ -1950,6 +1993,18 @@ export function play(root: HTMLElement) {
   }
 
   // pinned raid toast: tap for the detail sheet
+  /** Your open raids, top right under the map: who, and the clock until it lands. Coins fly to you when one settles. */
+  let trkKey = "";
+  function renderRaidTracker() {
+    const el = root.querySelector<HTMLElement>("#raid-trk")!;
+    const open = w.myRaids.filter((r) => r.status === "open").sort((a, b) => a.deadline - b.deadline).slice(0, 4);
+    const key = open.map((r) => `${r.id}:${r.deadline}`).join("|") + (guideOn() ? "g" : "");
+    if (key === trkKey) return;
+    trkKey = key;
+    el.hidden = !open.length || guideOn();
+    el.innerHTML = open.map((r) => `<li class="rt${r.target_kind === "vault" ? " v" : ""}"><span class="av">${avatar(r.target)}</span><span class="rt-n">${N(r.target)}</span><b data-until="${r.deadline}">${clock(r.deadline - chainNow())}</b></li>`).join("");
+  }
+
   function renderPinned() {
     const r = w.incoming;
     let pin = evHost.querySelector<HTMLButtonElement>(".ev.pin");
@@ -1977,6 +2032,7 @@ export function play(root: HTMLElement) {
     renderMission();
     renderArena();
     renderPinned();
+    renderRaidTracker();
     renderStats();
     renderActions();
     renderLog();
