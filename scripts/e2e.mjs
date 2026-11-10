@@ -1,5 +1,5 @@
 // End-to-end run against a freshly deployed fast-season contract on testnet.
-// Every behaviour Q-DAY claims is exercised with a real transaction, and
+// Every behaviour KEYFALL claims is exercised with a real transaction, and
 // each result is written with its explorer link.
 //
 // Usage: node e2e.mjs <contract-account> [out-dir]

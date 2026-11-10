@@ -1,4 +1,4 @@
-// The bleed: Q-DAY's signature visual. Grains of $QDAY drawn as piles.
+// The bleed: KEYFALL's signature visual. Grains of coins drawn as piles.
 //
 // Season mode (landing hero): the red pile on the ledge is every exposed bag,
 // the yellow pile on the floor is every vault. Pile areas are in proportion to

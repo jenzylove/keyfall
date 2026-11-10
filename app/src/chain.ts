@@ -1,4 +1,4 @@
-// Q-DAY chain layer. Everything the app reads or writes on NEAR goes through
+// KEYFALL chain layer. Everything the app reads or writes on NEAR goes through
 // here. No secret ever leaves the browser: the exposed wallet's ed25519 key and
 // the vault's ML-DSA-65 seed are created and kept on this device only.
 
@@ -80,7 +80,7 @@ async function withRpc<T>(fn: () => Promise<T>): Promise<T> {
 export const CONTRACT: string = NETWORK === "mainnet" ? MAINNET_CONTRACT : TESTNET_CONTRACT;
 export const EXPLORER = NETWORK === "mainnet" ? "https://nearblocks.io" : "https://testnet.nearblocks.io";
 /** The game's API. On a local dev server it is the live site (CORS allows localhost). */
-export const API_BASE = typeof location !== "undefined" && /localhost|127\.0\.0\.1/.test(location.hostname) ? "https://qday-one.vercel.app" : "";
+export const API_BASE = typeof location !== "undefined" && /localhost|127\.0\.0\.1/.test(location.hostname) ? "https://playkeyfall.vercel.app" : "";
 /** The game's API for this arena: mainnet calls carry `net=mainnet`. */
 export const apiUrl = (path: string) => {
   if (NETWORK !== "mainnet") return `${API_BASE}${path}`;
@@ -90,7 +90,7 @@ export const txLink = (h: string) => `${EXPLORER}/txns/${h}`;
 export const accountLink = (a: string) => `${EXPLORER}/address/${a}`;
 
 const TGAS = (n: number) => (BigInt(n) * 10n ** 12n).toString();
-export const ONE = 10n ** 18n; // 1 $QDAY (18 decimals)
+export const ONE = 10n ** 18n; // 1 coin (18 decimals)
 export const ONE_NEAR = 10n ** 24n;
 export const nearToYocto = (n: number) => (BigInt(Math.round(n * 1e6)) * 10n ** 18n).toString();
 
@@ -135,11 +135,11 @@ const MESSAGES: Record<string, string> = {
   E_PUNCH_DOWN: "No punching down: that bag is far smaller than yours.",
   E_RAID_LIMIT: "You've used all your raids this epoch.",
   E_STAKE_TOO_SMALL: "Stake more to raid.",
-  E_INSUFFICIENT: "Not enough $QDAY.",
+  E_INSUFFICIENT: "Not enough coins.",
   E_WINDOW_CLOSED: "Too late: the defend window has closed.",
   E_WINDOW_OPEN: "The defend window is still open.",
   E_BOSS_DONE: "You already hit Satoshi this epoch.",
-  E_BOSS_MIN_BALANCE: "Hold more $QDAY to raid Satoshi.",
+  E_BOSS_MIN_BALANCE: "Hold more coins to hit Satoshi.",
   E_FROZEN: "Frozen at Q-Day.",
   E_QDAY_PASSED: "Q-Day has passed. The season is over.",
   E_TAKEN: "That vault name is taken.",

@@ -195,4 +195,4 @@ export function nav(href: string) {
   dispatchEvent(new PopStateEvent("popstate"));
 }
 
-export const REPO = "https://github.com/jenzylove/qday";
+export const REPO = "https://github.com/jenzylove/keyfall";

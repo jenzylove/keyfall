@@ -1,6 +1,6 @@
 /* Display font: Jersey 10 (SIL OFL), self hosted, scaled to match the layout's sizes. */
 @font-face { font-family: "QDAY Display"; src: url("/fonts/jersey10-latin.woff2") format("woff2"); font-weight: 400 900; font-display: swap; size-adjust: 128%; }
-/* Q-DAY v3: arcade pixel. Neon on deep space black, CRT scanlines, chunky
+/* KEYFALL v3: arcade pixel. Neon on deep space black, CRT scanlines, chunky
    buttons with press depth, one pixel display font and one mono. Dark is the
    hero; light is finished too. Mobile first (390 wide), desktop gets room. */
 

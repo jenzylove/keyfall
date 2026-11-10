@@ -1,4 +1,4 @@
-// Pixel art drawn as crisp SVG: the Q-DAY logotype, the coin bag, the vault
+// Pixel art drawn as crisp SVG: the KEYFALL logotype, the coin bag, the vault
 // door, the raid panel and the big Satoshi boss. Parts carry classes so CSS can
 // animate them (drips fall, the door slams, beams run).
 

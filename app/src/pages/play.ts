@@ -1661,7 +1661,7 @@ export function play(root: HTMLElement) {
     }
   }
   const cleanWhy = (s: string) =>
-    s.replace(/qubit-(\d+)/g, "Qubit $1").replace(/\$QDAY/g, "coins").replace(/ \(0% shield\)/, "");
+    s.replace(/qubit-(\d+)/g, "Qubit $1").replace(/\$(QDAY|KEYFALL)/g, "coins").replace(/ \(0% shield\)/, "");
 
   // ----- shield
 

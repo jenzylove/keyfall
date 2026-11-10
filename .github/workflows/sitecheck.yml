@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        default: "https://qday-one.vercel.app"
+        default: "https://playkeyfall.vercel.app"
   schedule:
     - cron: "41 */3 * * *"
 
@@ -23,4 +23,4 @@ jobs:
       - working-directory: app
         env:
           CHROME: /usr/bin/google-chrome
-        run: node spike/smoke.mjs "${{ inputs.url || 'https://qday-one.vercel.app' }}" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: node spike/smoke.mjs "${{ inputs.url || 'https://playkeyfall.vercel.app' }}" | tee -a "$GITHUB_STEP_SUMMARY"

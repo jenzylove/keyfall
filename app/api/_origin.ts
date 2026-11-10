@@ -6,13 +6,13 @@
 // speed bump, not the limit. The limits that hold are in each route (join.ts
 // rate limits on chain; hunt and tick only send moves the contract allows).
 // The crank does not use these routes: it runs app/npc/tick.mjs directly.
-const SITE = [/^https:\/\/(qday|keyfall)\.jdollar\.site$/,/^https:\/\/qday-one\.vercel\.app$/, /^https:\/\/qday-[a-z0-9-]+-jenzyloves-projects\.vercel\.app$/];
+const SITE = [/^https:\/\/(qday|keyfall)\.jdollar\.site$/, /^https:\/\/playkeyfall\.vercel\.app$/,/^https:\/\/qday-one\.vercel\.app$/, /^https:\/\/qday-[a-z0-9-]+-jenzyloves-projects\.vercel\.app$/];
 const DEV = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 function allowed(origin: string): boolean {
   if (!origin) return false;
   if (SITE.some((r) => r.test(origin))) return true;
-  return process.env.VERCEL_ENV !== "production" && DEV.test(origin);
+  return DEV.test(origin); // local dev servers (a judge running npm run dev); forgeable anyway, see above
 }
 
 export function originOk(req: any): boolean {

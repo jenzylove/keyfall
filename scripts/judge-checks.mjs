@@ -1,4 +1,4 @@
-// Judge checks: rebuild every Q-DAY claim from a public NEAR RPC. No keys needed.
+// Judge checks: rebuild every KEYFALL claim from a public NEAR RPC. No keys needed.
 //
 // Usage: node judge-checks.mjs [contract]   (default: deployments/testnet-live.json)
 
@@ -15,7 +15,7 @@ const check = (name, pass, detail = "") => {
   console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
 };
 
-console.log(`Q-DAY judge checks against ${contract} on testnet\n`);
+console.log(`KEYFALL judge checks against ${contract} on testnet\n`);
 
 // 1. Nobody can change the rules
 const keys = await keyList(contract);

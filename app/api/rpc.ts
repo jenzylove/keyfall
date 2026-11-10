@@ -18,7 +18,7 @@ export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
   if (cors(req, res)) return;
   if (req.method !== "POST") return res.status(405).json({ error: "use POST" });
-  if (!originOk(req)) return res.status(403).json({ error: "this RPC serves the Q-DAY site only" });
+  if (!originOk(req)) return res.status(403).json({ error: "this RPC serves the KEYFALL site only" });
   const parsed = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body ?? {};
   if (!METHODS.has(String(parsed?.method))) return res.status(400).json({ jsonrpc: "2.0", id: parsed?.id ?? null, error: { code: -32601, message: "method not allowed" } });
   const body = JSON.stringify(parsed);

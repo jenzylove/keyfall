@@ -7,17 +7,22 @@
 <p align="center"><b>A memecoin where the only way to keep your bag is to move it behind a quantum safe key.<br/>The game is hunting everyone who didn't.</b></p>
 
 <p align="center">
-  <a href="https://qday-one.vercel.app"><img alt="Play" src="https://img.shields.io/badge/play-qday--one.vercel.app-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
+  <a href="https://playkeyfall.vercel.app"><img alt="Play" src="https://img.shields.io/badge/play-playkeyfall.vercel.app-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://nearblocks.io/address/keyfall.near"><img alt="Mainnet contract" src="https://img.shields.io/badge/NEAR%20mainnet-keyfall.near-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
-  <a href="https://testnet.nearblocks.io/address/qday-live-mw6vii9l47s.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice%20(testnet)-qday--live--mw6vii9l47s-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
-  <a href="https://github.com/jenzylove/qday/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jenzylove/qday/ci.yml?branch=main&style=flat-square&label=ci&labelColor=0C0C0B"></a>
+  <a href="https://testnet.nearblocks.io/address/qday-live-mw6vii9l47s.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice-NEAR%20testnet-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
+  <a href="https://github.com/jenzylove/keyfall/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/ci.yml?branch=main&style=flat-square&label=ci&labelColor=0C0C0B"></a>
   <a href="docs/e2e/latest.md"><img alt="End to end" src="https://img.shields.io/badge/end%20to%20end-33%2F33%20on%20testnet-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-EDEBE3?style=flat-square&labelColor=0C0C0B"></a>
 </p>
 
-<p align="center"><img src="docs/img/hero.png" alt="KEYFALL: the live arena of every player around the share of coins held in quantum vaults" width="900" /></p>
+<p align="center">
+  <img src="docs/img/gate.png" alt="Guide step 3 on a phone: a red bag runs for the gold vault gate" width="200" />
+  <img src="docs/img/shoot.png" alt="Aiming at a marked rival and firing: the hit becomes a real raid signed with the quantum key" width="200" />
+  <img src="docs/img/shield.png" alt="A gold vault with a 20% shield ring" width="200" />
+  <img src="docs/img/satoshi.png" alt="A real hit on Satoshi: you dealt 842, kept 673" width="200" />
+</p>
 
-Built at **NEAR HACKATHON** (November 2026). Tracks: **Memecoins With Mechanics** and **Games With Real Economies**. The repo, the practice contract and some code use the codename `qday`.
+Built at **NEAR HACKATHON** (November 2026). Tracks: **Memecoins With Mechanics** and **Games With Real Economies**. The practice contract keeps the season codename it was deployed with.
 
 ## The mechanic in one line
 
@@ -39,7 +44,7 @@ Every NEAR contract call carries the signer's public key, and its first byte is 
 
 ## Play it in two minutes
 
-Open **https://qday-one.vercel.app** on a phone or desktop and press **PLAY**. First visits start in the free **practice** arena: no wallet, no sign up, no popups.
+Open **https://playkeyfall.vercel.app** on a phone or desktop and press **PLAY**. First visits start in the free **practice** arena: no wallet, no sign up, no popups.
 
 1. **We make you a practice wallet and buy your first bag.** It lands red: your coins sit behind an old key, they leak over time and the hunters turn toward you.
 2. **Run to the gold gate.** Steer with your thumb (or WASD and the arrow keys). Touch the gate and your vault is built: your coins move into an account whose only key is quantum safe. If a raider caught you first and you escape in time, the raid takes nothing.
@@ -47,16 +52,14 @@ Open **https://qday-one.vercel.app** on a phone or desktop and press **PLAY**. F
 4. **Stay alive and climb.** Charge a SHIELD so raids take less, DASH away from raiders, and shoot Satoshi's core when it glows. The richest vault at Q-Day wins. Every move is signed in your browser with ML-DSA-65.
 5. **Play for real.** After the first mission, switch to the **mainnet** arena: buy $KEYFALL with your own NEAR on `keyfall.near` and play the same rules for real money.
 
-<p align="center"><img src="docs/img/raid-alert.png" alt="A raider hits your exposed bag: the clock starts while rivals circle in the arena" width="320" /></p>
-
-Prefer to check without playing? Open **Under the hood** (https://qday-one.vercel.app/proof): every check there reads the chain from your browser.
+Prefer to check without playing? Open **Under the hood** (https://playkeyfall.vercel.app/proof): every check there reads the chain from your browser.
 
 ## Two arenas, one contract code
 
 | | Mainnet | Practice |
 |---|---|---|
 | Contract | [`keyfall.near`](https://nearblocks.io/address/keyfall.near), deployed keyless on 9 November 2026 ([deploy](https://nearblocks.io/txns/CVAtSwnxxq1pxwkV22EtsUPDLQA3GFH4bA61nsS3Eeh7), [`deployments/mainnet.json`](deployments/mainnet.json)) | [`qday-live-mw6vii9l47s.testnet`](https://testnet.nearblocks.io/address/qday-live-mw6vii9l47s.testnet) |
-| Money | Real NEAR, real $KEYFALL | Free testnet coins ($QDAY) |
+| Money | Real NEAR, real $KEYFALL | Free testnet coins |
 | Q-Day | 23 November 2026, 04:56 UTC | 21 November 2026, 20:47 UTC |
 | Rules | [`sim/params-mainnet.json`](sim/params-mainnet.json): same as practice except a 2 hour immunity after a raid ends (24 hours in practice) and up to 6 raids per epoch (3 in practice) | [`sim/params.json`](sim/params.json) |
 
@@ -75,7 +78,7 @@ Before locking the mainnet contract, a spike proved mainnet accepts transactions
 | Harvest cost does not grow with holders | Harvest gas was equal at 4 and 44 exposed holders in the recorded testnet run |
 
 ```sh
-git clone https://github.com/jenzylove/qday && cd qday
+git clone https://github.com/jenzylove/keyfall && cd keyfall
 cd scripts && npm install && node judge-checks.mjs
 ```
 
@@ -94,7 +97,7 @@ These numbers came from simulation, not guesses: the same rules crate was run ov
 
 ## The hunters
 
-The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary quantum vaults playing under the same contract rules. Qubits greet new players with a raid, Shor hunts the largest exposed bag it may raid, Grover hunts the least shielded vault. They defend 2 raids in 3, run the harvest, settle closed raids and pay their own gas by selling part of their bag. The landing page shows how much of the vault total they hold. Their whole behaviour is one readable file with a reason for every move: [`app/npc/rules.mjs`](app/npc/rules.mjs).
+The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary quantum vaults playing under the same contract rules. Qubits greet new players with a raid once they are past their first three minutes, Shor hunts the largest exposed bag it may raid, Grover hunts the least shielded vault. They defend 2 raids in 3, run the harvest, settle closed raids and pay their own gas by selling part of their bag. The landing page shows how much of the vault total they hold. Their whole behaviour is one readable file with a reason for every move: [`app/npc/rules.mjs`](app/npc/rules.mjs).
 
 ## How it works
 

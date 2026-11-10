@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        default: "https://qday-one.vercel.app"
+        default: "https://playkeyfall.vercel.app"
 
 jobs:
   play:

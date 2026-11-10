@@ -1,4 +1,4 @@
-// Deploy Q-DAY to testnet: create the account, then in ONE transaction deploy
+// Deploy KEYFALL to testnet: create the account, then in ONE transaction deploy
 // the contract, initialise it and delete its only access key. After this
 // nobody can change the rules.
 //

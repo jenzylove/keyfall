@@ -8,7 +8,7 @@ Ticked only from the live app and the public repo, never from intent.
 - [x] All code written since 2026-10-19
 - [ ] README a human and an AI judge can follow: "do X, see Y", five-minute fast path
 - [ ] README lists libraries used; decide how to word the AI-assisted code line
-- [ ] README names the owner's other project, and that project's README names Q-DAY
+- [ ] README names the owner's other project, and that project's README names KEYFALL
 - [x] No secrets anywhere in git history
 - [ ] Hosted demo up until at least 2026-11-25
 - [ ] Public X post: built at NEAR HACKATHON, tags @NEARProtocol and #NEARHackathon, demo video attached

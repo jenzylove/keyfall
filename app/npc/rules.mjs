@@ -1,4 +1,4 @@
-// Q-DAY NPC rules. The whole behaviour of the game's own bots lives in this
+// KEYFALL NPC rules. The whole behaviour of the game's own bots lives in this
 // one file. No dependencies, no chain code: decide() is a pure function of a
 // snapshot and returns the moves one tick should make, each with a reason.
 //
@@ -128,7 +128,7 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     if (stake === null) return false;
     spent.add(att.account);
     targeted.add(t.account);
-    push({ npc: npcName(att.account), action: "raid", target: t.account, stake: stake.toString(), reason: `${why} Staking ${fmt(stake)} $QDAY for about ${fmt(take)}.` });
+    push({ npc: npcName(att.account), action: "raid", target: t.account, stake: stake.toString(), reason: `${why} Staking ${fmt(stake)} coins for about ${fmt(take)}.` });
     return true;
   };
   const free = (name) => attackers.find((a) => npcName(a.account) === name && !spent.has(a.account));
@@ -141,14 +141,14 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     if (seen !== undefined && now - Number(seen) < GREET_DELAY_MS) continue; // still learning the arena
     if (big(t.immune_until) !== 0n) continue; // already raided once
     const q = qubits().find((a) => eligible(a, t));
-    if (q) launch(q, t, `Newest holder ${short(t.account)} has not been raided yet: ${fmt(t.balance)} $QDAY, say hello.`);
+    if (q) launch(q, t, `Newest holder ${short(t.account)} has not been raided yet: ${fmt(t.balance)} coins, say hello.`);
   }
 
   // Shor: the eligible exposed holder with the largest balance.
   const shor = free("shor");
   if (shor) {
     const t = targets.filter((x) => x.kind === "exposed" && eligible(shor, x)).sort((a, b) => cmpDesc(a.balance, b.balance))[0];
-    if (t) launch(shor, t, `Largest exposed bag in range: ${fmt(t.balance)} $QDAY, no defence possible.`);
+    if (t) launch(shor, t, `Largest exposed bag in range: ${fmt(t.balance)} coins, no defence possible.`);
   }
 
   // Grover: the eligible vault with the lowest shield (tie: largest balance).
@@ -157,7 +157,7 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     const t = targets
       .filter((x) => x.kind === "vault" && eligible(grover, x))
       .sort((a, b) => (a.shield_bps || 0) - (b.shield_bps || 0) || cmpDesc(a.balance, b.balance))[0];
-    if (t) launch(grover, t, `Least shielded vault in range: ${(t.shield_bps || 0) / 100}% shield, ${fmt(t.balance)} $QDAY.`);
+    if (t) launch(grover, t, `Least shielded vault in range: ${(t.shield_bps || 0) / 100}% shield, ${fmt(t.balance)} coins.`);
   }
 
   // 4. Boss (after raids, so a greeting is never delayed): NPCs with boss_ready and enough balance, at most MAX_BOSS per tick.
@@ -219,7 +219,7 @@ export function explainRaid(raid, snap = {}) {
   const name = npcName(raid.attacker);
   const npc = ROSTER.find((r) => r.name === name);
   if (!npc) return "Not an NPC raid.";
-  const bag = snap.balance !== undefined ? `${fmt(snap.balance)} $QDAY` : "a big bag";
+  const bag = snap.balance !== undefined ? `${fmt(snap.balance)} coins` : "a big bag";
   if (npc.style === "hunter-exposed") return `Shor hunts the largest exposed bag it may raid: ${bag}, and an exposed wallet cannot defend. Move it into a vault.`;
   if (npc.style === "hunter-vault") return `Grover hunts the least shielded vault it may raid (${(snap.shield_bps || 0) / 100}% shield). Charge a shield or defend in time.`;
   return `${name} greets the newest holder it may raid. A friendly first raid: defend it or escape into a vault.`;
