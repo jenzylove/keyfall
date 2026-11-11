@@ -757,10 +757,13 @@ export function play(root: HTMLElement) {
   const bagCell = root.querySelector<HTMLElement>(".hud-cell.bag")!;
   const roundChip = document.createElement("span");
   roundChip.className = "round-chip"; roundChip.hidden = true;
-  bagCell.appendChild(roundChip);
   const comboEl = document.createElement("b");
   comboEl.className = "combo"; comboEl.hidden = true; comboEl.setAttribute("aria-live", "polite");
-  bagCell.appendChild(comboEl);
+  // both hang at the top centre of the arena, clear of the HUD and the goal bar
+  const fieldTop = document.createElement("div");
+  fieldTop.className = "field-top";
+  fieldTop.append(roundChip, comboEl);
+  field.appendChild(fieldTop);
   let comboT = 0;
   /** A confirmed payoff: coins fly from `from` into your bag, x2 x3 when payoffs land within 20 s, a jackpot over 30k. */
   function payoff(amount: bigint, from: string | null) {
@@ -1650,7 +1653,7 @@ export function play(root: HTMLElement) {
         ready: bossReadyForMe(),
         hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1,
         hpText: st ? `${short(st.satoshi_tokens)} / ${short(supply)}` : "",
-        badge: `SHOOT HIM · +~${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}`,
+        badge: `SHOOT HIM · +${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}`,
       },
     });
     // the boss is ready for you: say so once per round

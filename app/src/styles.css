@@ -975,12 +975,13 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .hud-cell.bag.fx-bump-big .hud-v { animation: bag-bump-big 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
 @keyframes bag-bump { 0% { transform: scale(1); } 35% { transform: scale(1.18); color: var(--gold-ink); } 100% { transform: scale(1); } }
 @keyframes bag-bump-big { 0% { transform: scale(1); } 30% { transform: scale(1.4) rotate(-3deg); color: var(--gold-ink); } 60% { transform: scale(0.95); } 100% { transform: scale(1); } }
-.hud-cell.bag .combo { position: absolute; right: -4px; bottom: 0; z-index: 3; padding: 3px 6px 4px; background: #0c0c0b; color: #ffd60a; font: 700 17px/1 var(--display); letter-spacing: 0.04em; box-shadow: inset 0 0 0 2px #ffd60a, 0 3px 0 #000; pointer-events: none; }
-.hud-cell.bag .combo[hidden], .round-chip[hidden] { display: none; }
-.hud-cell.bag .combo.in { animation: combo-in 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) both; }
+.field-top { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); z-index: 6; display: flex; flex-direction: row; align-items: center; gap: 8px; pointer-events: none; }
+.field-top .combo { padding: 5px 10px 6px; background: #0c0c0b; color: #ffd60a; font: 700 26px/1 var(--display); letter-spacing: 0.04em; box-shadow: inset 0 0 0 2px #ffd60a, 0 4px 0 #000; }
+.field-top .combo[hidden], .round-chip[hidden] { display: none; }
+.field-top .combo.in { animation: combo-in 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) both; }
 @keyframes combo-in { 0% { transform: scale(0.3) rotate(-12deg); } 60% { transform: scale(1.35) rotate(4deg); } 100% { transform: scale(1) rotate(0); } }
-.round-chip { position: absolute; left: 50%; top: calc(100% + 4px); transform: translateX(-50%); z-index: 3; display: flex; align-items: baseline; gap: 8px; padding: 6px 10px 7px; background: #0c0c0b; box-shadow: inset 0 0 0 2px #27f0ff, 0 4px 0 #000; white-space: nowrap; pointer-events: none; }
+.round-chip { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px 7px; background: #0c0c0b; box-shadow: inset 0 0 0 2px #27f0ff, 0 4px 0 #000; white-space: nowrap; pointer-events: none; }
 .round-chip .rc-k { font: 700 10px/1 var(--display); letter-spacing: 0.14em; text-transform: uppercase; color: #9ff8ff; }
 .round-chip b { font: 700 24px/1 var(--display); font-variant-numeric: tabular-nums; color: #27f0ff; }
 .act.shoot.sending .act-ic { animation: blink 0.5s steps(2) infinite; }
-@media (prefers-reduced-motion: reduce) { .hud-cell.bag.fx-bump .hud-v, .hud-cell.bag.fx-bump-big .hud-v, .hud-cell.bag .combo.in, .act.shoot.sending .act-ic { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .hud-cell.bag.fx-bump .hud-v, .hud-cell.bag.fx-bump-big .hud-v, .field-top .combo.in, .act.shoot.sending .act-ic { animation: none !important; } }
