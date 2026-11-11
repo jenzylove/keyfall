@@ -97,7 +97,29 @@ These numbers came from simulation, not guesses: the same rules crate was run ov
 
 ## The hunters
 
-The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary quantum vaults playing under the same contract rules. Six **bagholders** are their opposite: ordinary accounts that hold a big bag behind an old key, never move it, cannot defend, leak to the vaults every round and buy back in when they run low, so there is always red prey to shoot. Qubits greet new players with a raid once they are past their first three minutes and keep hunting anyone who is not resting, Shor hunts the largest exposed bag it may raid, Grover hunts the least shielded vault. They defend 1 raid in 3, late in the clock, run the harvest, settle closed raids and pay their own gas by selling part of their bag. The landing page shows how much of the vault total they hold. Their whole behaviour is one readable file with a reason for every move: [`app/npc/rules.mjs`](app/npc/rules.mjs).
+The game's own bots are ordinary quantum vaults playing under the same contract rules, with no special powers. Their whole behaviour is one readable file with a reason for every move: [`app/npc/rules.mjs`](app/npc/rules.mjs).
+
+| | Practice (testnet) | Mainnet |
+|---|---|---|
+| Hunters | `shor`, `grover`, `qubit-01` to `qubit-08` | `shor`, `grover`, `qubit-01` |
+| Bagholders (red prey) | six: ordinary accounts that hold a big bag behind an old key, never move it, cannot defend, leak to the vaults every round and buy back in when they run low | none: on mainnet the prey is real players, so nobody farms a bot pot |
+
+Qubits raid a new player once their first three minutes are up, then keep hunting any player who is not resting, a few raids per tick, whenever the contract allows it (rest after a raid, raids left in the round, no punching down). Shor hunts the largest red bag it may raid, Grover the least shielded vault. They defend 1 raid in 3, late in the clock, and hit Satoshi at most once every 6 hours. They move whenever a player has the game open (each open page wakes them every 30 seconds) and on a scheduled GitHub Actions crank. The landing page shows how much of the vault total they hold.
+
+## After Q-Day
+
+Q-Day is written into the contract: 23 November 2026, 04:56 UTC on mainnet, and 22 November 2026, 20:00 UTC in practice. When it passes, the contract on its own:
+
+- stops raids, the leak and Satoshi;
+- freezes every red bag for good, while vault coins stay fully usable (on mainnet they can still be sold back to the contract for NEAR at any time);
+- lets anyone call `finalize()`, which writes the season result, the ranked vaults, on chain once and for ever.
+
+The plan for the next season:
+
+- **Every season will be a new keyless contract,** the way this one was launched: the same code and its own rules, so nobody can change a season while it runs, not even the builder.
+- **Season 1's result will carry over.** Season 2 will read the finalized result of this season from the chain, and its vault holders will start with a head start in proportion to their final rank.
+- **Value never gets stuck** (live now). A vault can sell its coins back to the bonding curve for NEAR before or after Q-Day, so leaving a season costs nothing but the 2% sell fee.
+- **Running costs come from the game** (live now). The bots pay their own gas by selling a slice of their bag when they run low, and the cranks are free to call: any player's open page or the GitHub crank keeps a season moving.
 
 ## How it works
 

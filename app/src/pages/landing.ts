@@ -41,7 +41,7 @@ export function landing(root: HTMLElement) {
         <div class="how-strip" id="how-strip">
           <article class="how-card"><div class="how-art bag">${ART_BAG}</div><h3>Grab a bag</h3><p>Your coins start exposed, and the hunters turn toward you. They leak a slice to the vaults every round and freeze for good at Q-Day.</p></article>
           <article class="how-card"><div class="how-art vault">${ART_VAULT}</div><h3>Run to the gate</h3><p>Steer your bag with your thumb. Reach the gold gate and the vault door slams shut: only a quantum safe key can open it.</p></article>
-          <article class="how-card"><div class="how-art raid">${ART_RAID}</div><h3>Hunt and survive</h3><p>Touch a rival to raid it, intercept raiders, hit Satoshi in the centre. Biggest vault at Q-Day wins.</p></article>
+          <article class="how-card"><div class="how-art raid">${ART_RAID}</div><h3>Hunt and survive</h3><p>Lock onto a red rival and shoot to raid it, shoot back at raiders, hit Satoshi. Biggest vault at Q-Day wins.</p></article>
         </div>
         <div class="how-dots" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
       </div>

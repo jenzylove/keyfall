@@ -76,6 +76,6 @@ export function line(account: string, ev: Event, salt = ""): string {
 export const RIVALS = [
   { who: "shor", name: "Shor", line: "Hunts the biggest exposed bag." },
   { who: "grover", name: "Grover", line: "Hunts the weakest vault." },
-  { who: "qubit", name: "The Qubits", line: "Greet every new player with a raid." },
+  { who: "qubit", name: "The Qubits", line: "Hunt new players, and anyone who is not resting." },
   { who: "satoshi", name: "Satoshi", line: "The boss. Everyone hits his stash." },
 ];
