@@ -231,7 +231,7 @@ export function play(root: HTMLElement) {
     }
     const left = w.vault?.raids_left || 0;
     const canDefend = !!w.incoming && w.incoming.target === s.vault?.accountId;
-    if (left <= 0 && !canDefend && !arena.targets.has("satoshi")) { if (auto) return; sfx.play("deny"); nudge(); arena.say("me", `No raids left · new round in ${clock(Number(w.stats!.epoch_ends_ms) - chainNow())} · blocking stays free`, 3200, true); return; }
+    if (left <= 0 && !canDefend && !arena.targets.has("satoshi")) { if (auto) return; sfx.play("deny"); nudge(); arena.say("me", `Out of raids · next round in ${clock(Number(w.stats!.epoch_ends_ms) - chainNow())} · blocking stays free`, 3200, true); return; }
     if (!arena.aimTarget()) {
       if (auto) return;
       sfx.play("deny"); nudge();
@@ -270,6 +270,7 @@ export function play(root: HTMLElement) {
   sndLabel(sfx.isMuted());
   const offMute = sfx.onMute(sndLabel);
   sndBtn.onclick = () => { sfx.unlock(); sfx.toggleMute(); if (!sfx.isMuted()) sfx.play("blip"); };
+  sfx.startMusic(); // plays after the first tap (browsers keep audio locked until then), follows the mute toggle
   // any touch unlocks sound
   field.addEventListener("pointerdown", () => sfx.unlock(), { passive: true, once: true });
 
@@ -330,6 +331,7 @@ export function play(root: HTMLElement) {
   let sheetArg = "";
   let sheet: Sheet | null = null;
   let pendingRaid = ""; // target of a raid in flight (sent, not yet confirmed)
+  const justRaided = new Map<string, number>(); // target -> until (ms): a raid of yours confirmed, the view not caught up yet
   let prevState = "";
   let prevThreat = false;
   let prevRank = 0;
@@ -441,6 +443,7 @@ export function play(root: HTMLElement) {
   /** Why you can't raid this holder right now, in words, or "" if you can. */
   function blocker(h: Holder): { state: ArenaBody["state"]; why: string } {
     const now = chainNow();
+    if ((justRaided.get(h.account) || 0) > Date.now() && !h.under_raid) return { state: "busy", why: "" }; // your raid just landed; the view is a block behind
     if (w.stats?.after_q_day) return { state: h.kind === "exposed" ? "frozen" : "idle", why: "Q-Day has passed. Raids are over." };
     if (h.under_raid) return { state: "busy", why: "Already under raid. Wait for it to settle." };
     if (Number(h.immune_until) > now) return { state: "rest", why: `Resting ${span(Number(h.immune_until) - now)} after a raid.` };
@@ -460,7 +463,7 @@ export function play(root: HTMLElement) {
       case "small": return "Too small to rob";
       case "down": return "Too small for you";
       case "frozen": return "Frozen";
-      default: return w.vault && w.vault.raids_left <= 0 ? "No raids left" : "";
+      default: return w.vault && w.vault.raids_left <= 0 && w.stats ? `Next round ${clock(Number(w.stats.epoch_ends_ms) - chainNow())}` : "";
     }
   }
   /** Satoshi's line as you come close: why you cannot hit him yet, or that you can. */
@@ -716,12 +719,14 @@ export function play(root: HTMLElement) {
     }
   }
 
-  /** One contact move: spinner on your body while the chain confirms, result only after. */
-  async function act(name: string, text: string, fn: () => Promise<{ hash?: string; value?: unknown }>, ok: (v: any) => void) {
+  /** One contact move. With words: a spinner and the text on your body while the chain confirms. A quick move (text "")
+   * signs in the background behind a small pip: the shot already played; only a real failure interrupts (`fail` rolls back). */
+  async function act(name: string, text: string, fn: () => Promise<{ hash?: string; value?: unknown }>, ok: (v: any) => void, fail?: (why: string) => void, landed?: () => { value: unknown } | null) {
     if (busy) return false;
     busy = name;
     busyText = text;
     renderArena();
+    renderActions();
     try {
       const r = await fn();
       keepReceipt(name, r.hash);
@@ -730,13 +735,62 @@ export function play(root: HTMLElement) {
       await refresh();
     } catch (e) {
       console.warn(e);
+      if (landed && e instanceof chain.ChainError && e.maybeLanded) {
+        // the network dropped and the resend was refused: read the chain, the first send may have landed
+        await refresh();
+        const got = landed();
+        if (got) { busy = ""; ok(got.value); await refresh(); return true; }
+      }
       busy = "";
       sfx.play("deny");
-      tell(plainError(e), 4200);
+      if (fail) fail(plainError(e)); else tell(plainError(e), 4200);
+      renderArena();
+      renderActions();
       await refresh();
     }
     return true;
   }
+
+  // ---------------------------------------------------------------- payoffs: coins into the bag, combos, jackpots
+  // Only confirmed numbers: every caller passes an amount the chain returned or logged.
+  let comboN = 0, comboAt = 0;
+  const bagCell = root.querySelector<HTMLElement>(".hud-cell.bag")!;
+  const roundChip = document.createElement("span");
+  roundChip.className = "round-chip"; roundChip.hidden = true;
+  bagCell.appendChild(roundChip);
+  const comboEl = document.createElement("b");
+  comboEl.className = "combo"; comboEl.hidden = true; comboEl.setAttribute("aria-live", "polite");
+  bagCell.appendChild(comboEl);
+  let comboT = 0;
+  /** A confirmed payoff: coins fly from `from` into your bag, x2 x3 when payoffs land within 20 s, a jackpot over 30k. */
+  function payoff(amount: bigint, from: string | null) {
+    if (amount <= 0n) return;
+    const now = Date.now();
+    comboN = now - comboAt < 20_000 ? comboN + 1 : 1;
+    comboAt = now;
+    const big = whole(amount) > 30_000;
+    const ar = arena.el.getBoundingClientRect();
+    const sp = (from && arena.screenOf(from)) || arena.screenOf("me") || { x: 50, y: 50 };
+    const cl = (v: number) => Math.max(6, Math.min(94, v)); // a body off screen: the coins come in from the edge of the arena
+    const src = { x: ar.left + (cl(sp.x) / 100) * ar.width, y: ar.top + (cl(sp.y) / 100) * ar.height };
+    const bagNum = root.querySelector<HTMLElement>("#h-bag")!;
+    const br = bagNum.getBoundingClientRect();
+    const n = comboN;
+    if (big) { arena.burst("me", "#ffd60a", 30); fx.flash(field, "gold"); arena.shake(); sfx.vibrate([30, 30, 30, 30, 120]); }
+    fx.flyTo(src, { x: br.left + br.width / 2, y: br.top + br.height / 2 }, big ? 18 : 10, () => {
+      fx.bump(bagCell, big ? "fx-bump-big" : "fx-bump");
+      sfx.play(big ? "jackpot" : "coins");
+      if (n >= 2 && n === comboN) {
+        comboEl.textContent = `x${n}`;
+        comboEl.hidden = false;
+        fx.bump(comboEl, "in");
+        setTimeout(() => sfx.playCombo(n), 120);
+        clearTimeout(comboT);
+        comboT = window.setTimeout(() => { comboEl.hidden = true; }, Math.max(1500, 20_000 - (Date.now() - comboAt)));
+      }
+    });
+  }
+  let recentDefend = { who: "", at: 0 }; // a block you shot: its feed line must not pay out twice
 
   // ---------------------------------------------------------------- the guide: the first minute, one card at a time
 
@@ -958,14 +1012,21 @@ export function play(root: HTMLElement) {
     renderArena();
     const p = arena.screenOf(h.account);
     if (p) fx.pop(field, `stake ${short(stake)}`, "cyan", p);
-    await act("raid", "signing with your quantum key…", () => chain.raid(h.account, stake.toString()), (v) => {
+    await act("raid", "", () => chain.raid(h.account, stake.toString()), (v) => {
       const rid = String(v ?? "");
       if (rid) setProg({ raids: [...(prog().raids || []), rid].slice(-20) });
+      justRaided.set(h.account, Date.now() + 30_000); // until the chain view shows this raid, the body stays robbed (no second shot at it)
       if (prog().stage === "strike") setProg({ stage: "done" });
       guideRaided = true;
       arena.say(h.account, line(h.account, "raided"));
       toast({ tone: "gold", who: h.account, title: `Raid on ${N(h.account)} is on. ${h.kind === "vault" ? "It has" : "They have"} ${minutes(P(c(), "defend_window_ms"))} to ${h.kind === "vault" ? "defend" : "escape"}.` });
-    });
+    }, (why) => {
+      // the chain said no: the ROBBING badge goes, the body says why
+      pendingRaid = "";
+      justRaided.delete(h.account);
+      arena.badge(h.account, "MISSED", "#8b90a3", 1600, false);
+      arena.say(h.account, why, 4200, true);
+    }, () => { const r = w.open.find((x) => x.attacker === myId() && x.target === h.account); return r ? { value: String(r.id) } : null; });
     pendingRaid = "";
     missionKey = "";
     render();
@@ -974,17 +1035,19 @@ export function play(root: HTMLElement) {
   async function defendByShot(r: Raid) {
     if (busy) return;
     sfx.play("blip");
-    await act("defend", "signing with your quantum key…", () => chain.defend(r.id), () => {
+    const feedTop0 = w.feed.reduce((m, f) => Math.max(m, Number(f.n)), -1);
+    await act("defend", "", () => chain.defend(r.id), () => {
       sfx.play("clang"); sfx.vibrate([40, 30, 40]);
       arena.burst("me", "#27f0ff", 16);
       arena.badge(r.attacker, "BLOCKED", "#27f0ff", 2000);
       arena.fly(r.attacker, "me", "#ffd60a", 12);
       const won = BigInt(r.stake) - bps(BigInt(r.stake), P(c(), "raid_burn_bps"));
-      setTimeout(() => { fx.pop(field, `+${full(won)}`, "gold", arena.screenOf("me") || undefined); sfx.play("coins"); }, 500);
+      recentDefend = { who: r.attacker, at: Date.now() };
+      setTimeout(() => { fx.pop(field, `+${full(won)}`, "gold", arena.screenOf("me") || undefined); payoff(won, r.attacker); }, 500);
       fx.banner(field, "BLOCKED", `${nameOf(r.attacker, mine())}'s stake is yours · blocking never costs a raid`, "gold");
       arena.say(r.attacker, line(r.attacker, "defended"));
       earn("wall");
-    });
+    }, undefined, () => { const f = w.feed.find((x) => x.kind === "defend" && x.actor === myId() && x.target === r.attacker && Number(x.n) > feedTop0); return f ? { value: f.amount } : null; });
   }
 
   function gateTouched() {
@@ -1018,7 +1081,8 @@ export function play(root: HTMLElement) {
     const enough = w.vaultBal >= PB(c(), "boss_min_balance");
     if (!enough) { sfx.play("deny"); return { ok: false, why: `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins` }; }
     if (!v.boss_ready) { sfx.play("deny"); return { ok: false, why: `Ready in ${span(Number(st.epoch_ends_ms) - chainNow())}` }; }
-    void act("boss", "signing with your quantum key…", () => chain.bossRaid(), (val) => {
+    const feedTop = w.feed.reduce((m, f) => Math.max(m, Number(f.n)), -1);
+    void act("boss", "", () => chain.bossRaid(), (val) => {
       guideBossHit = true;
       const kept = BigInt(String(val ?? "0"));
       const burn = BigInt(P(c(), "boss_burn_bps"));
@@ -1026,10 +1090,11 @@ export function play(root: HTMLElement) {
       arena.shake(); fx.freeze(game, 120); sfx.play("thud"); sfx.vibrate([90, 30, 50]);
       arena.fly("satoshi", "me", "#ffd60a", 14);
       arena.badge("satoshi", `−${full(dealt)}`, "#ff3d2e", 2400);
-      setTimeout(() => { fx.pop(field, `+${full(kept)}`, "gold", arena.screenOf("me") || undefined); sfx.play("coins"); }, 600);
+      setTimeout(() => { fx.pop(field, `+${full(kept)}`, "gold", arena.screenOf("me") || undefined); payoff(kept, "satoshi"); }, 600);
       arena.say("satoshi", line("satoshi", "hit", String(Math.random())));
       earn("slayer");
-    });
+    }, (why) => { arena.badge("satoshi", "MISSED", "#8b90a3", 1600, false); arena.say("satoshi", why, 4200, true); },
+    () => { const f = w.feed.find((x) => x.kind === "boss" && x.actor === myId() && Number(x.n) > feedTop); return f ? { value: f.amount } : null; });
     return { ok: true };
   }
 
@@ -1151,10 +1216,15 @@ export function play(root: HTMLElement) {
       const html = left > 0
         ? `${Array.from({ length: max }, (_, i) => `<i class="${i < left ? "on" : ""}"></i>`).join("")}<span class="hp-k">${left} raid${left === 1 ? "" : "s"}</span>${harv}`
         : `<span class="hp-k none">0 raids</span>${harv}`;
+      // out of raids: a big round clock hangs under the bag, so the wait has a number on it
+      const st2 = w.stats;
+      const chipHtml = left <= 0 && st2 && !st2.after_q_day ? `<span class="rc-k">Next round</span><b data-until="${st2.epoch_ends_ms}">${clock(Number(st2.epoch_ends_ms) - chainNow())}</b>` : "";
+      if (roundChip.dataset.k !== chipHtml.replace(/>[^<]*<\/b>/, "")) { roundChip.dataset.k = chipHtml.replace(/>[^<]*<\/b>/, ""); roundChip.innerHTML = chipHtml; }
+      roundChip.hidden = !chipHtml;
       pips.hidden = false;
       pips.setAttribute("aria-label", left > 0 ? `${left} of ${max} raids left` : "No raids left");
       if (pips.innerHTML !== html) pips.innerHTML = html;
-    } else pips.hidden = true;
+    } else { pips.hidden = true; roundChip.hidden = true; }
     renderGoal();
   }
 
@@ -1258,10 +1328,13 @@ export function play(root: HTMLElement) {
     const left = v.raids_left;
     // the button always says what a press will do: SIGNING… while a move is out, the round clock when you are out of shots
     const roundIn = st ? `<b data-until="${st.epoch_ends_ms}">${clock(Number(st.epoch_ends_ms) - chainNow())}</b>` : "";
-    const status = over ? "Over" : busy ? "SIGNING…" : left > 0 ? `${left} raid${left === 1 ? "" : "s"}` : (w.incoming && w.incoming.target === sess().vault?.accountId) ? "Block · free" : arena.targets.has("satoshi") ? "Satoshi ready" : `next round ${roundIn}`;
-    set("shoot", status, over, 0, left > 0 && !busy);
-    shootBtn.classList.toggle("signing", !!busy && !over);
-    shootBtn.classList.toggle("empty", !busy && left <= 0 && !arena.targets.size);
+    const canBlock = !!w.incoming && w.incoming.target === sess().vault?.accountId;
+    const boss = arena.targets.has("satoshi");
+    const status = over ? "Over" : busy && busyText ? "SIGNING…" : left > 0 ? `${left} raid${left === 1 ? "" : "s"}` : canBlock ? "Block · free" : boss ? "Satoshi ready" : `Next round ${roundIn}`;
+    set("shoot", status, over, 0, (left > 0 || canBlock || boss) && !busy);
+    shootBtn.classList.toggle("signing", !!busy && !!busyText && !over);
+    shootBtn.classList.toggle("sending", !!busy && !busyText && !over);
+    shootBtn.classList.toggle("empty", !busy && left <= 0 && !canBlock && !boss);
   }
 
   root.querySelector("#actions")!.addEventListener("click", (e) => {
@@ -1534,7 +1607,7 @@ export function play(root: HTMLElement) {
       const tied = h.account === raider || myOpen.has(h.account) || hunt.has(h.account) || h.account === pendingRaid;
       const focus = tied || (inVault() && b.state === "open" && arena.distTo(h.account) < reach);
       const npc = isNpc(h.account) ? (npcName(h.account) === "shor" ? "shor" : npcName(h.account) === "grover" ? "grover" : "qubit") : "";
-      const mineRaid = myOpen.get(h.account) || (pendingRaid === h.account ? { deadline: 0 } as Raid : null);
+      const mineRaid = myOpen.get(h.account) || (pendingRaid === h.account || (justRaided.get(h.account) || 0) > Date.now() ? { deadline: 0 } as Raid : null);
       return {
         id: h.account, name: nameOf(h.account, me), bag: short(h.balance), kind: h.kind, balance: whole(h.balance),
         state: b.state, shieldBps: h.shield_bps || 0, immune: Number(h.immune_until) > chainNow(), npc,
@@ -1566,7 +1639,7 @@ export function play(root: HTMLElement) {
     arena.setMe({
       kind, bag: kind === "none" ? "" : short(myBag()), balance: whole(myBag()), shieldBps: inVault() ? w.vault?.shield_bps || 0 : 0,
       raidsLeft: w.vault?.raids_left || 0, maxRaids: P(c(), "max_raids_per_epoch"),
-      inFlight: busy && busy !== "grab" ? busyText : "", svg: avatar(idForArt),
+      inFlight: busy && busy !== "grab" ? busyText : "", signing: !!busy && busy !== "grab" && !busyText, svg: avatar(idForArt),
     });
     const st = w.stats;
     const supply = PB(c(), "satoshi_supply");
@@ -1581,6 +1654,7 @@ export function play(root: HTMLElement) {
       },
     });
     // the boss is ready for you: say so once per round
+    arena.bossArrow = !guideOn() && kind === "vault" && bossReadyForMe() && !w.incoming && (w.vault?.raids_left ?? 0) <= 0;
     const bossKey = bossReadyForMe() ? `${st?.epoch}` : "";
     if (bossKey && bossKey !== prevBossKey) toast({ tone: "hot", who: "satoshi", title: `Satoshi is ready for you: shoot his stash for about +${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}.` });
     prevBossKey = bossKey;
@@ -1660,7 +1734,8 @@ export function play(root: HTMLElement) {
         if (won) {
           // the robbed body flies apart, the coins stream to you, the real take pops big at you, then it reforms
           if (f.target) arena.shatter(f.target, true);
-          setTimeout(() => { fx.pop(field, `+${amt}`, "gold", at("me"), "big"); sfx.play("coins"); arena.burst("me", "#ffd60a", 10); }, 700);
+          const take = BigInt(f.amount), from = f.target || null;
+          setTimeout(() => { fx.pop(field, `+${amt}`, "gold", at("me"), "big"); arena.burst("me", "#ffd60a", 10); payoff(take, from); }, 700);
           if (f.target) arena.say(f.target, line(f.target, "defended"));
           earn("raider");
         } else { fx.pop(field, "took nothing", "ink", at(f.target)); if (f.target) arena.badge(f.target, "NOTHING", "#8b90a3", 1600, false); }
@@ -1688,8 +1763,10 @@ export function play(root: HTMLElement) {
         setTimeout(() => { fx.pop(field, `−${lost}`, "red", at("me"), "big"); sfx.play("deny"); }, 650);
         arena.say(f.actor, line(f.actor, "defends"));
       } else if (f.kind === "defend" && me.includes(f.actor)) {
+        if (recentDefend.who && recentDefend.who === f.target && Date.now() - recentDefend.at < 60_000) { recentDefend = { who: "", at: 0 }; continue; } // the shot already paid this out
         if (f.target) arena.fly(f.target, "me", "#ffd60a", 10);
-        setTimeout(() => { fx.pop(field, `+${amt}`, "gold", at("me")); sfx.play("coins"); }, 600);
+        const got = BigInt(f.amount), from = f.target || null;
+        setTimeout(() => { fx.pop(field, `+${amt}`, "gold", at("me")); payoff(got, from); }, 600);
         if (f.target) arena.say(f.target, line(f.target, "defended"));
         earn("wall");
       }
@@ -2316,7 +2393,7 @@ export function play(root: HTMLElement) {
   })();
   vaultName = suggestVaultName(sess().wallet?.accountId || String(Date.now()));
   render();
-  if (!introDone) { introDone = true; coldOpen(); }
+  if (!introDone) { introDone = true; sfx.duckMusic(true); coldOpen().then(() => sfx.duckMusic(false)); }
   tick(false);
   // While the game is open, wake the NPCs once a minute: they settle closed raids,
   // run the harvest when it is due, and answer raids on their own vaults.
@@ -2327,6 +2404,7 @@ export function play(root: HTMLElement) {
 
   // debugging and acceptance: fps and world on the element
   (field as any).__arena = arena;
+  (field as any).__music = () => sfx.musicState();
   (field as any).__toastTitle = (k: TitleKey) => { const [name, why] = TITLES[k]; toast({ tone: "gold", cls: "ev-title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}` }); }; // styling check only: stores nothing
   (field as any).__guide = () => ({ step: gstep, on: guideOn(), holds: guideHolds(), target: gTarget, variant: gVariant });
   (field as any).__world = () => ({ incoming: w.incoming, myRaids: w.myRaids.length, walletBal: String(w.walletBal), vaultBal: String(w.vaultBal), vault: sess().vault?.accountId, wallet: sess().wallet?.accountId, holders: w.holders.length, raidsLeft: w.vault?.raids_left });
@@ -2340,6 +2418,8 @@ export function play(root: HTMLElement) {
     clearInterval(guideT);
     holdTicks = () => false;
     offMute();
+    sfx.stopMusic();
+    sfx.duckMusic(false);
     arena.destroy();
     sheet?.close();
     document.body.classList.remove("in-game");

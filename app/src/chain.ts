@@ -120,6 +120,8 @@ export type Params = Record<string, string | number>;
 export class ChainError extends Error {
   code: string;
   hash?: string;
+  /** Set when this refusal came on a resend after a network error: the first send may have landed. */
+  maybeLanded = false;
   constructor(message: string, hash?: string) {
     super(friendly(message));
     this.code = (message.match(/E_[A-Z_]+/) || ["E_UNKNOWN"])[0];
@@ -378,13 +380,14 @@ function send(who: { accountId: string; signer: any }, receiverId: string, actio
 }
 async function sendNow(who: { accountId: string; signer: any }, receiverId: string, actions: any[]): Promise<TxResult> {
   let lastErr: unknown;
+  let resent = false; // a resend after a network error: the first may already be on chain
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const raw: any = await near.sendTx({ signerId: who.accountId, signer: who.signer, receiverId, actions, waitUntil: "EXECUTED_OPTIMISTIC", network: NETWORK } as any);
       const r = raw?.result ?? raw;
       const hash = r?.transaction?.hash || r?.transaction_outcome?.id || "";
       const fail = failureOf(r);
-      if (fail) throw new ChainError(fail, hash);
+      if (fail) { const ce = new ChainError(fail, hash); ce.maybeLanded = resent; throw ce; }
       return { hash, value: decodeValue(r) };
     } catch (e: any) {
       if (e instanceof ChainError) throw e;
@@ -392,6 +395,7 @@ async function sendNow(who: { accountId: string; signer: any }, receiverId: stri
       const msg = String(e?.message || e);
       if (/nonce/i.test(msg) && attempt < 2) { await new Promise((r) => setTimeout(r, 800)); continue; } // a nonce race: the library refetches it
       if (/fetch|network|timeout|503|502|429/i.test(msg)) {
+        resent = true;
         nextRpc();
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
         continue;

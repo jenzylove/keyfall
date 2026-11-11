@@ -178,7 +178,13 @@ export async function act(
   }
 }
 
-export const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+// read once and kept current: the arena asks many times a frame, and matchMedia is not free
+let rmq: MediaQueryList | null = null;
+let rmNow = false;
+export const reducedMotion = () => {
+  if (!rmq) { rmq = window.matchMedia("(prefers-reduced-motion: reduce)"); rmNow = rmq.matches; rmq.addEventListener?.("change", (e) => { rmNow = e.matches; }); }
+  return rmNow;
+};
 
 /** Whole $KEYFALL input to base units. */
 export function wholeToUnits(v: string): bigint | null {

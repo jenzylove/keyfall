@@ -37,6 +37,8 @@ export interface ArenaMe {
   raidsLeft: number;
   maxRaids: number;
   inFlight: string; // "" or the text under the spinner
+  /** A quick move (a shot) is signing in the background: a small pip by your bag, no words. */
+  signing?: boolean;
   svg: string;
 }
 export interface ArenaPlaces {
@@ -87,8 +89,9 @@ const SHOT_LIFE = 1.35; // seconds: about one screen of range
 const SHOT_COOL = 0.6;
 const AIM_HALF = (13 * Math.PI) / 180; // a cone of about 25 degrees
 const TILE = 48;
-/** ?film=1: recording mode for the trailer. Only you, your target and whoever is raiding you carry labels; fewer background bodies. */
-const FILM = typeof location !== "undefined" && new URLSearchParams(location.search).has("film");
+/** A calm arena is the default: only you, your locked target, your raid and whoever is raiding you carry labels, and fewer
+ * background bodies. ?crowd=1 brings back every label and the full crowd. (?film=1 was the old switch for the calm mode.) */
+const CROWD = typeof location !== "undefined" && new URLSearchParams(location.search).has("crowd");
 const GOLD = "#ffd60a", RED = "#ff3d2e", CYAN = "#27f0ff", GOLD2 = "#d9b000", GOLD3 = "#8a6d00";
 
 /** A phone, a small screen or a weak CPU: start in low power mode. Measured frame time can switch it on later. */
@@ -174,6 +177,8 @@ export class Arena {
   private shakeT = 0;
   private flashT = 0; private flashC = RED;
   private stopT = 0; // hit stop
+  private flashes = new Map<string, number>(); // white hit flash per body, seconds left
+  private rings: { x: number; y: number; t: number; r0: number }[] = []; // impact squares
   fps = 60;
   ready = false;
   onDash: ((cool: number) => void) | null = null;
@@ -260,7 +265,9 @@ export class Arena {
   /** Screen px at the top that a card covers: edge pointers and labels stay below it. */
   topInset = 0;
   /** How many bodies the page should hand over: fewer on a phone. */
-  get bodyCap() { return FILM ? 18 : this.lowPower ? 25 : 60; }
+  get bodyCap() { return CROWD ? (this.lowPower ? 25 : 60) : this.lowPower ? 18 : 24; }
+  /** A bouncing arrow over Satoshi while your hit on him is ready and nothing else needs you. */
+  bossArrow = false;
 
   setBodies(list: ArenaBody[]) {
     const seen = new Set<string>();
@@ -336,6 +343,13 @@ export class Arena {
   flash(c = RED) { if (!reducedMotion()) { this.flashT = 0.22; this.flashC = c; } }
   /** A short freeze frame on a big contact. */
   hitstop(ms = 90) { if (!reducedMotion()) this.stopT = ms / 1000; }
+  /** A landed shot: the body flashes white and an impact square opens around it. */
+  hitFlash(id: string) {
+    const key = id === "me" ? ME : id;
+    this.flashes.set(key, 0.16);
+    const s = this.simOf(id); if (!s || reducedMotion()) return;
+    this.rings.push({ x: s.x, y: s.y, t: 0, r0: id === "satoshi" ? 60 : ("r" in s ? (s as Sim).r : 24) });
+  }
 
   dash() {
     if (this.dashCool > 0 || this.meInfo.kind === "none") return false;
@@ -916,6 +930,9 @@ export class Arena {
     const me = this.me;
     const keep: Shot[] = [];
     for (const [k, v] of this.shattered) { if (v - dt <= 0) this.shattered.delete(k); else this.shattered.set(k, v - dt); }
+    for (const [k, v] of this.flashes) { if (v - dt <= 0) this.flashes.delete(k); else this.flashes.set(k, v - dt); }
+    for (const q of this.rings) q.t += dt;
+    if (this.rings.length) this.rings = this.rings.filter((q) => q.t < 0.32);
     for (const p of this.shots) {
       p.t += dt;
       if (p.target) {
@@ -931,7 +948,7 @@ export class Arena {
         // Satoshi's core
         if (this.places.boss.visible && Math.hypot(p.x - this.boss.x, p.y - this.boss.y) < 60) {
           const r = this.cb.onShot("satoshi");
-          if (r.ok) { this.hitstop(110); this.burst("satoshi", GOLD, 12); } else { this.deflectAt(p.x, p.y, GOLD); this.say("satoshi", r.why || "", 2600, true); }
+          if (r.ok) { this.hitstop(60); this.hitFlash("satoshi"); this.burst("satoshi", GOLD, 12); } else { this.deflectAt(p.x, p.y, GOLD); this.say("satoshi", r.why || "", 2600, true); }
           hit = true;
         }
         if (!hit) for (const id of this.order) {
@@ -940,7 +957,7 @@ export class Arena {
           if (Math.hypot(p.x - s.x, p.y - s.y) > s.r * (b.raidingMe ? 1.3 : 0.95)) continue; // a charging raider is a generous target
           const r = this.cb.onShot(id);
           if (b.shieldBps > 0) this.shieldHit(id);
-          if (r.ok) { this.hitstop(80); s.bounce = 0.3; s.vx += p.vx * 0.15; s.vy += p.vy * 0.15; this.burst(id, b.kind === "vault" ? GOLD : RED, 8); }
+          if (r.ok) { this.hitstop(60); this.hitFlash(id); s.bounce = 0.3; s.vx += p.vx * 0.15; s.vy += p.vy * 0.15; this.burst(id, b.kind === "vault" ? GOLD : RED, 8); }
           else { this.deflectAt(p.x, p.y, this.colors.dim); if (r.why) this.say(id, r.why, 2600, true); }
           hit = true;
           break;
@@ -996,9 +1013,13 @@ export class Arena {
     // reason lines: the nearest two bodies with a reason, and the one your aim is on
     this.hintIds.clear();
     if (this.meInfo.kind === "vault") {
-      const near = this.order.filter((id) => this.info.get(id)?.hint).map((id) => ({ id, d: this.distTo(id) })).sort((a, b) => a.d - b.d).slice(0, 2);
-      for (const n of near) if (n.d < 230) this.hintIds.add(n.id);
-      const aim = this.aimTarget(); if (aim && aim !== "satoshi") this.hintIds.add(aim);
+      if (CROWD) {
+        const near = this.order.filter((id) => this.info.get(id)?.hint).map((id) => ({ id, d: this.distTo(id) })).sort((a, b) => a.d - b.d).slice(0, 2);
+        for (const n of near) if (n.d < 230) this.hintIds.add(n.id);
+      }
+      // calm: one reason line, for the one body your aim is on (what you tapped, else what the next shot snaps to, else what you face)
+      const aim = (this.lockId && this.lockId !== "satoshi" && this.bodies.has(this.lockId) ? this.lockId : null) ?? this.aimTarget() ?? this.facingBody();
+      if (aim && aim !== "satoshi") this.hintIds.add(aim);
     }
     const ids = [...this.order].sort((a, b) => (this.bodies.get(a)?.y || 0) - (this.bodies.get(b)?.y || 0));
     const meDrawn = this.meInfo.kind !== "none";
@@ -1012,6 +1033,7 @@ export class Arena {
     this.flushLabels(c);
     this.drawRaidBadges(c);
     this.drawShots(c);
+    this.drawRings(c);
     this.drawParticles(c);
     this.drawGuideArrow(c);
     c.restore();
@@ -1182,6 +1204,8 @@ export class Arena {
     }
     this.outline(c, x, y + bob, rr, up < 1 ? this.colors.dim : color, hot ? 3 : 2);
     this.sprite(c, b.id, x, y, rr, s.face, bob, wobble, up);
+    const fl = this.flashes.get(b.id);
+    if (fl) { const op = c.globalCompositeOperation, a0 = c.globalAlpha; c.globalCompositeOperation = "lighter"; c.globalAlpha = Math.min(1, fl / 0.16) * 0.9; this.sprite(c, b.id, x, y, rr, s.face, bob, wobble, up); this.sprite(c, b.id, x, y, rr, s.face, bob, wobble, up); c.globalAlpha = a0; c.globalCompositeOperation = op; }
     const r1 = rr; void r0; // the badges below use the drawn size
     const rB = r1;
     // blink
@@ -1224,7 +1248,7 @@ export class Arena {
     c.save();
     c.textAlign = "center"; c.textBaseline = "top";
     const ry = r1; // labels hang under the drawn size
-    if (b.focus && (!FILM || b.id === this.lockId || b.raidingMe || b.raidedByMe)) {
+    if (b.focus && (CROWD || b.id === this.lockId || b.raidingMe || b.raidedByMe)) {
       c.font = this.font(12);
       c.fillStyle = hot ? RED : this.colors.ink;
       c.globalAlpha = dimmed ? 0.6 : 1;
@@ -1232,7 +1256,7 @@ export class Arena {
       if (b.showBag) { c.font = this.font(10.5); c.fillStyle = this.colors.dim; this.label(c, b.bag, x, y + ry + 24, 1); }
     }
     // the rule in words as you come close, before you bump
-    if (!FILM && iVault && b.hint && close && !hot && this.hintIds.has(b.id)) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
+    if (iVault && b.hint && (close || !CROWD) && !hot && this.hintIds.has(b.id)) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
     c.restore();
   }
   /** Labels are queued and decluttered: a label that would sit in the top UI
@@ -1300,11 +1324,11 @@ export class Arena {
   }
   /** The guide's arrow: a bouncing pixel chevron over what to touch next. */
   private drawGuideArrow(c: CanvasRenderingContext2D) {
-    const g = this.guide;
+    const g: GuideTarget = this.guide ?? (this.bossArrow && this.places.boss.visible && this.meInfo.kind === "vault" ? { kind: "boss" } : null);
     if (!g) return;
     const s = g.kind === "me" ? this.me : g.kind === "gate" ? this.gate : g.kind === "boss" ? this.boss : g.id ? this.bodies.get(g.id) : null;
     if (!s) return;
-    const r = g.kind === "boss" ? 100 : g.kind === "gate" ? 60 : ("r" in s ? (s as Sim).r : 24) + 8;
+    const r = g.kind === "boss" ? 170 : g.kind === "gate" ? 60 : ("r" in s ? (s as Sim).r : 24) + 8;
     const bounce = reducedMotion() ? 0 : Math.abs(Math.sin(this.t * 4)) * 8;
     const ax = Math.round(s.x), ay = Math.round(s.y - r - 14 - bounce);
     const col = g.kind === "body" ? RED : g.kind === "me" ? CYAN : GOLD;
@@ -1356,6 +1380,13 @@ export class Arena {
     this.label(c, "YOU", m.x, m.y + m.r + 8, 6);
     c.font = this.font(10.5); c.fillStyle = this.colors.ink;
     this.label(c, info.bag, m.x, m.y + m.r + 25, 5);
+    if (info.signing && !info.inFlight) {
+      // a quick move signing in the background: a small turning pip beside you, no words
+      const q = Math.floor(now / 110) % 4, sx = Math.round(m.x + m.r + 6), sy = Math.round(m.y - m.r - 4);
+      c.fillStyle = GOLD;
+      [[0, 0], [5, 0], [5, 5], [0, 5]].forEach(([dx, dy], i) => { c.globalAlpha = i === q ? 1 : 0.3; c.fillRect(sx + dx, sy + dy, 4, 4); });
+      c.globalAlpha = 1;
+    }
     if (info.inFlight) {
       const q = Math.floor(now / 110) % 4, sx = m.x - 8, sy = m.y - m.r - 34;
       c.fillStyle = this.colors.ink;
@@ -1423,7 +1454,11 @@ export class Arena {
       c.fillStyle = gr; c.fillRect(x - 150, y - 150, 300, 300);
     }
     const im = this.imgs.get("__boss__");
-    if (im && im.complete && im.naturalWidth) c.drawImage(im, x - S / 2, y - S / 2 + bob, S, S);
+    if (im && im.complete && im.naturalWidth) {
+      c.drawImage(im, x - S / 2, y - S / 2 + bob, S, S);
+      const fl = this.flashes.get("satoshi");
+      if (fl) { c.globalCompositeOperation = "lighter"; c.globalAlpha = Math.min(1, fl / 0.16) * 0.8; c.drawImage(im, x - S / 2, y - S / 2 + bob, S, S); c.globalAlpha = 1; c.globalCompositeOperation = "source-over"; }
+    }
     if (B.ready) { c.strokeStyle = RED; c.lineWidth = 3; c.globalAlpha = 0.5 + 0.5 * Math.sin(this.t * 5); c.strokeRect(x - 50.5, y - 12.5 + bob, 101, 74); c.globalAlpha = 1; }
     // health bar: his stash over his starting stash, from the chain
     const bw = 190, bh = 14, by = y - S / 2 - 24;
@@ -1502,6 +1537,31 @@ export class Arena {
       c.fillStyle = bd.color; c.fillText(bd.text, tx, ty);
       c.restore();
     }
+  }
+
+  /** Impact squares: a white frame that opens out from a landed shot. */
+  private drawRings(c: CanvasRenderingContext2D) {
+    if (!this.rings.length) return;
+    c.save();
+    c.strokeStyle = "#fff";
+    for (const q of this.rings) {
+      const f = q.t / 0.32, R = q.r0 + 6 + f * 26;
+      c.globalAlpha = 1 - f; c.lineWidth = 4 * (1 - f) + 1;
+      c.strokeRect(Math.round(q.x - R) + 0.5, Math.round(q.y - R) + 0.5, Math.round(R * 2), Math.round(R * 2));
+    }
+    c.restore();
+  }
+  /** The body straight ahead of you and close by (for its reason line), or null. */
+  private facingBody(): string | null {
+    let best: string | null = null, bd = Infinity;
+    for (const id of this.order) {
+      const s = this.bodies.get(id); if (!s) continue;
+      const dx = s.x - this.me.x, dy = s.y - this.me.y, dist = Math.hypot(dx, dy);
+      if (dist > 260 || dist < 1) continue;
+      if (Math.acos(clamp((dx * this.facing.x + dy * this.facing.y) / dist, -1, 1)) > AIM_HALF * 1.6) continue;
+      if (dist < bd) { bd = dist; best = id; }
+    }
+    return best;
   }
 
   /** Bullets: a bright pixel slug with a short tail. */

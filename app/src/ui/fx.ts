@@ -69,6 +69,32 @@ export function fly(host: HTMLElement, from: { x: number; y: number }, to: { x: 
   setTimeout(() => done?.(), 700);
 }
 
+/** Coins that fly between two points on the page (client px), above everything: from a body in the arena into the bag in the HUD. */
+export function flyTo(from: { x: number; y: number }, to: { x: number; y: number }, n = 10, done?: () => void) {
+  if (rm()) { done?.(); return; }
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement("i");
+    p.className = "fx-fly fixed";
+    const jx = (Math.random() - 0.5) * 28, jy = (Math.random() - 0.5) * 28;
+    p.style.left = `${from.x + jx}px`;
+    p.style.top = `${from.y + jy}px`;
+    p.style.setProperty("--tx", `${to.x - from.x - jx}px`);
+    p.style.setProperty("--ty", `${to.y - from.y - jy}px`);
+    p.style.setProperty("--delay", `${i * 40}ms`);
+    document.body.appendChild(p);
+    setTimeout(() => p.remove(), 760 + i * 40);
+  }
+  setTimeout(() => done?.(), 680 + Math.min(n, 12) * 40);
+}
+
+/** Pulse an element once (the bag number taking coins in). */
+export function bump(el: HTMLElement, cls = "fx-bump") {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), 500);
+}
+
 /** Flash a full screen colour for a frame or two. */
 export function flash(host: HTMLElement, tone: "red" | "gold" | "white" = "white") {
   if (rm()) return;
