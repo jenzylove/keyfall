@@ -1479,40 +1479,168 @@ export function play(root: HTMLElement) {
     }
   }
 
-  /** Mainnet: send NEAR from the vault to any NEAR account. */
+  /** Mainnet: send NEAR from the vault to a NEAR account, or through NEAR Intents
+   * to USDC or SOL on Solana, or USDC or ETH on Base. Every send is signed by the
+   * vault's ML-DSA-65 key. */
   function openCashOut() {
     const have = w.vaultNear ?? 0n;
-    const spendableY = have - BigInt(chain.nearToYocto(0.05));
+    const spendableY = have - BigInt(chain.nearToYocto(0.06)); // gas for the vault's own moves and two wNEAR registrations
+    const maxNear = Math.max(0, Math.floor(Number(spendableY / 10n ** 22n)) / 100);
+    const DESTS: { id: "near" | chain.CashoutDest; label: string; chain: string }[] = [
+      { id: "near", label: "NEAR", chain: "NEAR" },
+      { id: "usdc-sol", label: "USDC", chain: "Solana" },
+      { id: "sol", label: "SOL", chain: "Solana" },
+      { id: "usdc-base", label: "USDC", chain: "Base" },
+      { id: "eth-base", label: "ETH", chain: "Base" },
+    ];
+    let dest: (typeof DESTS)[number]["id"] = (() => { try { return (localStorage.getItem("keyfall.cashout.dest") as any) || "near"; } catch { return "near"; } })();
+    if (!DESTS.some((d) => d.id === dest)) dest = "near";
+    const D = () => DESTS.find((d) => d.id === dest)!;
+    const savedTo = () => { try { return localStorage.getItem(`keyfall.cashout.to.${dest}`) || ""; } catch { return ""; } };
+    const placeholder = () => (dest === "near" ? "yourname.near" : D().chain === "Solana" ? "your Solana address" : "your Base address (0x…)");
     show("cashout", "", "Cash out", `
       <p class="kick gold">Mainnet</p>
       <h2 class="s-title">Cash out</h2>
-      <p class="s-text">Your vault holds <b>${chain.fmtNear(have, 3)} NEAR</b>. Sell $KEYFALL for NEAR in the market first if you want more, then send NEAR to a NEAR account you control.</p>
-      <label class="m-field"><span>Send to (NEAR account)</span><input id="co-to" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="yourname.near"/></label>
-      <p class="m-hint" id="co-hint">Type the account that should receive the NEAR.</p>
-      <label class="s-range"><span>NEAR to send</span><input type="range" id="co-r" min="0" max="${Math.max(0, Number(chain.fmtNear(spendableY, 3).replace(/,/g, "")))}" step="0.01" value="0"/></label>
+      <p class="s-text">Your vault holds <b>${chain.fmtNear(have, 3)} NEAR</b>. Sell $KEYFALL for NEAR in the market first if you want more. Your quantum key signs the send; <b>NEAR Intents</b> delivers it on any chain.</p>
+      <label class="m-field"><span>Receive</span><select id="co-dest">${DESTS.map((d) => `<option value="${d.id}" ${d.id === dest ? "selected" : ""}>${d.id === "near" ? "NEAR on NEAR" : `${d.label} on ${d.chain}`}</option>`).join("")}</select></label>
+      <label class="m-field"><span id="co-tl">Send to</span><input id="co-to" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${placeholder()}" value="${esc(savedTo())}"/></label>
+      <p class="m-hint" id="co-hint">Paste the address that should receive it.</p>
+      <label class="s-range"><span>NEAR to send</span><input type="range" id="co-r" min="0" max="${maxNear}" step="0.01" value="0"/></label>
       <p class="s-calc" id="co-calc">Slide to choose how much to send.</p>
       <button class="btn wide hot" id="co-go" disabled>Send</button>
-      <p class="s-msg" id="co-msg" role="status"></p>`, "gold");
+      <p class="s-msg" id="co-msg" role="status"></p>
+      <div id="co-track" hidden></div>
+      <div id="co-refund" hidden></div>`, "gold");
     const B = sheet!.body;
-    const to = B.querySelector<HTMLInputElement>("#co-to")!, hint = B.querySelector<HTMLElement>("#co-hint")!, r = B.querySelector<HTMLInputElement>("#co-r")!, go = B.querySelector<HTMLButtonElement>("#co-go")!;
-    let okTo = false, n = 0;
+    const sel = B.querySelector<HTMLSelectElement>("#co-dest")!, to = B.querySelector<HTMLInputElement>("#co-to")!, hint = B.querySelector<HTMLElement>("#co-hint")!;
+    const r = B.querySelector<HTMLInputElement>("#co-r")!, go = B.querySelector<HTMLButtonElement>("#co-go")!, calc = B.querySelector<HTMLElement>("#co-calc")!, msg = B.querySelector<HTMLElement>("#co-msg")!;
+    let okTo = false, n = 0, priceN = 0, priceTimer = 0, poll = 0;
+    const amt = () => Number(r.value);
     const check = async () => {
-      const v = to.value.trim().toLowerCase();
+      const v = to.value.trim();
       okTo = false;
-      if (!v) { hint.className = "m-hint"; hint.textContent = "Type the account that should receive the NEAR."; return gate(); }
-      if (!NEAR_NAME.test(v)) { hint.className = "m-hint bad"; hint.textContent = "That is not a NEAR account name (like yourname.near)."; return gate(); }
+      if (!v) { hint.className = "m-hint"; hint.textContent = "Paste the address that should receive it."; return gate(); }
+      if (dest !== "near") {
+        const sol = D().chain === "Solana";
+        okTo = sol ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v) : /^0x[0-9a-fA-F]{40}$/.test(v);
+        hint.className = okTo ? "m-hint" : "m-hint bad";
+        hint.textContent = okTo ? `${D().label} lands at this ${D().chain} address. Check it twice: a send to the wrong address cannot be undone.` : `That is not a ${D().chain} address.`;
+        return gate();
+      }
+      const lower = v.toLowerCase();
+      if (!NEAR_NAME.test(lower)) { hint.className = "m-hint bad"; hint.textContent = "That is not a NEAR account name (like yourname.near)."; return gate(); }
       const id = ++n;
       hint.className = "m-hint"; hint.textContent = "Checking that account exists…";
-      const bal = await chain.nearBalance(v);
+      const bal = await chain.nearBalance(lower);
       if (id !== n) return;
-      if (bal > 0n) { okTo = true; hint.className = "m-hint"; hint.textContent = `Found. ${v} holds ${chain.fmtNear(bal, 2)} NEAR.`; }
+      if (bal > 0n) { okTo = true; hint.className = "m-hint"; hint.textContent = `Found. ${lower} holds ${chain.fmtNear(bal, 2)} NEAR.`; }
       else { hint.className = "m-hint bad"; hint.textContent = "That account does not exist on NEAR. Sending there would lose the NEAR, so it is blocked."; }
       gate();
     };
-    const gate = () => { const amt = Number(r.value); B.querySelector<HTMLElement>("#co-calc")!.textContent = amt > 0 ? `Send ${amt.toFixed(2)} NEAR. About ${chain.fmtNear(spendableY - BigInt(chain.nearToYocto(amt)), 2)} NEAR stays for moves.` : "Slide to choose how much to send."; if (!go.classList.contains("busy")) go.disabled = !(okTo && amt > 0); };
-    to.addEventListener("input", () => { clearTimeout(n); check(); });
+    /** The price in the coin they receive: a live 1Click dry quote for the amount on the slider. */
+    const price = () => {
+      clearTimeout(priceTimer);
+      const a = amt();
+      if (dest === "near" || a < 0.1) return;
+      const id = ++priceN;
+      priceTimer = window.setTimeout(async () => {
+        const probe = okTo ? to.value.trim() : D().chain === "Solana" ? "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM" : "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"; // any wallet address prices it (dry: nothing is sent); 1Click refuses program and burn addresses
+        try {
+          const q = await chain.cashoutQuote(dest as chain.CashoutDest, chain.nearToYocto(a), probe, true);
+          if (id !== priceN) return;
+          calc.innerHTML = `Send ${a.toFixed(2)} NEAR, receive about <b class="yel">${esc(fmtCoin(q.amountOutFormatted, D().label))} ${esc(D().label)}</b> on ${esc(D().chain)}${q.timeEstimate ? ` in about ${Math.max(1, Math.round(q.timeEstimate / 60))} min` : ""}.`;
+        } catch (e) {
+          if (id === priceN) calc.textContent = `Send ${a.toFixed(2)} NEAR. ${plainError(e)}`;
+        }
+      }, 450);
+    };
+    const fmtCoin = (s: string, label: string) => { const x = Number(s); return label === "USDC" ? x.toFixed(2) : x.toFixed(x < 0.01 ? 6 : 4); };
+    const gate = () => {
+      const a = amt();
+      if (a <= 0) calc.textContent = "Slide to choose how much to send.";
+      else if (dest === "near") calc.textContent = `Send ${a.toFixed(2)} NEAR. About ${chain.fmtNear(spendableY - BigInt(chain.nearToYocto(a)), 2)} NEAR stays for moves.`;
+      else if (a < 0.1) calc.textContent = "Send at least 0.1 NEAR to another chain.";
+      else { calc.textContent = `Send ${a.toFixed(2)} NEAR. Pricing in ${D().label}…`; price(); }
+      if (!go.classList.contains("busy")) go.disabled = !(okTo && a > 0 && (dest === "near" || a >= 0.1));
+    };
+    sel.onchange = () => {
+      dest = sel.value as typeof dest;
+      try { localStorage.setItem("keyfall.cashout.dest", dest); } catch {}
+      to.placeholder = placeholder();
+      to.value = savedTo();
+      void check();
+    };
+    to.addEventListener("input", () => { void check(); });
     r.addEventListener("input", gate);
-    move(go, B.querySelector("#co-msg")!, () => chain.cashOut(to.value.trim().toLowerCase(), chain.nearToYocto(Number(r.value))), () => `Sent ${Number(r.value).toFixed(2)} NEAR to ${to.value.trim()}.`, "cashout", () => { sfx.play("coins"); });
+    void check();
+
+    /** A refunded cash out comes back to the vault as wNEAR: offer to turn it back into NEAR. */
+    const refundBox = B.querySelector<HTMLElement>("#co-refund")!;
+    const showRefund = async () => {
+      const wn = await chain.vaultWnear();
+      if (!B.isConnected) return;
+      if (wn <= 0n) { refundBox.hidden = true; return; }
+      refundBox.hidden = false;
+      refundBox.innerHTML = `<p class="m-hint">Your vault holds <b>${chain.fmtNear(wn, 4)} wNEAR</b> from a cash out that came back.</p><button class="btn wide" id="co-unwrap">Turn it back into NEAR</button><p class="s-msg" id="co-umsg" role="status"></p>`;
+      move(refundBox.querySelector<HTMLButtonElement>("#co-unwrap")!, refundBox.querySelector("#co-umsg")!, () => chain.unwrapVault(wn.toString()), () => `${chain.fmtNear(wn, 4)} NEAR is back in your vault.`, "cashout", () => { refundBox.hidden = true; });
+    };
+    void showRefund();
+
+    go.onclick = async () => {
+      if (go.classList.contains("busy")) return;
+      const a = amt(), target = dest === "near" ? to.value.trim().toLowerCase() : to.value.trim();
+      const yocto = chain.nearToYocto(a);
+      try { localStorage.setItem(`keyfall.cashout.to.${dest}`, target); } catch {}
+      go.classList.add("busy"); go.disabled = true; go.textContent = "In flight";
+      msg.className = "s-msg"; msg.textContent = dest === "near" ? "Waiting for the chain to confirm…" : "Getting a NEAR Intents quote…";
+      try {
+        if (dest === "near") {
+          const res = await chain.cashOut(target, yocto);
+          keepReceipt("cashout", res.hash);
+          msg.className = "s-msg ok"; msg.textContent = `Sent ${a.toFixed(2)} NEAR to ${target}.`;
+          toast({ tone: "gold", title: esc(msg.textContent) });
+          sfx.play("coins");
+          await refresh();
+          return;
+        }
+        const d = D();
+        const q = await chain.cashoutQuote(dest as chain.CashoutDest, yocto, target, false);
+        msg.textContent = "Signing with your quantum key…";
+        const res = await chain.payCashout(q.depositAddress!, yocto);
+        keepReceipt("cashout", res.hash);
+        sfx.play("coins");
+        msg.className = "s-msg ok";
+        msg.innerHTML = `Sent ${a.toFixed(2)} NEAR into NEAR Intents. <a href="${chain.txLink(res.hash)}" target="_blank" rel="noopener">See the transaction</a>`;
+        const track = B.querySelector<HTMLElement>("#co-track")!;
+        track.hidden = false;
+        track.innerHTML = `<div class="quote"><p class="s-text">About <b class="yel">${esc(fmtCoin(q.amountOutFormatted, d.label))} ${esc(d.label)}</b> is on its way to <code>${esc(target)}</code> on ${esc(d.chain)}.</p><p class="s-calc" id="co-status"><i class="dot"></i> Waiting for NEAR Intents to see the deposit…</p></div>`;
+        const words: Record<string, string> = {
+          PENDING_DEPOSIT: "Waiting for NEAR Intents to see the deposit…", KNOWN_DEPOSIT_TX: "Deposit seen. Confirming…", INCOMPLETE_DEPOSIT: "Deposit seen. Checking the amount…",
+          PROCESSING: `Swapping to ${d.label}…`, SUCCESS: `${d.label} delivered on ${d.chain}.`,
+          REFUNDED: "The swap could not finish: the NEAR came back to your vault as wNEAR.", FAILED: "The swap failed: the NEAR comes back to your vault as wNEAR.",
+        };
+        let last = "";
+        clearInterval(poll);
+        poll = window.setInterval(async () => {
+          if (!B.isConnected) { clearInterval(poll); return; }
+          const fs = await chain.fundingStatus(q.depositAddress!);
+          const el = B.querySelector<HTMLElement>("#co-status");
+          if (!el || fs.status === last) return;
+          last = fs.status;
+          el.innerHTML = `<i class="dot${fs.status === "SUCCESS" ? " safe" : fs.status === "REFUNDED" || fs.status === "FAILED" ? " hot" : ""}"></i> ${esc(words[fs.status] || words.PENDING_DEPOSIT)}`;
+          if (fs.status === "SUCCESS") { clearInterval(poll); toast({ tone: "gold", title: esc(words.SUCCESS) }); }
+          if (fs.status === "REFUNDED" || fs.status === "FAILED") { clearInterval(poll); void showRefund(); }
+        }, 5000);
+        await refresh();
+      } catch (e) {
+        console.warn(e);
+        sfx.play("deny");
+        msg.className = "s-msg bad";
+        msg.textContent = plainError(e);
+      } finally {
+        go.classList.remove("busy"); go.textContent = "Send"; gate();
+      }
+    };
   }
 
   // ---------------------------------------------------------------- arena

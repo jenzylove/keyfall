@@ -510,6 +510,66 @@ export async function fundingStatus(depositAddress: string): Promise<FundingStat
 export async function cashOut(to: string, yocto: string) {
   return send(needVault(), to, [near.actions.transfer(yocto)]);
 }
+// ----- cash out to another chain through NEAR Intents (1Click), paid by the vault
+
+export type CashoutDest = "usdc-sol" | "sol" | "usdc-base" | "eth-base";
+export const CASHOUT_ASSET: Record<CashoutDest, string> = {
+  "usdc-sol": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+  sol: "nep141:sol.omft.near",
+  "usdc-base": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+  "eth-base": "nep141:base.omft.near",
+};
+const WRAP = "wrap.near";
+const WRAP_STORAGE = "1250000000000000000000"; // 0.00125 NEAR: one wNEAR storage registration
+export interface CashoutQuote {
+  dry: boolean; depositAddress: string | null; amountIn: string; amountOut: string; amountOutFormatted: string;
+  minAmountOut: string; amountOutUsd?: string; timeEstimate: number | null; asset: string; chain: string; recipient: string; deadline: string;
+}
+/** A 1Click quote for `yocto` NEAR from this device's vault to `recipient` on another chain. `dry` prices it only. */
+export async function cashoutQuote(dest: CashoutDest, yocto: string, recipient: string, dry: boolean): Promise<CashoutQuote> {
+  if (NETWORK !== "mainnet") throw new ChainError("Cash out to other chains is mainnet only.");
+  const v = needVault();
+  const r = await fetch(apiUrl("/api/cashout"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ vault: v.accountId, dest, yocto, recipient, dry }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ChainError(j?.error || `cash out quote failed (${r.status})`);
+  return j as CashoutQuote;
+}
+/** Pay a cash out quote from the vault: one transaction to wrap.near, signed with
+ * the vault's ML-DSA-65 key. It registers the vault and the deposit address with
+ * wNEAR (a no op when already registered), wraps `yocto` NEAR and sends that
+ * wNEAR to the 1Click deposit address. */
+export async function payCashout(depositAddress: string, yocto: string): Promise<TxResult> {
+  if (!/^[0-9a-f]{64}$/.test(depositAddress)) throw new ChainError("That deposit address is not a NEAR account.");
+  const v = needVault();
+  const r = await send(v, WRAP, [
+    fc("storage_deposit", { account_id: v.accountId, registration_only: true }, WRAP_STORAGE, 10),
+    fc("storage_deposit", { account_id: depositAddress, registration_only: true }, WRAP_STORAGE, 10),
+    fc("near_deposit", {}, yocto, 10),
+    fc("ft_transfer", { receiver_id: depositAddress, amount: yocto, memo: "KEYFALL cash out" }, "1", 20),
+  ]);
+  // Tell 1Click about the deposit so it starts at once (best effort; it also watches the address).
+  void fetch("https://1click.chaindefuser.com/v0/deposit/submit", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ txHash: r.hash, depositAddress, nearSenderAccount: v.accountId }),
+  }).catch(() => {});
+  return r;
+}
+/** wNEAR the vault holds (a refunded cash out comes back as wNEAR). */
+export async function vaultWnear(): Promise<bigint> {
+  if (!vaultSigner) return 0n;
+  const id = vaultSigner.accountId;
+  try {
+    const v = await withRpc(() => near.view({ contractId: WRAP, methodName: "ft_balance_of", args: { account_id: id }, network: NETWORK }));
+    return BigInt((v as string) || 0);
+  } catch {
+    return 0n;
+  }
+}
+/** Turn the vault's wNEAR back into NEAR (signed with the quantum key). */
+export async function unwrapVault(yocto: string) {
+  return send(needVault(), WRAP, [fc("near_withdraw", { amount: yocto }, "1", 20)]);
+}
+
 /** Send the exposed wallet's NEAR to any NEAR account (keeps a little for gas). */
 export async function walletWithdraw(to: string, yocto: string) {
   return send(needWallet(), to, [near.actions.transfer(yocto)]);

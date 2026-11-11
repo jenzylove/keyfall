@@ -7,6 +7,8 @@
 //! Wasm: `KEYFALL_WASM` or `../target/near/qday_contract/qday_contract.wasm`
 //! (build it with `cargo near build non-reproducible-wasm --no-abi` in `contract/`).
 
+#![allow(unused_must_use)] // `ok()` already asserted success; some results are not needed
+
 use base64::Engine;
 use near_workspaces::network::Sandbox;
 use near_workspaces::result::ExecutionFinalResult;
