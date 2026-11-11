@@ -87,6 +87,8 @@ const SHOT_LIFE = 1.35; // seconds: about one screen of range
 const SHOT_COOL = 0.6;
 const AIM_HALF = (13 * Math.PI) / 180; // a cone of about 25 degrees
 const TILE = 48;
+/** ?film=1: recording mode for the trailer. Only you, your target and whoever is raiding you carry labels; fewer background bodies. */
+const FILM = typeof location !== "undefined" && new URLSearchParams(location.search).has("film");
 const GOLD = "#ffd60a", RED = "#ff3d2e", CYAN = "#27f0ff", GOLD2 = "#d9b000", GOLD3 = "#8a6d00";
 
 /** A phone, a small screen or a weak CPU: start in low power mode. Measured frame time can switch it on later. */
@@ -258,7 +260,7 @@ export class Arena {
   /** Screen px at the top that a card covers: edge pointers and labels stay below it. */
   topInset = 0;
   /** How many bodies the page should hand over: fewer on a phone. */
-  get bodyCap() { return this.lowPower ? 25 : 60; }
+  get bodyCap() { return FILM ? 18 : this.lowPower ? 25 : 60; }
 
   setBodies(list: ArenaBody[]) {
     const seen = new Set<string>();
@@ -1222,7 +1224,7 @@ export class Arena {
     c.save();
     c.textAlign = "center"; c.textBaseline = "top";
     const ry = r1; // labels hang under the drawn size
-    if (b.focus) {
+    if (b.focus && (!FILM || b.id === this.lockId || b.raidingMe || b.raidedByMe)) {
       c.font = this.font(12);
       c.fillStyle = hot ? RED : this.colors.ink;
       c.globalAlpha = dimmed ? 0.6 : 1;
@@ -1230,7 +1232,7 @@ export class Arena {
       if (b.showBag) { c.font = this.font(10.5); c.fillStyle = this.colors.dim; this.label(c, b.bag, x, y + ry + 24, 1); }
     }
     // the rule in words as you come close, before you bump
-    if (iVault && b.hint && close && !hot && this.hintIds.has(b.id)) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
+    if (!FILM && iVault && b.hint && close && !hot && this.hintIds.has(b.id)) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
     c.restore();
   }
   /** Labels are queued and decluttered: a label that would sit in the top UI
