@@ -14,6 +14,7 @@ export const DEFEND_CHANCE = 1 / 3; // an NPC defends 1 raid in 3 (2 in 3 made e
 export const DEFEND_AFTER = 0.5; // ...and only in the second half of the clock, so a raid on a bot is a real gamble
 export const GREET_WINDOW_MS = 30 * 60 * 1000; // qubits greet holders newer than this
 export const GREET_DELAY_MS = 3 * 60 * 1000; // ...but never in a holder's first minutes: the arena guide runs then
+export const HUNTS_PER_TICK = 2; // repeat raids on players per tick, beyond the greeting
 export const GREET_TAIL = 10; // with no registration times, "newest" = last N holders
 export const STAKE_BALANCE_CAP_BPS = 2000n; // never stake more than 20% of the NPC's bag
 export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC pays for its gas
@@ -31,7 +32,7 @@ export const ROSTER = [
 ];
 
 /** Bag in whole NEAR bought at setup (read by scripts/npc-setup.mjs). */
-export const BAGS_NEAR = { shor: 2, grover: 2, qubit: 0.4 };
+export const BAGS_NEAR = { shor: 0.5, grover: 0.5, qubit: 0.3 }; // small enough that "no punching down" lets them hit real players
 
 const rosterNames = new Set(ROSTER.map((r) => r.name));
 export const npcName = (accountId) => String(accountId).split(".")[0];
@@ -168,6 +169,15 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     if (big(t.immune_until) !== 0n) continue; // already raided once
     const q = qubits().find((a) => eligible(a, t));
     if (q) launch(q, t, `Newest holder ${short(t.account)} has not been raided yet: ${fmt(t.balance)} coins, say hello.`);
+  }
+
+  // Qubits keep hunting: after the greeting, any player who is not resting gets raided again, a few
+  // per tick, so the arena never goes quiet. The contract's rest after a raid paces it.
+  let hunts = 0;
+  for (const t of [...targets].sort(() => random() - 0.5)) {
+    if (hunts >= HUNTS_PER_TICK) break;
+    const q = qubits().find((a) => eligible(a, t));
+    if (q && launch(q, t, `Hunting ${short(t.account)}: ${fmt(t.balance)} coins and not resting.`)) hunts++;
   }
 
   // Shor: the eligible exposed holder with the largest balance.

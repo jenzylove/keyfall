@@ -150,14 +150,15 @@ test("Qubits greet the newest unraided holder, one qubit per target", () => {
   assert.match(m[0].reason, /Newest holder/);
 });
 
-test("Qubits skip holders registered more than 30 minutes ago or already raided", () => {
+test("past the greeting window, Qubits still hunt (not greet) a player who is not resting", () => {
   const qs = [npc("qubit-01", { balance: Q(20000) })];
   const old = holder("old.testnet", { balance: Q(60000) });
   const m1 = decide(base({ npcs: qs, holders: [old], firstSeen: { "old.testnet": NOW - 31 * 60 * 1000 } }));
-  assert.equal(raids(m1).length, 0);
-  const raided = holder("hit.testnet", { balance: Q(60000), immune_until: "0" });
+  assert.equal(raids(m1).length, 1);
+  assert.match(raids(m1)[0].reason, /Hunting/);
+  const raided = holder("hit.testnet", { balance: Q(60000) });
   const m2 = decide(base({ npcs: qs, holders: [{ ...raided, immune_until: String(NOW - 5) }] }));
-  assert.equal(raids(m2).length, 0);
+  assert.match(raids(m2)[0].reason, /Hunting/);
 });
 
 test("Qubits leave a holder alone for its first minutes, then greet it", () => {
@@ -260,4 +261,13 @@ test("bagholders: buy back in when low, never raid, never raided by NPCs", () =>
   assert.equal(full.filter((x) => x.action === "buy").length, 0);
   const broke = decide(base({ npcs: [], holders: [], bags: [bag], fuel: { [bag.account]: (10n ** 24n).toString() } }));
   assert.equal(broke.filter((x) => x.action === "buy").length, 0);
+});
+
+test("qubits keep hunting a player who already met them, once the rest is over", () => {
+  const qs = [npc("qubit-01"), npc("qubit-02"), npc("qubit-03")];
+  const old = holder("player.testnet", { immune_until: "5" }); // raided before, rest over
+  const m = decide(base({ npcs: qs, holders: [old], firstSeen: { "player.testnet": NOW - 3600_000 } }));
+  assert.equal(raids(m).filter((x) => x.target === "player.testnet").length, 1);
+  const resting = holder("player.testnet", { immune_until: String(NOW + 60_000) });
+  assert.equal(raids(decide(base({ npcs: qs, holders: [resting] }))).length, 0);
 });

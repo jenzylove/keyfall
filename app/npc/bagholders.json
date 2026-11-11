@@ -14,5 +14,13 @@
     "kfbag04-mwasdg19.testnet",
     "kfbag05-mwasex8y.testnet",
     "kfbag06-mwasgfpw.testnet"
+  ],
+  "keyfall-arcade4-mwbrut5g2vx.testnet": [
+    "kfbag01-mwbryyeh.testnet",
+    "kfbag02-mwbs0fo3.testnet",
+    "kfbag03-mwbs1vv3.testnet",
+    "kfbag04-mwbs3d4i.testnet",
+    "kfbag05-mwbs4u8q.testnet",
+    "kfbag06-mwbs6bdm.testnet"
   ]
 }

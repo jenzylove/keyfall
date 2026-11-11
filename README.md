@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://keyfall.jdollar.site"><img alt="Play" src="https://img.shields.io/badge/play-keyfall.jdollar.site-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://nearblocks.io/address/keyfall.near"><img alt="Mainnet contract" src="https://img.shields.io/badge/NEAR%20mainnet-keyfall.near-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
-  <a href="https://testnet.nearblocks.io/address/keyfall-arcade3-mwaruamc57.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice-NEAR%20testnet-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
+  <a href="https://testnet.nearblocks.io/address/keyfall-arcade4-mwbrut5g2vx.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice-NEAR%20testnet-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://github.com/jenzylove/keyfall/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/ci.yml?branch=main&style=flat-square&label=ci&labelColor=0C0C0B"></a>
   <a href="docs/e2e/latest.md"><img alt="End to end" src="https://img.shields.io/badge/end%20to%20end-33%2F33%20on%20testnet-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-EDEBE3?style=flat-square&labelColor=0C0C0B"></a>
@@ -58,10 +58,10 @@ Prefer to check without playing? Open **Under the hood** (https://keyfall.jdolla
 
 | | Mainnet | Practice |
 |---|---|---|
-| Contract | [`keyfall.near`](https://nearblocks.io/address/keyfall.near), deployed keyless on 9 November 2026 ([deploy](https://nearblocks.io/txns/CVAtSwnxxq1pxwkV22EtsUPDLQA3GFH4bA61nsS3Eeh7), [`deployments/mainnet.json`](deployments/mainnet.json)) | [`keyfall-arcade3-mwaruamc57.testnet`](https://testnet.nearblocks.io/address/keyfall-arcade3-mwaruamc57.testnet), season 3, deployed keyless on 10 November 2026 ([`deployments/testnet-live.json`](deployments/testnet-live.json)) |
+| Contract | [`keyfall.near`](https://nearblocks.io/address/keyfall.near), deployed keyless on 9 November 2026 ([deploy](https://nearblocks.io/txns/CVAtSwnxxq1pxwkV22EtsUPDLQA3GFH4bA61nsS3Eeh7), [`deployments/mainnet.json`](deployments/mainnet.json)) | [`keyfall-arcade4-mwbrut5g2vx.testnet`](https://testnet.nearblocks.io/address/keyfall-arcade4-mwbrut5g2vx.testnet), season 4, deployed keyless on 11 November 2026 ([`deployments/testnet-live.json`](deployments/testnet-live.json)) |
 | Money | Real NEAR, real $KEYFALL | Free testnet coins |
 | Q-Day | 23 November 2026, 04:56 UTC | 22 November 2026, 20:00 UTC |
-| Clock | The long season: 6 hour rounds, a 10 minute raid clock, 6 raids a round, 2 hours of rest after a raid ([`sim/params-mainnet.json`](sim/params-mainnet.json)) | The arcade season: 15 minute rounds, a **90 second** raid clock, 4 raids a round, 1 hour of rest, a smaller leak every round ([`sim/params-arcade.json`](sim/params-arcade.json)) |
+| Clock | The long season: 6 hour rounds, a 10 minute raid clock, 6 raids a round, 2 hours of rest after a raid ([`sim/params-mainnet.json`](sim/params-mainnet.json)) | The arcade season: 10 minute rounds, a **90 second** raid clock, 3 raids a round, 10 minutes of rest after a raid, a smaller leak every round ([`sim/params-arcade.json`](sim/params-arcade.json)) |
 
 Before locking the mainnet contract, a spike proved mainnet accepts transactions signed only by an ML-DSA-65 key: an account was created with only a quantum key and then deleted itself with that key ([docs/spikes/s3-mainnet.md](docs/spikes/s3-mainnet.md)).
 
@@ -87,17 +87,17 @@ cd scripts && npm install && node judge-checks.mjs
 ## The rules
 
 - **Supply:** 21,000,000 coins. Satoshi's stash (1,100,000 on mainnet, 3,000,000 in practice) is an exposed holder that can never move. The rest sits in a bonding curve inside the contract. No team allocation, no admin mint, no outside pool.
-- **Harvest:** every round anyone can call `harvest()`: a slice of every exposed balance, Satoshi included (2.5% per 6 hour round on mainnet, 0.06% per 15 minute round in practice, about the same pressure per day); half burns, half goes to vaults.
+- **Harvest:** every round anyone can call `harvest()`: a slice of every exposed balance, Satoshi included (2.5% per 6 hour round on mainnet, 0.04% per 10 minute round in practice, about the same pressure per day); half burns, half goes to vaults.
 - **Raids:** a vault stakes coins against any holder. An exposed target cannot defend but can escape by moving into a vault before the clock runs out (10 minutes on mainnet, 90 seconds in practice). A vault target can defend and take the stake. The take is 7 to 10% of an exposed bag or 0.5 to 2% of a vault, reduced by its shield, capped at 3 times the stake. No punching down: the target must be at least a quarter (mainnet) or half (practice) of your size.
 - **Shields:** burn a share of your bag; strength is the square root of the share (1% buys 10%, 4% buys 20%).
-- **Satoshi:** once per round each vault can take a slice of Satoshi's stash (0.1% on mainnet; 0.1% of a bigger stash in practice, about 3,000 coins a hit at the start, sized by simulation so he lasts to Q-Day). The bots hit him at most once every 6 hours, so on the short clock his stash is left for players.
+- **Satoshi:** once per round each vault can take a slice of Satoshi's stash (0.1% on mainnet; 0.05% of a bigger 3,000,000 stash in practice, about 1,500 coins a hit at the start, sized by simulation so he lasts to Q-Day). The bots hit him at most once every 6 hours, so on the short clock his stash is left for players.
 - **Q-Day:** raids, harvest and Satoshi stop; every exposed balance freezes for good; `finalize()` writes the season result on chain.
 
 These numbers came from simulation, not guesses: the same rules crate was run over 6 scenarios and 48 parameter sets, which caught small vaults being farmed and led to vault armour and the no punching down rule ([docs/BUILD_LOG.md](docs/BUILD_LOG.md)). The arcade clock was simulated the same way at 30 second steps: about 25 successful raids a day against about 1 on the long clock, with Satoshi lasting to Q-Day and the median small vault losing about 3% to raids ([sim/out/ARCADE.md](sim/out/ARCADE.md)).
 
 ## The hunters
 
-The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary quantum vaults playing under the same contract rules. Six **bagholders** are their opposite: ordinary accounts that hold a big bag behind an old key, never move it, cannot defend, leak to the vaults every round and buy back in when they run low, so there is always red prey to shoot. Qubits greet new players with a raid once they are past their first three minutes, Shor hunts the largest exposed bag it may raid, Grover hunts the least shielded vault. They defend 1 raid in 3, late in the clock, run the harvest, settle closed raids and pay their own gas by selling part of their bag. The landing page shows how much of the vault total they hold. Their whole behaviour is one readable file with a reason for every move: [`app/npc/rules.mjs`](app/npc/rules.mjs).
+The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary quantum vaults playing under the same contract rules. Six **bagholders** are their opposite: ordinary accounts that hold a big bag behind an old key, never move it, cannot defend, leak to the vaults every round and buy back in when they run low, so there is always red prey to shoot. Qubits greet new players with a raid once they are past their first three minutes and keep hunting anyone who is not resting, Shor hunts the largest exposed bag it may raid, Grover hunts the least shielded vault. They defend 1 raid in 3, late in the clock, run the harvest, settle closed raids and pay their own gas by selling part of their bag. The landing page shows how much of the vault total they hold. Their whole behaviour is one readable file with a reason for every move: [`app/npc/rules.mjs`](app/npc/rules.mjs).
 
 ## How it works
 
