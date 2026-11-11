@@ -11,6 +11,8 @@
   <a href="https://nearblocks.io/address/keyfall.near"><img alt="Mainnet contract" src="https://img.shields.io/badge/NEAR%20mainnet-keyfall.near-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://testnet.nearblocks.io/address/keyfall-arcade4-mwbrut5g2vx.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice-NEAR%20testnet-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://github.com/jenzylove/keyfall/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/ci.yml?branch=main&style=flat-square&label=ci&labelColor=0C0C0B"></a>
+  <a href="https://github.com/jenzylove/keyfall/actions/workflows/sandbox.yml"><img alt="Sandbox tests" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/sandbox.yml?branch=main&style=flat-square&label=sandbox%20tests&labelColor=0C0C0B"></a>
+  <a href="https://github.com/jenzylove/keyfall/actions/workflows/verifiable-build.yml"><img alt="Verifiable build" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/verifiable-build.yml?branch=main&style=flat-square&label=verifiable%20build&labelColor=0C0C0B"></a>
   <a href="docs/e2e/latest.md"><img alt="End to end" src="https://img.shields.io/badge/end%20to%20end-33%2F33%20on%20testnet-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-EDEBE3?style=flat-square&labelColor=0C0C0B"></a>
 </p>
@@ -50,7 +52,7 @@ Open **https://keyfall.jdollar.site** on a phone or desktop and press **PLAY**. 
 2. **Run to the gold gate.** Steer with your thumb (or WASD and the arrow keys). Touch the gate and your vault is built: your coins move into an account whose only key is quantum safe. If a raider caught you first and you escape in time, the raid takes nothing.
 3. **Now you're gold, and only gold can shoot.** Shoot a marked rival to raid it. Exposed bags run, so chase them. Vaults fight back.
 4. **Stay alive and climb.** Charge a SHIELD so raids take less, DASH away from raiders, and shoot Satoshi's core when it glows. The richest vault at Q-Day wins. Every move is signed in your browser with ML-DSA-65.
-5. **Play for real.** After the first mission, switch to the **mainnet** arena: buy $KEYFALL with NEAR on `keyfall.near` and play the same rules for real money. No NEAR yet? Top up from USDC or SOL on Solana, or USDC or ETH on Base, through NEAR Intents straight to your in browser wallet (QR code included), and cash out to any NEAR account from the menu. Before any money goes in you save the wallet's recovery code (its key is sealed in your browser and nobody else has a copy); a swap that cannot finish refunds to your own address on the chain you paid from.
+5. **Play for real.** After the first mission, switch to the **mainnet** arena: buy $KEYFALL with NEAR on `keyfall.near` and play the same rules for real money. No NEAR yet? Top up from USDC or SOL on Solana, or USDC or ETH on Base, through NEAR Intents straight to your in browser wallet (QR code included), and cash out the same way: your vault signs one transaction with its ML-DSA-65 key and NEAR Intents delivers USDC or SOL on Solana, USDC or ETH on Base, or NEAR to any NEAR account. Before any money goes in you save the wallet's recovery code (its key is sealed in your browser and nobody else has a copy); a swap that cannot finish refunds to your own address on the chain you paid from.
 
 Prefer to check without playing? Open **Under the hood** (https://keyfall.jdollar.site/proof): every check there reads the chain from your browser.
 
@@ -69,10 +71,11 @@ Before locking the mainnet contract, a spike proved mainnet accepts transactions
 
 | Claim | How to check |
 |---|---|
+| Every move works on a real NEAR node | [`sandbox/tests/arena.rs`](sandbox/tests/arena.rs) deploys the built wasm on a local NEAR sandbox and plays it with real signed transactions: buy, a vault born with one ML-DSA-65 key, migrate, shield, raid and resolve, defend, boss, Q-Day freeze and `finalize()`. A vault that adds an ed25519 key to itself is refused with `E_NOT_QUANTUM` on raid, transfer, sell and shield. Runs on every push ([sandbox](https://github.com/jenzylove/keyfall/actions/workflows/sandbox.yml)) |
 | Only quantum signed moves are accepted | The same `boss_raid` refused with `E_NOT_QUANTUM` when signed with ed25519, accepted with ML-DSA-65: transactions in [docs/e2e/latest.md](docs/e2e/latest.md) |
 | Vaults are born quantum only | `/proof` reads every vault's key list live and counts how many hold exactly one `ml-dsa-65` key |
 | Nobody can change the rules | The contract accounts have **no access keys**, and `config()` equals the params file field by field |
-| The deployed code is this repo | `node scripts/judge-checks.mjs` compares your local wasm build hash with the deployed one. The mainnet wasm hash is in [`deployments/mainnet.json`](deployments/mainnet.json) |
+| The deployed code is this repo | `node scripts/judge-checks.mjs` compares your local wasm build hash with the deployed one. The mainnet wasm hash is in [`deployments/mainnet.json`](deployments/mainnet.json). How to rebuild it: [Rebuild the wasm](#rebuild-the-wasm) |
 | The books add up | exposed + vaults + market + escrow + burned = 21,000,000, checked live |
 | The whole season works, Q-Day included | 33 of 33 end to end checks on a fresh testnet season with real transactions, including frozen bags, stopped raids and `finalize()`: [docs/e2e/latest.md](docs/e2e/latest.md) |
 | Harvest cost does not grow with holders | Harvest gas was equal at 4 and 44 exposed holders in the recorded testnet run |
@@ -83,6 +86,28 @@ cd scripts && npm install && node judge-checks.mjs
 ```
 
 `judge-checks.mjs` runs against the practice contract by default (`deployments/testnet-live.json`).
+
+### Rebuild the wasm
+
+There are two routes, and they answer different questions.
+
+**The mainnet wasm** (`keyfall.near`, sha256 `9095039b…2ccf` in [`deployments/mainnet.json`](deployments/mainnet.json)) was built with the plain cargo near route, not inside Docker:
+
+```sh
+cd contract && cargo near build non-reproducible-wasm --no-abi
+sha256sum ../target/near/qday_contract/qday_contract.wasm
+```
+
+This route depends on your Rust and cargo near versions, so the hash only matches with the toolchain it was built with. Judges have rebuilt `9095039b…` this way on their own machines. A stock GitHub runner (Rust 1.99.1, latest cargo near) gives a different hash for the same source; the [verifiable build](https://github.com/jenzylove/keyfall/actions/workflows/verifiable-build.yml) job prints both side by side.
+
+**The reproducible route** (NEP-330) pins the whole toolchain in a Docker image chosen by digest in [`contract/Cargo.toml`](contract/Cargo.toml) (`sourcescan/cargo-near:0.22.0-rust-1.99.1`):
+
+```sh
+cd contract && cargo near build reproducible-wasm   # needs Docker and a clean git checkout
+sha256sum ../target/near/qday_contract/qday_contract.wasm
+```
+
+Anyone with Docker gets the same bytes from the same commit, and the wasm records that commit and image inside it. The [verifiable build](https://github.com/jenzylove/keyfall/actions/workflows/verifiable-build.yml) job runs it on every push and writes the sha256 to the job summary. The mainnet contract predates this route and is keyless, so it is never redeployed: its proof stays the non reproducible rebuild above.
 
 ## The rules
 
@@ -159,9 +184,15 @@ cd contract && cargo near build non-reproducible-wasm --no-abi
 # tests (Linux or macOS; on Windows the aws-lc-sys dev dependency needs NASM)
 cargo test --workspace
 cd app && node --test npc/rules.test.mjs
+
+# contract on a local NEAR sandbox (after the wasm build above)
+cd sandbox && cargo test -- --nocapture
+
+# cash out through NEAR Intents, dry run up to the deposit (read only)
+cd scripts && node cashout-dry.mjs --vault <name>.keyfall.near --near 0.5
 ```
 
-CI runs the Rust tests and the wasm build on every push. A clean runner also loads every live route every 3 hours (`sitecheck`).
+CI runs the Rust tests and the wasm build on every push, the sandbox suite plays the contract on a local NEAR node, and the verifiable build job prints the reproducible and non reproducible wasm hashes. A clean runner also loads every live route every 3 hours (`sitecheck`).
 
 ## Scope
 
