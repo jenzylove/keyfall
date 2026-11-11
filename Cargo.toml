@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["core", "contract", "sim"]
-exclude = ["spikes"]
+exclude = ["spikes", "sandbox"]
 
 [workspace.package]
 edition = "2021"

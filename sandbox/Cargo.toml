@@ -1,0 +1,21 @@
+# Integration tests on a local NEAR sandbox (near-workspaces). Kept out of the
+# main workspace: they need the built contract wasm and a sandbox node, so they
+# run in their own CI job (.github/workflows/sandbox.yml).
+[package]
+name = "keyfall-sandbox-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"
+
+[dev-dependencies]
+near-workspaces = "0.24"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+serde_json = "1"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

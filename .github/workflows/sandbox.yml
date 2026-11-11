@@ -1,0 +1,39 @@
+name: sandbox
+
+# Contract integration tests on a local NEAR node (near-workspaces): the built
+# wasm is deployed and played with real ed25519 and ML-DSA-65 transactions.
+on:
+  push:
+    branches: [main, "v8-*"]
+    paths-ignore: ["app/**", "docs/**", "*.md"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            sandbox -> target
+      - name: Install cargo-near
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Build contract wasm
+        working-directory: contract
+        run: cargo near build non-reproducible-wasm --no-abi
+      - name: Wasm hash
+        run: sha256sum target/near/qday_contract/qday_contract.wasm | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Sandbox tests
+        working-directory: sandbox
+        env:
+          KEYFALL_WASM: ${{ github.workspace }}/target/near/qday_contract/qday_contract.wasm
+        run: cargo test -- --nocapture --test-threads 2
