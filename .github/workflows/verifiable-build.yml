@@ -1,0 +1,52 @@
+name: verifiable build
+
+# Builds the contract twice:
+#  1. reproducible: `cargo near build reproducible-wasm` inside the Docker image
+#     pinned by digest in contract/Cargo.toml. Anyone with Docker gets the same
+#     bytes from the same commit.
+#  2. non reproducible: the route the mainnet wasm was built with
+#     (`cargo near build non-reproducible-wasm --no-abi`), for comparison.
+# Both sha256 values go to the job summary next to deployments/mainnet.json.
+on:
+  push:
+    branches: [main, "v8-*"]
+    paths-ignore: ["app/**", "docs/**", "*.md"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install cargo-near
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Reproducible build (Docker, pinned image)
+        working-directory: contract
+        run: cargo near build reproducible-wasm
+      - name: Hashes
+        run: |
+          {
+            echo "### Contract wasm sha256"
+            echo
+            echo "| Build | sha256 |"
+            echo "|---|---|"
+            echo "| reproducible (Docker) at ${GITHUB_SHA::7} | \`$(sha256sum target/near/qday_contract/qday_contract.wasm | cut -d' ' -f1)\` |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          cp target/near/qday_contract/qday_contract.wasm /tmp/reproducible.wasm
+      - name: Non reproducible build (the mainnet route)
+        working-directory: contract
+        run: cargo near build non-reproducible-wasm --no-abi
+      - name: Compare
+        run: |
+          nonrepro=$(sha256sum target/near/qday_contract/qday_contract.wasm | cut -d' ' -f1)
+          mainnet=$(node -p "require('./deployments/mainnet.json').wasm_sha256")
+          {
+            echo "| non reproducible on this runner | \`$nonrepro\` |"
+            echo "| mainnet keyfall.near (deployments/mainnet.json) | \`$mainnet\` |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -9,6 +9,14 @@ repository = "https://github.com/jenzylove/qday"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# Reproducible build (NEP-330): `cargo near build reproducible-wasm` runs the
+# build inside this pinned image, identified by digest, from a clean commit.
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.22.0-rust-1.99.1"
+image_digest = "sha256:c9655eaf7436b90c87ea8b25739f91063032c5c30ba24cfeafe72c142943b5bb"
+passed_env = []
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked", "--no-abi"]
+
 [dependencies]
 qday-core = { path = "../core" }
 near-sdk = "5"
