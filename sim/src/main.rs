@@ -387,6 +387,17 @@ fn run(p: &Params, m: Mix, seed: u64) -> RunResult {
             g.balance_of(&a.exposed) + if a.has_vault { g.balance_of(&a.vault) } else { 0 }
         })
         .collect();
+    if std::env::var("SIM_TOP").is_ok() {
+        // who ends on top, and how much of it they simply bought at the start
+        let mut who: Vec<(u128, usize)> = bags.iter().copied().zip(0..).collect();
+        who.sort();
+        let total: u128 = bags.iter().sum();
+        let pct = |x: u128| x as f64 * 100.0 / total.max(1) as f64;
+        for (bag, i) in who.iter().rev().take(3) {
+            let a = &agents[*i];
+            eprintln!("  top: {:?} bought {:.1}% of all holdings at entry, ends with {:.1}%", a.arch, pct(a.start_bag), pct(*bag));
+        }
+    }
     bags.sort();
     let total: u128 = bags.iter().sum();
     let top2: u128 = bags.iter().rev().take(2).sum();

@@ -288,3 +288,164 @@ async fn q_day_freezes_exposed_and_finalizes() -> anyhow::Result<()> {
     println!("q-day: all passed");
     Ok(())
 }
+
+/// Season 5 arcade rules (sim/params-arcade5.json) with a sandbox clock:
+/// a 2 bullet clip that regenerates every 6 s, one shield charge, a 3 s
+/// cooldown on Satoshi and a boss that dies in three hits.
+fn arcade_params() -> Value {
+    let mut p: Value = serde_json::from_str(include_str!("../../sim/params-arcade5.json")).unwrap();
+    p["defend_window_ms"] = json!(10_000);
+    p["immunity_ms"] = json!(1_000);
+    p["boss_bps"] = json!(3_400);
+    let a = &mut p["arcade"];
+    a["clip_size"] = json!(2);
+    a["bullet_regen_ms"] = json!(6_000);
+    a["shield_max"] = json!(1);
+    a["shield_regen_ms"] = json!(3_600_000);
+    a["boss_cooldown_ms"] = json!(3_000);
+    a["round_max_ms"] = json!(3_600_000);
+    p
+}
+
+/// A number from a view, whether it comes as a JSON number or a string.
+fn num(v: &Value) -> u128 {
+    v.as_u64().map(u128::from).or_else(|| v.as_str().and_then(|s| s.parse().ok())).unwrap_or_else(|| panic!("number, got {v}"))
+}
+fn arc(h: &Value, k: &str) -> u128 {
+    num(&h["arcade"][k])
+}
+
+#[tokio::test]
+async fn arcade_bullets_shields_and_satoshi_blast() -> anyhow::Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let p = arcade_params();
+    let reload_price = num(&p["arcade"]["reload_price"]);
+    let game = deploy(&worker, p).await?;
+    let c = game.id().clone();
+    let g60 = Gas::from_tgas(60);
+    let (alice, bob, dan, carol) = (worker.dev_create_tla().await?, worker.dev_create_tla().await?, worker.dev_create_tla().await?, worker.dev_create_tla().await?);
+    for w in [&alice, &bob, &dan, &carol] {
+        buy(w, &c, 3).await?;
+    }
+    let av = create_vault(&worker, &alice, &c, "alice").await?;
+    let bv = create_vault(&worker, &bob, &c, "bob").await?;
+    let dv = create_vault(&worker, &dan, &c, "dan").await?;
+    for (w, v) in [(&alice, &av), (&bob, &bv), (&dan, &dv)] {
+        let amt = balance(&worker, &c, w.id()).await?;
+        ok(
+            w.call(&c, "ft_transfer")
+                .args_json(json!({ "receiver_id": v.id(), "amount": amt.to_string() }))
+                .deposit(NearToken::from_yoctonear(1))
+                .gas(Gas::from_tgas(50))
+                .transact()
+                .await?,
+            "migrate",
+        );
+    }
+    let h = holder(&worker, &c, av.id()).await?;
+    assert_eq!((arc(&h, "bullets"), arc(&h, "shields")), (2, 1), "a vault starts with a full clip and full shields");
+    let stake = (5_000 * ONE).to_string();
+    let raid = |a: &Account, t: &AccountId| a.call(&c, "raid").args_json(json!({ "target": t, "stake": stake })).gas(g60);
+
+    println!("a raid is a shot: it costs one bullet");
+    ok(raid(&av, carol.id()).transact().await?, "raid carol");
+    assert_eq!(arc(&holder(&worker, &c, av.id()).await?, "bullets"), 1);
+
+    println!("block spends a shield charge, not a bullet");
+    let id: String = ok(raid(&bv, av.id()).transact().await?, "bob raids alice").json()?;
+    ok(av.call(&c, "block").args_json(json!({ "raid_id": id })).gas(g60).transact().await?, "block");
+    let h = holder(&worker, &c, av.id()).await?;
+    assert_eq!((arc(&h, "bullets"), arc(&h, "shields")), (1, 0));
+    assert_eq!(view(&worker, &c, "get_raid", json!({ "raid_id": id })).await?["status"], "blocked");
+
+    println!("no charges left: block is refused; defend spends a bullet");
+    tokio::time::sleep(Duration::from_millis(1_500)).await; // immunity after the block
+    let id: String = ok(raid(&dv, av.id()).transact().await?, "dan raids alice").json()?;
+    refused(av.call(&c, "block").args_json(json!({ "raid_id": id })).gas(g60).transact().await?, "E_NO_SHIELDS", "block with no charges");
+    ok(av.call(&c, "defend").args_json(json!({ "raid_id": id })).gas(g60).transact().await?, "defend");
+    let h = holder(&worker, &c, av.id()).await?;
+    assert_eq!((arc(&h, "bullets"), arc(&h, "shields")), (0, 0));
+    assert_eq!(view(&worker, &c, "get_raid", json!({ "raid_id": id })).await?["status"], "defended");
+
+    println!("empty clip: E_NO_BULLETS, then a free bullet regenerates");
+    refused(raid(&av, bv.id()).transact().await?, "E_NO_BULLETS", "raid with an empty clip");
+    assert!(arc(&h, "next_bullet_ms") > 0, "the view says when the next bullet comes");
+    let mut back = false;
+    for _ in 0..30 {
+        if arc(&holder(&worker, &c, av.id()).await?, "bullets") >= 1 {
+            back = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(1_000)).await;
+    }
+    assert!(back, "a bullet came back within 30 s");
+
+    println!("reload burns the reload price and fills the clip");
+    let before = balance(&worker, &c, av.id()).await?;
+    let burned: u128 = ok(av.call(&c, "reload").args_json(json!({})).gas(g60).transact().await?, "reload").json::<String>()?.parse()?;
+    assert_eq!(burned, reload_price);
+    assert_eq!(burned, 50_000 * ONE, "reload costs 50k");
+    assert_eq!(balance(&worker, &c, av.id()).await?, before - burned);
+    assert_eq!(arc(&holder(&worker, &c, av.id()).await?, "bullets"), 2);
+
+    println!("break: on and off");
+    ok(av.call(&c, "set_break").args_json(json!({ "on": true })).gas(g60).transact().await?, "break on");
+    assert_eq!(holder(&worker, &c, av.id()).await?["arcade"]["on_break"], true);
+    ok(av.call(&c, "set_break").args_json(json!({ "on": false })).gas(g60).transact().await?, "break off");
+    assert_eq!(holder(&worker, &c, av.id()).await?["arcade"]["on_break"], false);
+
+    println!("Satoshi: a hit is damage only, then a cooldown");
+    let a0 = view(&worker, &c, "arena", json!({})).await?;
+    let spawn = num(&a0["boss_spawn"]);
+    assert_eq!(num(&a0["boss_hp"]), spawn);
+    let before = balance(&worker, &c, av.id()).await?;
+    ok(av.call(&c, "boss_raid").args_json(json!({})).gas(g60).transact().await?, "alice hits Satoshi");
+    assert_eq!(balance(&worker, &c, av.id()).await?, before, "a hit moves no coins");
+    assert!(num(&view(&worker, &c, "arena", json!({})).await?["boss_hp"]) < spawn);
+    refused(av.call(&c, "boss_raid").args_json(json!({})).gas(g60).transact().await?, "E_BOSS_COOLDOWN", "second hit inside the cooldown");
+    ok(bv.call(&c, "boss_raid").args_json(json!({})).gas(g60).transact().await?, "bob hits Satoshi");
+    ok(dv.call(&c, "boss_raid").args_json(json!({})).gas(g60).transact().await?, "the third hit kills him");
+
+    println!("blast: the pot is split by damage, credited lazily, claimed once");
+    let a1 = view(&worker, &c, "arena", json!({})).await?;
+    let last = a1["last_round"].clone();
+    println!("  last round: {last}");
+    assert!(last["killer"].is_string(), "the round ended in a blast");
+    assert!(last["winner"].is_string(), "a blast round has a winner");
+    let b = view(&worker, &c, "blast", json!({ "round": num(&last["round"]).to_string() })).await?;
+    let (pot, dmg) = (num(&b["pot"]), num(&b["damage"]));
+    assert!(pot > 0);
+    assert_eq!(num(&b["hitters"]), 3);
+    let pend = |h: &Value| num(&h["arcade"]["blast_pending"]);
+    let (ha, hb, hd) = (holder(&worker, &c, av.id()).await?, holder(&worker, &c, bv.id()).await?, holder(&worker, &c, dv.id()).await?);
+    let (pa, pb, pd) = (pend(&ha), pend(&hb), pend(&hd));
+    println!("  pot {pot}, damage {dmg}, shares {pa} {pb} {pd}");
+    assert_eq!(pa, pb, "equal damage, equal share");
+    assert!(pd > 0 && pd <= pa, "the killing hit was capped by his life left");
+    assert!(pa + pb + pd <= pot && pot - (pa + pb + pd) < 10, "shares add up to the pot");
+    let hit = spawn * 3_400 / 10_000;
+    assert_eq!(pa, pot * hit / dmg, "share = pot x damage / total damage");
+    assert_eq!(balance(&worker, &c, av.id()).await?, num(&ha["balance"]), "pending coins already count in the balance");
+    // anyone can claim for bob, once
+    let got: u128 = ok(carol.call(&c, "claim_blast").args_json(json!({ "account_id": bv.id() })).gas(g60).transact().await?, "claim for bob").json::<String>()?.parse()?;
+    assert_eq!(got, pb);
+    assert_eq!(pend(&holder(&worker, &c, bv.id()).await?), 0);
+    refused(carol.call(&c, "claim_blast").args_json(json!({ "account_id": bv.id() })).gas(g60).transact().await?, "E_NOTHING_TO_CLAIM", "second claim");
+    // alice's share lands on her next move
+    let bal = balance(&worker, &c, av.id()).await?;
+    ok(av.call(&c, "set_break").args_json(json!({ "on": true })).gas(g60).transact().await?, "any move");
+    assert_eq!(pend(&holder(&worker, &c, av.id()).await?), 0);
+    assert_eq!(balance(&worker, &c, av.id()).await?, bal, "the claim moved pending coins into the bag, nothing more");
+    assert!(num(&view(&worker, &c, "arena", json!({})).await?["boss_hp"]) > 0, "Satoshi respawned");
+
+    println!("quantum check: arcade moves signed with ed25519 are refused");
+    let ed = SecretKey::from_random(KeyType::ED25519);
+    ok(av.batch(av.id()).add_key(ed.public_key(), AccessKey::full_access()).transact().await?, "add ed25519 key");
+    let classical = Account::from_secret_key(av.id().clone(), ed, &worker);
+    refused(classical.call(&c, "reload").args_json(json!({})).gas(g60).transact().await?, "E_NOT_QUANTUM", "reload signed with ed25519");
+    refused(classical.call(&c, "buy_shield").args_json(json!({})).gas(g60).transact().await?, "E_NOT_QUANTUM", "buy_shield signed with ed25519");
+    refused(classical.call(&c, "boss_raid").args_json(json!({})).gas(g60).transact().await?, "E_NOT_QUANTUM", "boss hit signed with ed25519");
+    refused(classical.call(&c, "set_break").args_json(json!({ "on": false })).gas(g60).transact().await?, "E_NOT_QUANTUM", "break signed with ed25519");
+    println!("arcade: all passed");
+    Ok(())
+}

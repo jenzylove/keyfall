@@ -4,7 +4,7 @@ name: sandbox
 # wasm is deployed and played with real ed25519 and ML-DSA-65 transactions.
 on:
   push:
-    branches: [main, "v8-*"]
+    branches: [main, "v8-*", "v10-*"]
     paths-ignore: ["app/**", "docs/**", "*.md"]
   pull_request:
   workflow_dispatch:
