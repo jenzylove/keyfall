@@ -1701,6 +1701,9 @@ export class Arena {
       // stack pointer labels instead of overlapping them
       for (let i = 0; i < 4 && placed.some((q) => Math.abs(q.x - lx) * 2 < q.w + w && Math.abs(q.y - ly) < 16); i++) ly += 16;
       placed.push({ x: lx, y: ly, w });
+      // never on top of YOU: the arrow still points, the words step aside
+      const mp = this.toScreen(this.me.x, this.me.y), mr = this.me.r + 8;
+      if (Math.abs(lx - mp.x) * 2 < w + mr * 2 && ly + 7 > mp.y - mr && ly - 7 < mp.y + mr + 34) { c.restore(); continue; }
       c.fillStyle = this.colors.bg; c.globalAlpha = 0.8; c.fillRect(Math.round(lx - w / 2), Math.round(ly - 7), Math.round(w), 14); c.globalAlpha = 1;
       c.fillStyle = t.color === GOLD ? this.colors.goldInk : t.color === RED ? this.colors.redInk : t.color; c.fillText(txt, Math.round(lx), Math.round(ly) + 1);
       c.restore();

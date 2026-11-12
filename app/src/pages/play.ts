@@ -1670,22 +1670,23 @@ export function play(root: HTMLElement) {
     const have = w.vaultNear ?? 0n;
     const spendableY = have - BigInt(chain.nearToYocto(0.06)); // gas for the vault's own moves and two wNEAR registrations
     const maxNear = Math.max(0, Math.floor(Number(spendableY / 10n ** 22n)) / 100);
-    const DESTS: { id: "near" | chain.CashoutDest; label: string; chain: string }[] = [
+    const ALL_DESTS: { id: "near" | chain.CashoutDest; label: string; chain: string }[] = [
       { id: "near", label: "NEAR", chain: "NEAR" },
       { id: "usdc-sol", label: "USDC", chain: "Solana" },
       { id: "sol", label: "SOL", chain: "Solana" },
       { id: "usdc-base", label: "USDC", chain: "Base" },
       { id: "eth-base", label: "ETH", chain: "Base" },
     ];
+    const DESTS = ALL_DESTS.filter((d) => MAIN || d.id === "near"); // practice NEAR only goes to NEAR accounts
     let dest: (typeof DESTS)[number]["id"] = (() => { try { return (localStorage.getItem("keyfall.cashout.dest") as any) || "near"; } catch { return "near"; } })();
     if (!DESTS.some((d) => d.id === dest)) dest = "near";
     const D = () => DESTS.find((d) => d.id === dest)!;
     const savedTo = () => { try { return localStorage.getItem(`keyfall.cashout.to.${dest}`) || ""; } catch { return ""; } };
-    const placeholder = () => (dest === "near" ? "yourname.near" : D().chain === "Solana" ? "your Solana address" : "your Base address (0x…)");
+    const placeholder = () => (dest === "near" ? (MAIN ? "yourname.near" : "yourname.testnet") : D().chain === "Solana" ? "your Solana address" : "your Base address (0x…)");
     show("cashout", "", "Cash out", `
-      <p class="kick gold">Mainnet</p>
+      <p class="kick gold">${NET_LABEL} · your vault</p>
       <h2 class="s-title">Cash out</h2>
-      <p class="s-text">Your vault holds <b>${chain.fmtNear(have, 3)} NEAR</b>${w.vaultBal > 0n ? ` and <b>${full(w.vaultBal)}</b> coins` : ""}. Your quantum key signs the send; <b>NEAR Intents</b> delivers it on any chain.</p>
+      <p class="s-text">Your vault holds <b>${chain.fmtNear(have, 3)} NEAR</b>${w.vaultBal > 0n ? ` and <b>${full(w.vaultBal)}</b> coins` : ""}. Your quantum key signs the send${MAIN ? "; <b>NEAR Intents</b> delivers it on any chain" : ""}.</p>
       ${w.vaultBal > 0n ? `<button type="button" class="linkish" id="co-sell">Sell coins first ›</button>` : ""}
       <label class="m-field"><span>Receive</span><select id="co-dest">${DESTS.map((d) => `<option value="${d.id}" ${d.id === dest ? "selected" : ""}>${d.id === "near" ? "NEAR on NEAR" : `${d.label} on ${d.chain}`}</option>`).join("")}</select></label>
       <p class="m-hint" id="co-time"></p>
@@ -1749,7 +1750,7 @@ export function play(root: HTMLElement) {
     const gate = () => {
       const a = amt();
       if (a <= 0) calc.textContent = "Slide to choose how much to send.";
-      else if (dest === "near") calc.textContent = `Send ${a.toFixed(2)} NEAR. About ${chain.fmtNear(spendableY - BigInt(chain.nearToYocto(a)), 2)} NEAR stays for moves.`;
+      else if (dest === "near") calc.textContent = `Send ${a.toFixed(2)} NEAR. About ${chain.fmtNear(have - BigInt(chain.nearToYocto(a)), 2)} NEAR stays for moves.`;
       else if (a < 0.1) calc.textContent = "Send at least 0.1 NEAR to another chain.";
       else { calc.textContent = `Send ${a.toFixed(2)} NEAR. Pricing in ${D().label}…`; price(); }
       if (!go.classList.contains("busy")) go.disabled = !(okTo && a > 0 && (dest === "near" || a >= 0.1));
@@ -2396,9 +2397,10 @@ export function play(root: HTMLElement) {
     }, () => (sess().vault ? "Bought, and it's in your vault." : "Bought."), sess().vault && buyPayer() === "wallet" ? "migrate" : "buy");
     move(B.querySelector("#mk-sgo")!, out, () => chain.sell(sellAmount().toString(), sess().vault ? "vault" : "wallet"), (v) => `Sold for ${chain.fmtNear(String(v ?? "0"), 3)} NEAR.`, "sell", () => {
       sr.value = "0";
-      // mainnet: the NEAR from a sale is one tap from leaving
+      updateSellText();
+      // the NEAR from a sale is one tap from leaving
       const nx = B.querySelector<HTMLElement>("#mk-next");
-      if (MAIN && nx) {
+      if (nx) {
         nx.innerHTML = sess().vault ? `<button type="button" class="btn wide" id="mk-cash">Cash out ›</button>` : `<button type="button" class="btn wide" id="mk-wout">Send NEAR out ›</button>`;
         const cb = nx.querySelector<HTMLButtonElement>("#mk-cash"); if (cb) cb.onclick = () => openCashOut();
         const wb = nx.querySelector<HTMLButtonElement>("#mk-wout"); if (wb) wb.onclick = () => openWalletOut();
@@ -2526,7 +2528,7 @@ export function play(root: HTMLElement) {
         <button type="button" class="set-item" id="st-act"><span>Activity</span><span>›</span></button>
         <button type="button" class="set-item" id="st-boss"><span>Satoshi boss fight</span><span>›</span></button>
         <button type="button" class="set-item" id="st-net"><span>Switch arena</span><span>${MAIN ? "Mainnet" : "Practice"}</span></button>
-        ${MAIN && s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out</span><span>›</span></button>` : ""}
+        ${s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out</span><span>${MAIN ? "›" : "Practice NEAR ›"}</span></button>` : ""}
         ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>` : ""}
         ${s.wallet && (w.walletNear ?? 0n) > BigInt(chain.nearToYocto(0.02)) ? `<button type="button" class="set-item" id="st-wout"><span>Send wallet NEAR out</span><span>${chain.fmtNear(w.walletNear ?? 0n, 2)} ${NET_LABEL} NEAR ›</span></button>` : ""}
         <button type="button" class="set-item" id="st-theme"><span>Theme</span><span>${theme === "dark" ? "Dark" : "Light"}</span></button>

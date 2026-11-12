@@ -4,6 +4,8 @@ import { $, $$, FAIL, REPO, esc, isNpc, maybe, reducedMotion, short } from "../u
 import { deploy, e2e, findCheck, guardAccepted, guardRefused, sim, simParams, simParamsFile, type SimPoint } from "../ui/evidence";
 import { fmtParam } from "../ui/params";
 
+/** Recorded step names, in the page's own words (no hyphenated prose; file and account names stay as they are). */
+const prose = (t: string) => t.replace(/\bquantum-only\b/g, "quantum only").replace(/\bon-chain\b/g, "on chain");
 const V = (state: "pass" | "fail" | "wait", label?: string) => `<span class="verdict ${state}">${label ?? (state === "pass" ? "Pass" : state === "fail" ? "Fail" : "Checking")}</span>`;
 const tx = (h?: string, label = "view on explorer") => (h ? `<a class="tx nowrap" href="${txLink(h)}" target="_blank" rel="noopener">${label} ↗</a>` : "");
 
@@ -137,7 +139,7 @@ export function proof(root: HTMLElement) {
   if (e2e) {
     verdict("p-e2e", e2e.all_pass ? "pass" : "fail", e2e.all_pass ? `${e2e.checks.filter((c) => c.pass).length} of ${e2e.checks.length} pass` : undefined);
     body("p-e2e").innerHTML = `<div class="scroll-x"><table class="tbl"><thead><tr><th>Step</th><th class="r">Result</th><th class="r">Tx</th></tr></thead><tbody>
-      ${e2e.checks.map((c) => `<tr><td>${esc(c.name)}</td><td class="r">${c.pass ? '<span class="okmark">pass</span>' : '<span class="badmark">fail</span>'}</td><td class="r">${c.hash ? `<a class="tx" href="${txLink(c.hash)}" target="_blank" rel="noopener">${esc(c.hash.slice(0, 6))}…↗</a>` : ""}</td></tr>`).join("")}
+      ${e2e.checks.map((c) => `<tr><td>${esc(prose(c.name))}</td><td class="r">${c.pass ? '<span class="okmark">pass</span>' : '<span class="badmark">fail</span>'}</td><td class="r">${c.hash ? `<a class="tx" href="${txLink(c.hash)}" target="_blank" rel="noopener">${esc(c.hash.slice(0, 6))}…↗</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div><p class="tx">Script: <a href="${REPO}/tree/main/scripts" target="_blank" rel="noopener">scripts ↗</a></p>`;
   } else verdict("p-e2e", "fail", "No file");
 
