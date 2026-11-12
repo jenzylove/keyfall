@@ -424,7 +424,7 @@ async fn arcade_bullets_shields_and_satoshi_blast() -> anyhow::Result<()> {
     assert!(pd > 0 && pd <= pa, "the killing hit was capped by his life left");
     assert!(pa + pb + pd <= pot && pot - (pa + pb + pd) < 10, "shares add up to the pot");
     let hit = spawn * 3_400 / 10_000;
-    assert_eq!(pa, pot * hit / dmg, "share = pot x damage / total damage");
+    assert_eq!(pa, (pot / ONE) * (hit / ONE) / (dmg / ONE) * ONE, "share = pot x damage / total damage");
     assert_eq!(balance(&worker, &c, av.id()).await?, num(&ha["balance"]), "pending coins already count in the balance");
     // anyone can claim for bob, once
     let got: u128 = ok(carol.call(&c, "claim_blast").args_json(json!({ "account_id": bv.id() })).gas(g60).transact().await?, "claim for bob").json::<String>()?.parse()?;

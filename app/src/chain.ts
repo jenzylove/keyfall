@@ -109,10 +109,27 @@ export interface Stats {
 export interface Holder {
   account: string; kind: Kind; balance: string; shield_bps: number; immune_until: string;
   under_raid: string | null; raids_left: number; boss_ready: boolean;
+  /** Arcade seasons only (practice season 5 on): bullets, shield charges, break, blast share. */
+  arcade?: ArcadeHolder | null;
 }
+export interface ArcadeHolder {
+  bullets: number; next_bullet_ms: string; shields: number; next_shield_ms: string; boss_next_ms: string;
+  on_break: boolean; break_since: string; blast_pending: string; blast_round: string | null; damage: string;
+  round: string; round_gain: string; round_loss: string; prev_gain: string; prev_loss: string;
+}
+export interface RoundEnd {
+  round: number; killer: string | null; pot: string; damage: string; hitters: number;
+  winner: string | null; winner_take: string; burned: string; respawn: string; recycled: string;
+}
+export interface Arena {
+  now_ms: string; round: string; round_started_ms: string; round_ends_ms: string; boss_hp: string; boss_spawn: string;
+  boss_stash: string; damage: string; hitters: string; reserve: string; kills: string; round_burned: string;
+  blast_escrow: string; last_round: RoundEnd | null;
+}
+export interface Blast { round: number; pot: string; damage: string; hitters: number; paid: string }
 export interface Raid {
   id: number; attacker: string; target: string; target_kind: Kind; stake: string; opened_at: number;
-  deadline: number; status: "open" | "defended" | "resolved"; take: string; burned: string;
+  deadline: number; status: "open" | "defended" | "resolved" | "blocked"; take: string; burned: string;
 }
 export interface FeedItem { n: string; at: string; kind: string; actor: string; target: string | null; amount: string; extra: string | null }
 export type Params = Record<string, string | number>;
@@ -174,6 +191,9 @@ export const getRaid = (raid_id: number | string) => view<Raid | null>("get_raid
 export const getOpenRaids = () => view<Raid[]>("open_raids", {});
 export const getFeed = (limit = 30) => view<FeedItem[]>("feed", { limit });
 export const getSeason = () => view<unknown>("season");
+export const getArena = () => view<Arena | null>("arena");
+export const getRounds = (limit = 10) => view<RoundEnd[]>("rounds", { limit });
+export const getBlast = (round: number | string) => view<Blast | null>("blast", { round: String(round) });
 export const quoteBuy = (yocto: string) => view<string | null>("quote_buy", { near: yocto });
 export const quoteSell = (amount: string) => view<string | null>("quote_sell", { amount });
 export const balanceOf = (account_id: string) => view<string>("ft_balance_of", { account_id });
@@ -683,6 +703,11 @@ export const raid = (target: string, stake: string) => send(needVault(), CONTRAC
 export const defend = (raidId: number | string) => send(needVault(), CONTRACT, [fc("defend", { raid_id: String(raidId) }, "0", 60)]);
 export const chargeShield = (amount: string) => send(needVault(), CONTRACT, [fc("charge_shield", { amount }, "0", 50)]);
 export const bossRaid = () => send(needVault(), CONTRACT, [fc("boss_raid", {}, "0", 50)]);
+// arcade seasons
+export const block = (raidId: number | string) => send(needVault(), CONTRACT, [fc("block", { raid_id: String(raidId) }, "0", 60)]);
+export const reload = () => send(needVault(), CONTRACT, [fc("reload", {}, "0", 60)]);
+export const buyShield = () => send(needVault(), CONTRACT, [fc("buy_shield", {}, "0", 60)]);
+export const setBreak = (on: boolean) => send(needVault(), CONTRACT, [fc("set_break", { on }, "0", 50)]);
 
 /** Permissionless cranks: anyone can call these; the app uses whichever key it has. */
 function anyKey() {

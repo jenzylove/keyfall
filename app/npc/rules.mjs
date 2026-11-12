@@ -20,6 +20,7 @@ export const STAKE_BALANCE_CAP_BPS = 2000n; // never stake more than 20% of the 
 export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC pays for its gas
 export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
 export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
+export const MAX_HUNTERS_ARCADE = 2; // arcade: at most 2 bots raid players per tick (steady pressure, never a pile on)
 export const MAX_BOSS_ARCADE = 1; // arcade: bot hits on Satoshi per tick (the blast pot is mostly for players)
 
 const QUBITS = Array.from({ length: 8 }, (_, i) => ({
@@ -159,12 +160,16 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
 
   const fresh = (id) => firstSeen[id] !== undefined && now - Number(firstSeen[id]) < GREET_DELAY_MS;
   const targets = holders.map(view).filter((t) => !fresh(t.account)); // nobody raids a holder in its first minutes
+  let onPlayers = 0;
   const launch = (att, t, why) => {
+    const player = !npcIds.has(t.account);
+    if (arcade && player && onPlayers >= MAX_HUNTERS_ARCADE) return false;
     const take = expectedTake(t, config);
     const stake = pickStake(take, att.balance, config);
     if (stake === null) return false;
     spent.add(att.account);
     targeted.add(t.account);
+    if (player) onPlayers++;
     push({ npc: npcName(att.account), action: "raid", target: t.account, stake: stake.toString(), reason: `${why} Staking ${fmt(stake)} coins for about ${fmt(take)}.` });
     return true;
   };

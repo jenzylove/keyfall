@@ -324,3 +324,12 @@ test("arcade: one bot hit on Satoshi a tick, any round", () => {
   const m = decide(base({ config: arcadeConfig, stats: { ...stats, epoch: "7" }, npcs: ns }));
   assert.equal(m.filter((x) => x.action === "boss").length, 1);
 });
+
+test("arcade: at most 2 bots raid players a tick", () => {
+  const bots = ["shor", "grover", "qubit-01", "qubit-02", "qubit-03"].map((n) => npc(n, { arcade: av() }));
+  const people = Array.from({ length: 6 }, (_, i) => holder(`p${i}.testnet`, { kind: i % 2 ? "vault" : "exposed" }));
+  const r = raids(decide(base({ config: arcadeConfig, npcs: bots, holders: people, random: () => 0.5 })));
+  assert.equal(r.filter((x) => !x.target.endsWith(C)).length, 2);
+  // off arcade the old caps apply
+  assert.ok(raids(decide(base({ npcs: bots, holders: people, random: () => 0.5 }))).length > 2);
+});
