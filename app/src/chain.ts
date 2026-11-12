@@ -50,7 +50,7 @@ export function switchNetwork(n: Network) {
 // to the next one when a node fails or rate limits. The app's own proxy
 // (/api/rpc) is the last resort, so the site never depends on one node.
 const PUBLIC_RPCS: Record<Network, string[]> = {
-  testnet: ["https://rpc.testnet.fastnear.com", "https://rpc.testnet.near.org", "https://test.rpc.fastnear.com"],
+  testnet: ["https://rpc.testnet.fastnear.com", "https://near-testnet.drpc.org", "https://test.rpc.fastnear.com", "https://rpc.testnet.near.org"],
   mainnet: ["https://rpc.mainnet.fastnear.com", "https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"],
 };
 const RPCS = [
@@ -648,19 +648,53 @@ function rawPq(signer: MlDsa65Signer): Uint8Array {
 
 /** Creates `<name>.<contract>`, born with only the ML-DSA-65 key. Paid by the
  * exposed wallet (0.3 NEAR funds the vault's own gas). */
+const LS_VAULT_PENDING = `${LS_VAULT}.pending`;
+
+/** Does this account carry the key of this vault signer? */
+async function vaultKeyLanded(accountId: string, signer: any): Promise<boolean> {
+  if (!(await accountExists(accountId).catch(() => false))) return false;
+  const keys = await keyList(accountId).catch(() => []);
+  const handle = String(publicKeyToHandle(signer.publicKey as any));
+  return keys.some((k) => k.public_key === signer.publicKey || k.public_key === handle);
+}
+
 export async function createVault(name: string, seed: Uint8Array, onSent?: () => void): Promise<TxResult & { accountId: string }> {
   const w = needWallet();
   const signer = signerFromSeed(seed);
-  const r = await send(w, CONTRACT, [fc("create_vault", { name, pq_public_key: bytesToBase64(rawPq(signer)) }, nearToYocto(0.3), 100)]);
-  onSent?.(); // the account tx is in; now the key shows up on it
   const accountId = `${name}.${CONTRACT}`;
-  // the tx returned executed (optimistic); the holder view usually answers at once, so poll fast and briefly
-  let seen = await getHolder(accountId).catch(() => null);
-  for (let i = 0; i < 40 && !seen; i++) { await new Promise((r) => setTimeout(r, 400)); seen = await getHolder(accountId).catch(() => null); }
-  if (!seen) throw new ChainError("The vault account was not created.", r.hash);
-  lsSet(LS_VAULT, { accountId, ...(await sealSeed(seed)), contract: CONTRACT } satisfies VaultRecord);
+  // Seal the key on this device BEFORE the vault exists: a slow network can never leave a vault nobody holds the key to.
+  const sealed = await sealSeed(seed);
+  lsSet(LS_VAULT_PENDING, { accountId, ...sealed, contract: CONTRACT } satisfies VaultRecord);
+  let r: TxResult = { hash: "" } as TxResult;
+  try {
+    r = await send(w, CONTRACT, [fc("create_vault", { name, pq_public_key: bytesToBase64(rawPq(signer)) }, nearToYocto(0.3), 100)]);
+  } catch (e) {
+    // The contract said no (name taken, not enough NEAR): nothing was made. Anything else may still have landed.
+    if (/E_[A-Z_]+|exists|not enough|Not enough/i.test(String((e as any)?.message || e))) { try { localStorage.removeItem(LS_VAULT_PENDING); } catch {} throw e; }
+  }
+  onSent?.(); // the account tx is in; now the key shows up on it
+  // Wait for the account and its quantum key, patiently: testnet nodes can take a while to answer.
+  let ok = await vaultKeyLanded(accountId, signer);
+  for (let i = 0; i < 45 && !ok; i++) { await new Promise((z) => setTimeout(z, 2000)); ok = await vaultKeyLanded(accountId, signer); }
+  if (!ok) throw new ChainError("The network is slow. Your vault key is saved on this device: reopen the game in a minute and it picks up where it left off.", r.hash);
+  lsSet(LS_VAULT, { accountId, ...sealed, contract: CONTRACT } satisfies VaultRecord);
+  try { localStorage.removeItem(LS_VAULT_PENDING); } catch {}
   vaultSigner = { accountId, signer };
   return { ...r, accountId };
+}
+
+/** A vault whose build was cut off by a slow network: if it landed on chain with our key, adopt it. */
+export async function resumePendingVault(): Promise<string | null> {
+  const p = lsGet<VaultRecord>(LS_VAULT_PENDING);
+  if (!p || p.contract !== CONTRACT || lsGet<VaultRecord>(LS_VAULT)) return null;
+  try {
+    const signer = signerFromSeed(await openSeed(p));
+    if (!(await vaultKeyLanded(p.accountId, signer))) return null;
+    lsSet(LS_VAULT, p);
+    localStorage.removeItem(LS_VAULT_PENDING);
+    vaultSigner = { accountId: p.accountId, signer };
+    return p.accountId;
+  } catch { return null; }
 }
 
 /** The recovery code of the vault sealed on this device, for the player's own

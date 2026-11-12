@@ -3153,6 +3153,14 @@ export function play(root: HTMLElement) {
   }
   if (!introDone) { introDone = true; sfx.duckMusic(true); coldOpen().then(() => sfx.duckMusic(false)); }
   tick(false);
+  // A vault build cut off by a slow network: if the vault landed with this device's key, carry on from there.
+  void chain.resumePendingVault().then((id) => {
+    if (!id || !alive) return;
+    setProg({ vault: id });
+    missionKey = "";
+    toast({ tone: "gold", title: "Your vault was built while the network was slow. Touch the gate to move your coins in." });
+    void refresh();
+  });
   // The bots run on their own heartbeat (a GitHub Actions loop every 30 s), so an open tab never polls the server.
   const npcBeat = 0;
 
