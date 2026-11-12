@@ -143,6 +143,8 @@ const I = {
 
 interface World {
   ok: boolean;
+  /** Arcade seasons: the shared Satoshi life bar and the last round. */
+  arena?: chain.Arena | null;
   stats: Stats | null;
   config: Params | null;
   wallet: Holder | null;
@@ -249,6 +251,7 @@ export function play(root: HTMLElement) {
     if (!arena.shootReady) return;
     // auto fire only blocks: it may shoot back at the raider charging your vault, never start a raid on its own
     if (auto && !(w.incoming && w.incoming.target === s.vault?.accountId && arena.lockId === w.incoming.attacker)) return;
+    if (auto && ARC()) return; // arcade: answering a raid is your choice (SHIELD or SHOOT BACK), never spent for you
     const open = (id: string) => arena.targets.has(id) && !w.myRaids.some((r) => r.status === "open" && r.target === id);
     const lock = arena.lockId;
     const mineOn = lock ? w.myRaids.find((r) => r.status === "open" && r.target === lock) : null;
@@ -260,6 +263,7 @@ export function play(root: HTMLElement) {
     }
     const left = w.vault?.raids_left || 0;
     const canDefend = !!w.incoming && w.incoming.target === s.vault?.accountId;
+    if (ARC() && left <= 0 && !canDefend) { if (auto) return; sfx.play("deny"); nudge(); openReload(); return; }
     if (left <= 0 && !canDefend && !arena.targets.has("satoshi")) { if (auto) return; sfx.play("deny"); nudge(); arena.say("me", `Out of raids · next round in ${clock(Number(w.stats!.epoch_ends_ms) - chainNow())} · blocking stays free`, 3200, true); return; }
     if (!arena.aimTarget()) {
       if (auto) return;
@@ -348,7 +352,7 @@ export function play(root: HTMLElement) {
   }
 
   let alive = true;
-  let w: World = { ok: false, stats: null, config: null, wallet: null, vault: null, walletBal: 0n, vaultBal: 0n, walletNear: null, vaultNear: null, holders: [], open: [], feed: [], myRaids: [], incoming: null, escape: null, sellQuote: null };
+  let w: World = { ok: false, stats: null, config: null, wallet: null, vault: null, walletBal: 0n, vaultBal: 0n, walletNear: null, vaultNear: null, holders: [], open: [], feed: [], myRaids: [], incoming: null, escape: null, sellQuote: null, arena: null };
   let loaded = false;
   let busy = ""; // a move in flight, by name
   let busyText = "";
@@ -389,6 +393,14 @@ export function play(root: HTMLElement) {
   const mine = () => [sess().wallet?.accountId, sess().vault?.accountId].filter(Boolean) as string[];
   const N = (a: string | null | undefined) => esc(nameOf(a, mine()));
   const c = () => w.config;
+  // arcade seasons (practice season 5 on): bullets, shield charges, a shared Satoshi life bar. Mainnet keeps the old rules and UI.
+  const ARC = () => !!(w.config as any)?.arcade;
+  const A = (k: string) => Number(((w.config as any)?.arcade || {})[k] || 0);
+  const AB = (k: string) => BigInt(((w.config as any)?.arcade || {})[k] || 0);
+  const av = () => (inVault() ? w.vault?.arcade || null : null);
+  const glowUntil = new Map<string, number>(); // fresh blast winners glow gold for a while
+  let dmgSnap = new Map<string, bigint>(); // damage on Satoshi by vault, this round (kept from the last load before a round ends)
+  let snapRound = "";
 
   // ---------------------------------------------------------------- data
 
@@ -427,6 +439,11 @@ export function play(root: HTMLElement) {
     const escape = escId ? (incoming && String(incoming.id) === escId ? incoming : await safe(chain.getRaid(escId))) : null;
     if (!stats) { w.ok = false; return; }
     syncClock(stats.now_ms);
+    const arenaV = (config as any)?.arcade ? await safe(chain.getArena()) : null;
+    if (arenaV && holders && (snapRound === "" || snapRound === arenaV.round)) {
+      // damage per vault this round; when the round has just ended we keep the snapshot from before it
+      dmgSnap = new Map(holders.filter((h) => h.arcade && BigInt(h.arcade.damage || "0") > 0n).map((h) => [h.account, BigInt(h.arcade!.damage)] as const));
+    }
     // mainnet only: what the bag would sell for right now, from the contract's own quote
     let sellQuote: bigint | null = null;
     {
@@ -445,6 +462,7 @@ export function play(root: HTMLElement) {
       incoming: incoming && incoming.status === "open" ? incoming : null,
       escape,
       sellQuote,
+      arena: arenaV ?? w.arena ?? null,
     };
     loaded = true;
   }
@@ -492,7 +510,7 @@ export function play(root: HTMLElement) {
       case "small": return "Too small to rob";
       case "down": return "Too small for you";
       case "frozen": return "Frozen";
-      default: return w.vault && w.vault.raids_left <= 0 && w.stats ? `Next round ${clock(Number(w.stats.epoch_ends_ms) - chainNow())}` : "";
+      default: return w.vault && w.vault.raids_left <= 0 && w.stats ? (ARC() ? "Clip empty · RELOAD" : `Next round ${clock(Number(w.stats.epoch_ends_ms) - chainNow())}`) : "";
     }
   }
   /** Satoshi's line as you come close: why you cannot hit him yet, or that you can. */
@@ -500,12 +518,14 @@ export function play(root: HTMLElement) {
     const v = w.vault, st = w.stats;
     if (!inVault() || !v || !st) return "Get gold first";
     if (w.vaultBal < PB(c(), "boss_min_balance")) return `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins`;
+    if (!v.boss_ready && ARC()) return (v.arcade?.bullets ?? 0) <= 0 ? "reload to shoot him" : `next hit in ${clock(Number(v.arcade?.boss_next_ms || 0) - chainNow())}`;
     if (!v.boss_ready) return `next hit in ${clock(Number(st.epoch_ends_ms) - chainNow())}`;
     return "SHOOT HIM";
   }
   /** What a boss hit takes right now: boss_bps of his stash, capped by boss_cap (the contract's rule). */
   function bossHitNow(): bigint {
     const st = w.stats; if (!st) return 0n;
+    if (ARC() && w.arena) return minB(bps(BigInt(w.arena.boss_spawn), P(c(), "boss_bps")), BigInt(w.arena.boss_hp)); // damage to his shared life bar
     return minB(bps(BigInt(st.satoshi_tokens), P(c(), "boss_bps")), PB(c(), "boss_cap"));
   }
 
@@ -883,8 +903,8 @@ export function play(root: HTMLElement) {
     3: { title: "Get to the gold door.", text: "It makes a new account locked by a quantum safe key, made on your phone." },
     4: { title: "You are gold now. Safe.", text: "Every move you make now is signed with that quantum key. Red bags leak coins to you every round.", tap: true },
     5: { title: "Rob a red bag.", text: TOUCH ? "The marked player is locked on. Get close and tap SHOOT." : "The marked player is locked on. Get close and press SHOOT or Space." },
-    6: { title: "Now they hunt you too.", text: "When a raider comes for your vault you lock onto it and shoot back on your own: blocking wins its stake. Raids always wait for your SHOOT tap. A SHIELD makes their raids take less, DASH gets you away. Red mines zap you for a second. Hold the map to look around.", tap: true },
-    7: { title: "Your goal:", text: "Be the richest vault when Q-Day hits. Red bags freeze forever that day. Satoshi is the boss: every round each vault can shoot his stash once.", tap: true },
+    6: { title: "Now they hunt you too.", get text() { return ARC() ? "When a raider shoots at your vault you pick: SHIELD spends a charge and the raid fails, SHOOT BACK spends a bullet and hits them. Either way their stake is yours. DASH gets you away. Red mines zap you for a second. Hold the map to look around." : "When a raider comes for your vault you lock onto it and shoot back on your own: blocking wins its stake. Raids always wait for your SHOOT tap. A SHIELD makes their raids take less, DASH gets you away. Red mines zap you for a second. Hold the map to look around."; }, tap: true },
+    7: { title: "Your goal:", get text() { return ARC() ? "Be the richest vault when Q-Day hits. Red bags freeze forever that day. Satoshi is the boss everyone shares: each hit is a bullet. When his life bar empties he blasts and his stash is split by damage." : "Be the richest vault when Q-Day hits. Red bags freeze forever that day. Satoshi is the boss: every round each vault can shoot his stash once."; }, tap: true },
   };
 
   /** The nearest real body you can raid right now, or null. */
@@ -983,7 +1003,9 @@ export function play(root: HTMLElement) {
     guideEl.classList.toggle("low", gstep === 7); // room for the arrow under the goal bar
     const tone = gstep === 2 || gstep === 5 ? "red" : gstep === 1 || gstep === 6 ? "cyan" : "gold";
     const shots = w.vault?.raids_left ?? 0;
-    const ammo = ` You have ${shots} raid${shots === 1 ? "" : "s"} this round. Blocking a raid on you and shooting Satoshi's stash never use one.`;
+    const ammo = ARC()
+      ? ` You have ${shots} bullet${shots === 1 ? "" : "s"}. One comes back free every minute; RELOAD fills the clip.`
+      : ` You have ${shots} raid${shots === 1 ? "" : "s"} this round. Blocking a raid on you and shooting Satoshi's stash never use one.`;
     const stakeN = gstep === 5 && variant === "body" && gTarget ? stakeFor(gTarget) : 0n;
     const stakeLine = stakeN > 0n ? ` Each raid stakes about ${short(stakeN)} coins. You get them back if it lands.` : "";
     const text = gstep === 5
@@ -1127,7 +1149,7 @@ export function play(root: HTMLElement) {
       const won = BigInt(r.stake) - bps(BigInt(r.stake), P(c(), "raid_burn_bps"));
       recentDefend = { who: r.attacker, at: Date.now() };
       setTimeout(() => { fx.pop(field, `+${full(won)}`, "gold", arena.screenOf("me") || undefined); payoff(won, r.attacker); }, 500);
-      fx.banner(field, "BLOCKED", `${nameOf(r.attacker, mine())}'s stake is yours · blocking never costs a raid`, "gold");
+      fx.banner(field, ARC() ? "SHOT BACK" : "BLOCKED", ARC() ? `${nameOf(r.attacker, mine())}'s stake is yours` : `${nameOf(r.attacker, mine())}'s stake is yours · blocking never costs a raid`, "gold");
       arena.say(r.attacker, line(r.attacker, "defended"));
       earn("wall");
     }, undefined, () => { const f = w.feed.find((x) => x.kind === "defend" && x.actor === myId() && x.target === r.attacker && Number(x.n) > feedTop0); return f ? { value: f.amount } : null; });
@@ -1163,8 +1185,28 @@ export function play(root: HTMLElement) {
     if (busy) return { ok: false, why: "Signing the last move…" };
     const enough = w.vaultBal >= PB(c(), "boss_min_balance");
     if (!enough) { sfx.play("deny"); return { ok: false, why: `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins` }; }
+    if (!v.boss_ready && ARC()) { sfx.play("deny"); if ((v.arcade?.bullets ?? 0) <= 0) { openReload(); return { ok: false, why: "Clip empty" }; } return { ok: false, why: `Next hit in ${span(Number(v.arcade?.boss_next_ms || 0) - chainNow())}` }; }
     if (!v.boss_ready) { sfx.play("deny"); return { ok: false, why: `Ready in ${span(Number(st.epoch_ends_ms) - chainNow())}` }; }
     const feedTop = w.feed.reduce((m, f) => Math.max(m, Number(f.n)), -1);
+    if (ARC()) {
+      // a hit is damage on his shared life bar; the coins come when he blasts, shared by damage
+      void act("boss", "", () => chain.bossRaid(), (val) => {
+        guideBossHit = true;
+        const dealt = BigInt(String(val ?? "0"));
+        arena.shake(); fx.freeze(game, 120); sfx.play("thud"); sfx.vibrate([90, 30, 50]);
+        arena.burst("satoshi", "#ff3d2e", 14);
+        arena.badge("satoshi", `−${short(dealt)} LIFE`, "#ff3d2e", 2400);
+        const mineD = (dmgSnap.get(myId()) || 0n) + dealt;
+        dmgSnap.set(myId(), mineD);
+        const a = w.arena;
+        const share = a && BigInt(a.damage) + dealt > 0n ? (bps(BigInt(a.boss_stash), 10000 - P(c(), "boss_burn_bps")) * mineD) / (BigInt(a.damage) + dealt) : 0n;
+        toast({ tone: "gold", who: "satoshi", title: `Hit: −${full(dealt)} life. Your share if he blasts now: about +${full(share)}.` });
+        arena.say("satoshi", line("satoshi", "hit", String(Math.random())));
+        earn("slayer");
+      }, (why) => { arena.badge("satoshi", "MISSED", "#8b90a3", 1600, false); arena.say("satoshi", why, 4200, true); },
+      () => { const f = w.feed.find((x) => x.kind === "boss" && x.actor === myId() && Number(x.n) > feedTop); return f ? { value: f.amount } : null; });
+      return { ok: true };
+    }
     void act("boss", "", () => chain.bossRaid(), (val) => {
       guideBossHit = true;
       const kept = BigInt(String(val ?? "0"));
@@ -1292,7 +1334,16 @@ export function play(root: HTMLElement) {
     root.querySelector<HTMLElement>(".rdot")!.hidden = !(s.vault && prog().backedUp !== s.vault.accountId);
     // shots left this epoch (your raids left): bullets by your bag, words when none are left
     const pips = root.querySelector<HTMLElement>("#h-pips")!;
-    if (inVault() && w.vault) {
+    if (inVault() && w.vault && ARC() && w.vault.arcade) {
+      const a = w.vault.arcade, clip = A("clip_size"), smax = A("shield_max");
+      const nb = Number(a.next_bullet_ms) > 0 ? `<small data-until="${a.next_bullet_ms}">${clock(Number(a.next_bullet_ms) - chainNow())}</small>` : "";
+      const html = `<span class="pp-row b">${Array.from({ length: clip }, (_, i) => `<i class="${i < a.bullets ? "on" : ""}"></i>`).join("")}${a.bullets <= 0 ? `<em>RELOAD</em>` : ""}${nb}</span>`
+        + `<span class="pp-row s">${Array.from({ length: smax }, (_, i) => `<i class="${i < a.shields ? "on" : ""}"></i>`).join("")}</span>`;
+      pips.hidden = false; roundChip.hidden = true;
+      pips.classList.add("arc");
+      pips.setAttribute("aria-label", `${a.bullets} of ${clip} bullets, ${a.shields} of ${smax} shield charges. Tap to reload`);
+      if (pips.dataset.k !== html.replace(/<small[^>]*>[^<]*<\/small>/, "")) { pips.dataset.k = html.replace(/<small[^>]*>[^<]*<\/small>/, ""); pips.innerHTML = html; }
+    } else if (inVault() && w.vault) {
       const max = P(c(), "max_raids_per_epoch"), left = w.vault.raids_left;
       // (the next harvest is shown in the goal bar)
       const harv = ""; // the next harvest lives in the goal bar and the YOUR BAG sheet; the HUD cell is too narrow for it
@@ -1375,8 +1426,15 @@ export function play(root: HTMLElement) {
       if (s.vault && w.walletBal > 0n) rows.push(["Still exposed", `<span class="red">${full(w.walletBal)}</span>`]);
       if (v) {
         rows.push(["Shield", v.shield_bps ? `${pct(v.shield_bps)}` : "None"]);
-        rows.push(["Raids left", `${v.raids_left} of ${P(c(), "max_raids_per_epoch")}`]);
-        rows.push(["Satoshi", v.boss_ready ? `<span class="yel">Ready</span>` : `in <span data-until="${st.epoch_ends_ms}">${span(Number(st.epoch_ends_ms) - chainNow())}</span>`]);
+        if (ARC() && v.arcade) {
+          const a = v.arcade;
+          rows.push(["Bullets", `${a.bullets} of ${A("clip_size")}${Number(a.next_bullet_ms) ? ` · next <span data-until="${a.next_bullet_ms}">${span(Number(a.next_bullet_ms) - chainNow())}</span>` : ""}`]);
+          rows.push(["Shield charges", `${a.shields} of ${A("shield_max")}`]);
+          rows.push(["Satoshi", v.boss_ready ? `<span class="yel">Ready</span>` : a.bullets <= 0 ? "Reload to shoot" : `in <span data-until="${a.boss_next_ms}">${span(Number(a.boss_next_ms) - chainNow())}</span>`]);
+        } else {
+          rows.push(["Raids left", `${v.raids_left} of ${P(c(), "max_raids_per_epoch")}`]);
+          rows.push(["Satoshi", v.boss_ready ? `<span class="yel">Ready</span>` : `in <span data-until="${st.epoch_ends_ms}">${span(Number(st.epoch_ends_ms) - chainNow())}</span>`]);
+        }
       }
       const nearV = inVault() ? w.vaultNear : w.walletNear;
       if (nearV !== null) rows.push([`${NET_LABEL} NEAR`, chain.fmtNear(nearV, 2)]);
@@ -1408,19 +1466,24 @@ export function play(root: HTMLElement) {
     }
     const epochMs = P(c(), "epoch_ms") || 1;
     const leftMs = st ? Number(st.epoch_ends_ms) - chainNow() : 0;
-    set("shield", v.shield_bps ? `${pct(v.shield_bps)} · ${clock(leftMs)}` : "None", over, v.shield_bps ? leftMs / epochMs : 0, false);
+    if (ARC() && v.arcade) {
+      const a = v.arcade, smax = A("shield_max") || 1;
+      set("shield", `${a.shields}/${smax}${a.shields < smax && Number(a.next_shield_ms) ? ` · ${hudClock(Number(a.next_shield_ms) - chainNow())}` : ""}`, over, a.shields / smax, false);
+    } else set("shield", v.shield_bps ? `${pct(v.shield_bps)} · ${clock(leftMs)}` : "None", over, v.shield_bps ? leftMs / epochMs : 0, false);
     set("market", "Buy · sell", false);
     const left = v.raids_left;
     // the button always says what a press will do: SIGNING… while a move is out, the round clock when you are out of shots
     const roundIn = st ? `<b data-until="${st.epoch_ends_ms}">${clock(Number(st.epoch_ends_ms) - chainNow())}</b>` : "";
     const canBlock = !!w.incoming && w.incoming.target === sess().vault?.accountId;
     const boss = arena.targets.has("satoshi");
-    const status = over ? "Over" : busy && busyText ? "SIGNING…" : left > 0 ? `${left} raid${left === 1 ? "" : "s"}` : canBlock ? "Block · free" : boss ? "Satoshi ready" : `Next round ${roundIn}`;
-    const dead = !busy && left <= 0 && !canBlock && !boss; // nothing a press could do: dim, the clock still reads
+    const arc = ARC();
+    const status = over ? "Over" : busy && busyText ? "SIGNING…" : arc ? (canBlock ? "Shield or shoot" : left > 0 ? `${left} bullet${left === 1 ? "" : "s"}` : "Reload") : left > 0 ? `${left} raid${left === 1 ? "" : "s"}` : canBlock ? "Block · free" : boss ? "Satoshi ready" : `Next round ${roundIn}`;
+    const dead = !arc && !busy && left <= 0 && !canBlock && !boss; // nothing a press could do: dim, the clock still reads (arcade: a press reloads)
     set("shoot", status, over || dead, 0, (left > 0 || canBlock || boss) && !busy);
     shootBtn.classList.toggle("signing", !!busy && !!busyText && !over);
     shootBtn.classList.toggle("sending", !!busy && !busyText && !over);
-    shootBtn.classList.toggle("empty", !busy && left <= 0 && !canBlock && !boss);
+    shootBtn.classList.toggle("empty", !arc && !busy && left <= 0 && !canBlock && !boss);
+    shootBtn.classList.toggle("reload", arc && !busy && left <= 0 && !canBlock);
   }
 
   root.querySelector("#actions")!.addEventListener("click", (e) => {
@@ -1432,10 +1495,11 @@ export function play(root: HTMLElement) {
       toast({ tone: "ink", title: s.wallet || s.vault ? "Vaults only. Get gold first." : "Grab a free bag first." });
       return;
     }
-    if (k === "shield") openShield();
+    if (k === "shield") (ARC() ? openShieldArc() : openShield());
     if (k === "market") openMarket();
   });
   root.querySelector("#h-menu")!.addEventListener("click", () => openSettings());
+  root.querySelector("#h-pips")!.addEventListener("click", (e) => { if (ARC() && inVault()) { e.stopPropagation(); openReload(); } });
   root.querySelector(".hud-cell.bag")!.addEventListener("click", () => { if (sess().wallet || sess().vault) openBag(); });
   root.querySelector("#h-net")!.addEventListener("click", () => openNetwork());
 
@@ -1869,6 +1933,7 @@ export function play(root: HTMLElement) {
         svg: avatar(h.account),
         focus, showBag: tied || (inVault() && b.state === "open"), // what you can rob shows what it holds
         hint: hintFor(h, b.state),
+        glow: ARC() && ((glowUntil.get(h.account) || 0) > Date.now() || BigInt(h.arcade?.blast_pending || "0") > 0n),
       };
     });
     arena.setBodies(bodies);
@@ -1891,6 +1956,7 @@ export function play(root: HTMLElement) {
       kind, bag: kind === "none" ? "" : short(myBag()), balance: whole(myBag()), shieldBps: inVault() ? w.vault?.shield_bps || 0 : 0,
       raidsLeft: w.vault?.raids_left || 0, maxRaids: P(c(), "max_raids_per_epoch"),
       inFlight: busy && busy !== "grab" ? busyText : "", signing: !!busy && busy !== "grab" && !busyText, svg: avatar(idForArt),
+      glow: ARC() && inVault() && ((glowUntil.get(myId()) || 0) > Date.now() || BigInt(w.vault?.arcade?.blast_pending || "0") > 0n),
     });
     const st = w.stats;
     const supply = PB(c(), "satoshi_supply");
@@ -1899,14 +1965,20 @@ export function play(root: HTMLElement) {
       boss: {
         visible: inVault() || arena.bossDist < 420, hint: kind !== "none" && arena.bossDist < 520, line: bossLine(),
         ready: bossReadyForMe(),
-        hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1,
-        hpText: st ? `${short(st.satoshi_tokens)} / ${short(supply)}` : "",
-        badge: `SHOOT HIM · +${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}`,
+        ...(ARC() && w.arena ? {
+          hp: BigInt(w.arena.boss_spawn) > 0n ? Number((BigInt(w.arena.boss_hp) * 10000n) / BigInt(w.arena.boss_spawn)) / 10000 : 1,
+          hpText: `${short(w.arena.boss_hp)} / ${short(w.arena.boss_spawn)}`,
+          badge: `SHOOT HIM · −${short(bossHitNow())} LIFE`,
+        } : {
+          hp: st && supply > 0n ? Number((BigInt(st.satoshi_tokens) * 10000n) / supply) / 10000 : 1,
+          hpText: st ? `${short(st.satoshi_tokens)} / ${short(supply)}` : "",
+          badge: `SHOOT HIM · +${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}`,
+        }),
       },
     });
     // the boss is ready for you: say so once per round
     arena.bossArrow = !guideOn() && kind === "vault" && bossReadyForMe() && !w.incoming && (w.vault?.raids_left ?? 0) <= 0;
-    const bossKey = bossReadyForMe() ? `${st?.epoch}` : "";
+    const bossKey = bossReadyForMe() && !ARC() ? `${st?.epoch}` : ""; // arcade: his hit comes back every 20 s; the life bar says it, no toast
     if (bossKey && bossKey !== prevBossKey) toast({ tone: "hot", who: "satoshi", title: `Satoshi is ready for you: shoot his stash for about +${full(bossHitNow() - bps(bossHitNow(), P(c(), "boss_burn_bps")))}.` });
     prevBossKey = bossKey;
     guideTick();
@@ -2004,7 +2076,7 @@ export function play(root: HTMLElement) {
           arena.say(f.actor, line(f.actor, "escaped"));
           earn("escape");
         }
-      } else if (f.kind === "defend" && me.includes(f.target || "")) {
+      } else if ((f.kind === "defend" || f.kind === "block") && me.includes(f.target || "")) {
         // they blocked your raid: a counter shot comes back at you, BLOCKED on them, your stake pops red at you
         const r = w.myRaids.find((x) => x.target === f.actor && (x.status === "defended" || x.status === "open"));
         const lost = r ? full(r.stake) : amt;
@@ -2013,7 +2085,7 @@ export function play(root: HTMLElement) {
         arena.badge(f.actor, "BLOCKED", "#ff3d2e", 2200);
         setTimeout(() => { fx.pop(field, `−${lost}`, "red", at("me"), "big"); sfx.play("deny"); }, 650);
         arena.say(f.actor, line(f.actor, "defends"));
-      } else if (f.kind === "defend" && me.includes(f.actor)) {
+      } else if ((f.kind === "defend" || f.kind === "block") && me.includes(f.actor)) {
         if (recentDefend.who && recentDefend.who === f.target && Date.now() - recentDefend.at < 60_000) { recentDefend = { who: "", at: 0 }; continue; } // the shot already paid this out
         if (f.target) arena.fly(f.target, "me", "#ffd60a", 10);
         const got = BigInt(f.amount), from = f.target || null;
@@ -2066,7 +2138,12 @@ export function play(root: HTMLElement) {
         return BigInt(f.amount) > 0n ? `${who} on ${O(f.target)} took ${amt}` : `${who} on ${O(f.target)} took nothing`;
       }
       case "shield": return `${W(f.actor)} burned ${amt} for a ${pct(Number(f.extra || 0))} shield`;
-      case "boss": return `${W(f.actor)} shot Satoshi's stash for ${amt}`;
+      case "boss": return f.extra === "hit" ? `${W(f.actor)} hit Satoshi for ${amt} life` : `${W(f.actor)} shot Satoshi's stash for ${amt}`;
+      case "block": return `${W(f.actor)} blocked ${O(f.target)} with a shield charge and won ${amt}`;
+      case "reload": return `${W(f.actor)} burned ${amt} to reload`;
+      case "blast": return `Satoshi blasted: ${amt} shared by damage · ${W(f.actor)} landed the last hit`;
+      case "round": return `Round ${esc(f.extra || "")} ended: Satoshi survived`;
+      case "break": return f.extra === "on" ? `${W(f.actor)} took a break` : `${W(f.actor)} is back`;
       default: return `${W(f.actor)} made a move`;
     }
   }
@@ -2143,7 +2220,8 @@ export function play(root: HTMLElement) {
 
   function updateSheet() {
     if (!sheet || sheet.closed || currentSheet() !== sheet) return;
-    if (sheetKind === "shield") updateShield();
+    if (sheetKind === "shield") (ARC() ? updateShieldArc() : updateShield());
+    if (sheetKind === "reload") updateReload();
     if (sheetKind === "bag") updateBag();
     if (sheetKind === "satoshi") updateSatoshi();
     if (sheetKind === "under") updateUnderRaid();
@@ -2191,6 +2269,13 @@ export function play(root: HTMLElement) {
     if (closed) {
       act2.innerHTML = `<p class="s-text">Time is up. The raid settles in a moment.</p><button class="btn wide ghost" id="ur-go">Settle it now</button>`;
       move(act2.querySelector("#ur-go")!, out, () => chain.resolve(r.id), (v) => `Settled. The raid took ${full(String(v ?? "0"))}.`, "resolve");
+    } else if (!exposed && ARC()) {
+      const a = av();
+      act2.innerHTML = `<p class="s-text">Answer it: a shield charge makes the raid fail, or shoot back with a bullet. Either way their stake of ${full(r.stake)} is yours, less a ${pct(P(c(), "raid_burn_bps"))} burn.</p><button class="btn wide" id="ur-sh">Shield · ${a?.shields ?? 0} left</button><button class="btn wide hot" id="ur-sb">Shoot back · ${a?.bullets ?? 0} bullets</button>`;
+      act2.querySelector<HTMLButtonElement>("#ur-sh")!.onclick = () => { sheet?.close(); blockRaid(r, (a?.shields ?? 0) <= 0); };
+      const sb = act2.querySelector<HTMLButtonElement>("#ur-sb")!;
+      sb.disabled = (a?.bullets ?? 0) <= 0;
+      sb.onclick = () => { sheet?.close(); defendByShot(r); };
     } else if (!exposed) {
       act2.innerHTML = `<p class="s-text">Shoot the raider in the arena, or defend from here: their stake of ${full(r.stake)} is yours, less a ${pct(P(c(), "raid_burn_bps"))} burn.</p><button class="btn wide" id="ur-go">Defend</button><button type="button" class="btn ghost wide small" id="ur-share">${I.share} Call for backup</button>`;
       act2.querySelector<HTMLButtonElement>("#ur-share")!.onclick = () => shareRaid(r);
@@ -2214,7 +2299,7 @@ export function play(root: HTMLElement) {
       <h2 class="s-title">Your bag</h2>
       <div class="bag-grid" id="bag-grid"></div>
       <div class="set-block"><div class="set-h"><b>Your keys</b></div><div id="bag-keys" class="keys-list"></div></div>
-      <p class="s-text dim">Red bags leak to vaults every round and freeze at Q-Day. The coin is your score, your ammo (stakes) and your armour (shields).</p>`, "gold");
+      <p class="s-text dim">Red bags leak to vaults every round and freeze at Q-Day. ${ARC() ? `The coin is your score, your ammo (a reload burns ${full(AB("reload_price"))}) and your armour (a shield charge burns ${full(AB("shield_price"))}).` : "The coin is your score, your ammo (stakes) and your armour (shields)."}</p>`, "gold");
     updateBag();
   }
   function updateBag() {
@@ -2293,6 +2378,253 @@ export function play(root: HTMLElement) {
     }
   }
 
+
+  // ================================================================ arcade seasons (practice season 5 on)
+  // Bullets and shield charges, the SHIELD or SHOOT BACK prompt, the reload popup, Satoshi's shared life
+  // bar, the blast and round recap, a break from the bots and what happened while you were away.
+
+  let promptEl: HTMLElement | null = null;
+  let promptKey = "";
+  const breakChip = document.createElement("button");
+  breakChip.type = "button"; breakChip.className = "break-chip"; breakChip.hidden = true;
+  breakChip.onclick = () => toggleBreak();
+  field.appendChild(breakChip);
+  let seenRound: string | null = null;
+  let awayChecked = false;
+  let awaySaveT = 0;
+  const AWAY_KEY = () => `kf-away:${chain.CONTRACT}`;
+  const AWAY_AFTER_MS = 5 * 60_000;
+
+  function arcadeTick() {
+    if (!ARC() || !w.ok) { promptEl?.remove(); promptEl = null; breakChip.hidden = true; return; }
+    renderPrompt();
+    renderBreak();
+    roundWatch();
+    awayWatch();
+  }
+
+  /** A raid on your vault: answer it your way. SHIELD spends a charge (the raid fails), SHOOT BACK spends a bullet. */
+  function renderPrompt() {
+    const r = w.incoming, me = sess().vault?.accountId;
+    const live = !!r && !!me && r.target === me && r.status === "open" && r.deadline > chainNow() && inVault() && !busy;
+    if (!live) { promptEl?.remove(); promptEl = null; promptKey = ""; return; }
+    const a = av();
+    const sh = a?.shields ?? 0, bl = a?.bullets ?? 0;
+    const won = BigInt(r!.stake) - bps(BigInt(r!.stake), P(c(), "raid_burn_bps"));
+    const key = `${r!.id}:${sh}:${bl}`;
+    if (key === promptKey && promptEl) return;
+    const fresh = !promptKey.startsWith(`${r!.id}:`);
+    promptKey = key;
+    if (!promptEl) { promptEl = document.createElement("div"); promptEl.className = "arc-prompt"; promptEl.setAttribute("role", "alertdialog"); field.appendChild(promptEl); }
+    promptEl.innerHTML = `<p class="ap-t"><span class="av">${avatar(r!.attacker)}</span><span><b>${N(r!.attacker)}</b> is shooting at you · <b class="red" data-until="${r!.deadline}">${clock(r!.deadline - chainNow())}</b><small>Answer and their ${full(won)} stake is yours.</small></span></p>
+      <div class="ap-b">
+        <button type="button" class="ap-btn sh"${sh <= 0 && w.vaultBal < AB("shield_price") ? " disabled" : ""}><b>SHIELD</b><small>${sh > 0 ? `${sh} charge${sh === 1 ? "" : "s"} left` : `buy one · ${short(AB("shield_price"))}`}</small></button>
+        <button type="button" class="ap-btn sb"${bl <= 0 ? " disabled" : ""}><b>SHOOT BACK</b><small>${bl > 0 ? `${bl} bullet${bl === 1 ? "" : "s"} left` : "no bullets"}</small></button>
+      </div>`;
+    promptEl.querySelector<HTMLButtonElement>(".sh")!.onclick = () => { const x = w.incoming; if (x) blockRaid(x, sh <= 0); };
+    promptEl.querySelector<HTMLButtonElement>(".sb")!.onclick = () => { const x = w.incoming; if (x) { arena.fly("me", x.attacker, "#27f0ff", 8); defendByShot(x); } };
+    if (fresh) { sfx.play("alarm"); sfx.vibrate([60, 40, 60]); }
+  }
+
+  async function blockRaid(r: Raid, buyFirst = false) {
+    if (busy) return;
+    sfx.play("blip");
+    const feedTop0 = w.feed.reduce((m, f) => Math.max(m, Number(f.n)), -1);
+    await act("block", "", () => (buyFirst ? chain.buyShield().then(() => chain.block(r.id)) : chain.block(r.id)), () => {
+      sfx.play("clang"); sfx.vibrate([40, 30, 40]);
+      arena.burst("me", "#27f0ff", 18);
+      arena.badge(r.attacker, "SHIELDED", "#27f0ff", 2000);
+      arena.fly(r.attacker, "me", "#ffd60a", 12);
+      const won = BigInt(r.stake) - bps(BigInt(r.stake), P(c(), "raid_burn_bps"));
+      recentDefend = { who: r.attacker, at: Date.now() };
+      setTimeout(() => { fx.pop(field, `+${full(won)}`, "gold", arena.screenOf("me") || undefined); payoff(won, r.attacker); }, 500);
+      fx.banner(field, "SHIELDED", `the raid failed · ${nameOf(r.attacker, mine())}'s stake is yours`, "cyan");
+      arena.say(r.attacker, line(r.attacker, "defended"));
+      earn("wall");
+    }, undefined, () => { const f = w.feed.find((x) => x.kind === "block" && x.actor === myId() && Number(x.n) > feedTop0); return f ? { value: f.amount } : null; });
+  }
+
+  function openReload() {
+    const a = av();
+    if (!a) return;
+    const clip = A("clip_size"), price = AB("reload_price");
+    show("reload", "", "Reload", `
+      <div class="who"><span class="av big icon gold">${I.shoot}</span><div><h2 class="s-title">${a.bullets <= 0 ? "Clip empty" : `${a.bullets} of ${clip} bullets`}</h2><p class="who-sub" id="rl-next"></p></div></div>
+      <div class="rl-pips">${Array.from({ length: clip }, (_, i) => `<i class="${i < a.bullets ? "on" : ""}"></i>`).join("")}</div>
+      <p class="s-text">Reload now: burn <b class="yel">${full(price)}</b> coins and your clip is back to <b>${clip}</b> bullets. The burn leaves the supply for good.</p>
+      <p class="s-text dim">Or keep playing: one bullet comes back free every ${every(A("bullet_regen_ms"))}. Shield charges block raids without a bullet.</p>
+      <button class="btn wide hot" id="rl-go">Reload · ${short(price)}</button>
+      <button class="btn wide ghost" id="rl-no">Keep playing</button>
+      <p class="s-msg" id="rl-msg" role="status"></p>`, "gold");
+    const B = sheet!.body;
+    B.querySelector<HTMLButtonElement>("#rl-no")!.onclick = () => sheet?.close();
+    move(B.querySelector("#rl-go")!, B.querySelector("#rl-msg")!, () => chain.reload(), () => `Reloaded: ${clip} bullets.`, "reload", () => { sfx.play("powerup"); sfx.vibrate([20, 30, 20]); arena.burst("me", "#ffd60a", 12); setTimeout(() => sheet?.close(), 700); });
+    updateReload();
+  }
+  function updateReload() {
+    const B = sheet!.body, a = av();
+    if (!a || !B.isConnected) return;
+    const nx = B.querySelector<HTMLElement>("#rl-next");
+    if (nx) nx.innerHTML = Number(a.next_bullet_ms) > 0 ? `Next free bullet in <b data-until="${a.next_bullet_ms}">${span(Number(a.next_bullet_ms) - chainNow())}</b>` : "Clip full";
+    const go = B.querySelector<HTMLButtonElement>("#rl-go");
+    if (go && !go.classList.contains("busy")) {
+      const full_ = a.bullets >= A("clip_size"), poor = w.vaultBal < AB("reload_price");
+      go.disabled = full_ || poor;
+      go.textContent = full_ ? "Clip is full" : poor ? `Needs ${short(AB("reload_price"))} coins` : `Reload · ${short(AB("reload_price"))}`;
+    }
+  }
+
+  function openShieldArc() {
+    const a = av();
+    if (!a) return;
+    const smax = A("shield_max"), price = AB("shield_price");
+    show("shield", "", "Shield", `
+      <div class="who"><span class="av big icon gold">${I.shield}</span><div><h2 class="s-title">Shield charges</h2><p class="who-sub" id="sa-next"></p></div></div>
+      <div class="rl-pips sh" id="sa-pips"></div>
+      <p class="s-text">When someone shoots at you, a charge blocks it: the raid fails and their stake is yours, less a ${pct(P(c(), "raid_burn_bps"))} burn. Blocking never spends a bullet.</p>
+      <p class="s-text dim">One charge comes back free every ${every(A("shield_regen_ms"))}, up to ${smax}. A charge costs ${full(price)}, far less than a reload, so save your bullets for Satoshi.</p>
+      <button class="btn wide" id="sa-go">Buy a charge · ${short(price)}</button>
+      <p class="s-msg" id="sa-msg" role="status"></p>`, "gold");
+    const B = sheet!.body;
+    move(B.querySelector("#sa-go")!, B.querySelector("#sa-msg")!, () => chain.buyShield(), (v) => `Shield charges: ${Number(v ?? 0)} of ${smax}.`, "shield", () => { sfx.vibrate(40); earn("shield"); });
+    updateShieldArc();
+  }
+  function updateShieldArc() {
+    const B = sheet!.body, a = av();
+    if (!a || !B.isConnected) return;
+    const smax = A("shield_max");
+    const pp = B.querySelector<HTMLElement>("#sa-pips");
+    if (pp) pp.innerHTML = Array.from({ length: smax }, (_, i) => `<i class="${i < a.shields ? "on" : ""}"></i>`).join("");
+    const nx = B.querySelector<HTMLElement>("#sa-next");
+    if (nx) nx.innerHTML = `${a.shields} of ${smax}${a.shields < smax && Number(a.next_shield_ms) ? ` · next free in <b data-until="${a.next_shield_ms}">${span(Number(a.next_shield_ms) - chainNow())}</b>` : ""}`;
+    const go = B.querySelector<HTMLButtonElement>("#sa-go");
+    if (go && !go.classList.contains("busy")) {
+      const fullS = a.shields >= smax, poor = w.vaultBal < AB("shield_price");
+      go.disabled = fullS || poor;
+      go.textContent = fullS ? "Charges full" : poor ? `Needs ${short(AB("shield_price"))} coins` : `Buy a charge · ${short(AB("shield_price"))}`;
+    }
+  }
+
+  // ----- the round: Satoshi blasts (or survives), then a recap
+
+  function roundWatch() {
+    const lr = w.arena?.last_round || null;
+    const key = lr ? String(lr.round) : "none";
+    if (seenRound === null) seenRound = key;
+    else if (key !== seenRound) { seenRound = key; if (lr) roundEnded(lr); }
+    snapRound = w.arena?.round ?? snapRound;
+  }
+
+  function roundEnded(lr: chain.RoundEnd) {
+    const me = myId();
+    const pot = BigInt(lr.pot), dmg = BigInt(lr.damage);
+    const hitters = [...dmgSnap.entries()].filter(([, d]) => d > 0n).sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0));
+    const myD = dmgSnap.get(me) || 0n;
+    const myShare = dmg > 0n ? (pot * myD) / dmg : 0n;
+    const rank = hitters.findIndex(([id]) => id === me) + 1;
+    if (lr.killer) {
+      for (const [id] of hitters) glowUntil.set(id, Date.now() + 120_000);
+      if (lr.killer) glowUntil.set(lr.killer, Date.now() + 120_000);
+      arena.flash("#ffd60a"); arena.shake(); fx.freeze(game, 160);
+      sfx.play("fanfare"); sfx.vibrate([60, 40, 120]);
+      arena.burst("satoshi", "#ffd60a", 30);
+      hitters.slice(0, 10).forEach(([id], i) => setTimeout(() => arena.fly("satoshi", id === me ? "me" : id, "#ffd60a", 10), 250 + i * 110));
+      fx.banner(field, "SATOSHI BLASTS", `${short(pot)} coins split by damage`, "gold", 2400);
+      if (myShare > 0n) setTimeout(() => fx.pop(field, `+${full(myShare)}`, "gold", arena.screenOf("me") || undefined, "big"), 1200);
+    } else {
+      fx.banner(field, "ROUND OVER", "Satoshi survived · his life bar resets", "red", 2200);
+    }
+    dmgSnap = new Map();
+    const open = () => openRecap(lr, myD, myShare, rank, hitters.length);
+    setTimeout(() => {
+      if (!alive) return;
+      if (sheet && sheetKind !== "recap") toast({ tone: "gold", who: "satoshi", title: lr.killer ? `Satoshi blasted. Tap for the round recap.` : `Round over. Tap for the recap.`, open });
+      else open();
+    }, 2600);
+  }
+
+  function openRecap(lr: chain.RoundEnd, myD: bigint, myShare: bigint, rank: number, n: number) {
+    const me = myId();
+    const iWon = !!lr.winner && lr.winner === me;
+    const row = (k: string, v: string) => `<div class="set-row"><span class="set-k">${k}</span><b>${v}</b></div>`;
+    show("recap", String(lr.round), "Round recap", `
+      <p class="kick gold">Round ${lr.round + 1} · ${lr.killer ? "Satoshi blasted" : "Satoshi survived"}</p>
+      <div class="rc-win${iWon ? " me" : ""}"><span class="av big">${lr.winner ? avatar(lr.winner) : ART_SATOSHI_RED}</span><div><span class="set-k">Round winner</span><h2 class="s-title">${lr.winner ? (iWon ? "You" : N(lr.winner)) : "Nobody"}</h2><small>${lr.winner ? `+${full(lr.winner_take)} ${lr.killer ? "from raids and the blast" : "from raids"}` : "No vault took coins this round."}</small></div></div>
+      ${lr.killer ? row("Pot shared", full(lr.pot)) + row("Hitters", String(lr.hitters)) + row("Last hit", N(lr.killer)) : ""}
+      ${row("Your damage", myD > 0n ? `${full(myD)}${rank ? ` · #${rank} of ${n}` : ""}` : "None")}
+      ${lr.killer ? row("Your share", myShare > 0n ? `<span class="yel">+${full(myShare)}</span>` : "None") : ""}
+      <p class="s-text dim">${myD > 0n ? (lr.killer ? "Your share is already in your bag." : "He survived, so damage paid nothing this round. A full life bar comes back now.") : "Each hit on Satoshi is one bullet. More damage, bigger share when he blasts."}</p>
+      <button class="btn wide" id="rc-go">Next round</button>`, "gold");
+    sheet!.body.querySelector<HTMLButtonElement>("#rc-go")!.onclick = () => sheet?.close();
+    if (iWon) { sfx.play("fanfare"); fx.banner(field, "YOU WON THE ROUND", `+${full(lr.winner_take)}`, "gold"); }
+  }
+
+  // ----- take a break: the game's bots leave you alone (players still can raid)
+
+  function renderBreak() {
+    const a = av();
+    const on = !!a?.on_break;
+    breakChip.hidden = !on;
+    if (on) { const t = `On a break · bots leave you alone · <b>Come back</b>`; if (breakChip.innerHTML !== t) breakChip.innerHTML = t; }
+  }
+  function toggleBreak() {
+    const a = av();
+    if (!a) return;
+    const on = !a.on_break;
+    const since = Number(a.break_since || 0);
+    void act("break", on ? "starting your break…" : "coming back…", () => chain.setBreak(on), () => {
+      toast({ tone: "ink", title: on ? "On a break. The bots leave you alone. Players can still raid you, and your shield charges still answer." : "Back in the fight." });
+      if (!on && since > 0) void showAway({ t: since, bal: "" }, true);
+    });
+  }
+
+  // ----- while you were away
+
+  function awayWatch() {
+    if (!inVault() || document.hidden) return;
+    if (!awayChecked) {
+      awayChecked = true;
+      let saved: { t: number; bal: string; n: number } | null = null;
+      try { saved = JSON.parse(localStorage.getItem(AWAY_KEY()) || "null"); } catch {}
+      if (saved && Date.now() - saved.t > AWAY_AFTER_MS) void showAway(saved, false);
+    }
+    if (Date.now() - awaySaveT > 5000) {
+      awaySaveT = Date.now();
+      try { localStorage.setItem(AWAY_KEY(), JSON.stringify({ t: Date.now(), bal: w.vaultBal.toString(), n: 0 })); } catch {}
+    }
+  }
+
+  async function showAway(since: { t: number; bal: string }, fromBreak: boolean) {
+    const me = myId();
+    let feed = w.feed;
+    try { feed = await chain.getFeed(64); } catch {}
+    const after = feed.filter((f) => Number(f.at) > since.t);
+    const sum = (xs: typeof after) => xs.reduce((m, f) => m + BigInt(f.amount), 0n);
+    const lost = after.filter((f) => f.kind === "resolve" && f.target === me && BigInt(f.amount) > 0n);
+    const won = after.filter((f) => f.kind === "resolve" && f.actor === me && BigInt(f.amount) > 0n);
+    const answered = after.filter((f) => (f.kind === "defend" || f.kind === "block") && f.actor === me);
+    const blasts = after.filter((f) => f.kind === "blast");
+    const rounds = after.filter((f) => f.kind === "blast" || f.kind === "round");
+    const harv = after.filter((f) => f.kind === "harvest");
+    const delta = since.bal ? w.vaultBal - BigInt(since.bal) : null;
+    const lines: string[] = [];
+    if (delta !== null && delta !== 0n) lines.push(`<div class="set-row"><span class="set-k">Your bag</span><b class="${delta > 0n ? "yel" : "red"}">${delta > 0n ? "+" : "−"}${full(delta > 0n ? delta : -delta)}</b></div>`);
+    if (lost.length) lines.push(`<div class="set-row"><span class="set-k">Raided</span><b class="red">${lost.length}× · −${full(sum(lost))}</b></div>`);
+    if (won.length) lines.push(`<div class="set-row"><span class="set-k">Your raids landed</span><b class="yel">${won.length}× · +${full(sum(won))}</b></div>`);
+    if (answered.length) lines.push(`<div class="set-row"><span class="set-k">Raids you answered</span><b class="yel">${answered.length}× · +${full(sum(answered))}</b></div>`);
+    if (harv.length) lines.push(`<div class="set-row"><span class="set-k">Harvests</span><b>${harv.length}</b></div>`);
+    if (rounds.length) lines.push(`<div class="set-row"><span class="set-k">Rounds played</span><b>${rounds.length}${blasts.length ? ` · Satoshi blasted ${blasts.length}×` : ""}</b></div>`);
+    if (!lines.length) { if (fromBreak) toast({ tone: "ink", title: "Quiet while you were away: nothing hit your bag." }); return; }
+    if (sheet) return; // never on top of something you are doing
+    show("away", "", "While you were away", `
+      <p class="kick gold">${fromBreak ? "Your break" : "Welcome back"} · ${span(Date.now() - since.t)}</p>
+      <h2 class="s-title">While you were away</h2>
+      ${lines.join("")}
+      <p class="s-text dim">From the contract's own move log${after.length >= 60 ? " (the last 64 moves)" : ""}.</p>
+      <button class="btn wide" id="aw-go">Back to the arena</button>`, "gold");
+    sheet!.body.querySelector<HTMLButtonElement>("#aw-go")!.onclick = () => sheet?.close();
+  }
+
   // ----- satoshi (the boss sheet, from the menu; the hit itself is by touch in the arena)
 
   function openSatoshi() {
@@ -2310,6 +2642,7 @@ export function play(root: HTMLElement) {
       </div>`, "gold");
     sheet!.el.classList.add("boss-sheet");
     move(sheet!.body.querySelector("#bs-go")!, sheet!.body.querySelector("#bs-msg")!, () => chain.bossRaid(), (v) => {
+      if (ARC()) return `Hit: −${full(String(v ?? "0"))} life. Your share comes when he blasts.`;
       const kept = BigInt(String(v ?? "0"));
       const burn = BigInt(P(c(), "boss_burn_bps"));
       const dealt = burn > 0n ? (kept * 10000n + (10000n - burn) - 1n) / (10000n - burn) : kept;
@@ -2343,7 +2676,18 @@ export function play(root: HTMLElement) {
     const enough = !!v && w.vaultBal >= PB(c(), "boss_min_balance");
     B.querySelector<HTMLElement>("#bs-next")!.innerHTML = !v ? "Only a vault can shoot his stash." : !enough ? `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to shoot his stash.` : v.boss_ready ? `A hit now takes <b class="yel">${full(hit)}</b>. You keep <b class="yel">${full(keep)}</b>.` : `Next hit ready in <b data-until="${st.epoch_ends_ms}">${span(Number(st.epoch_ends_ms) - chainNow())}</b>.`;
     const go = B.querySelector<HTMLButtonElement>("#bs-go")!;
-    if (!go.classList.contains("busy")) { go.disabled = !(v && enough && v.boss_ready); go.textContent = v?.boss_ready ? "HIT" : "HIT · on cooldown"; }
+    if (ARC() && w.arena) {
+      const a = w.arena, hp = BigInt(a.boss_hp), spawn = BigInt(a.boss_spawn);
+      const pot = bps(BigInt(a.boss_stash), 10000 - P(c(), "boss_burn_bps"));
+      const dmgNow = bossHitNow();
+      B.querySelector<HTMLElement>("#bs-stash")!.textContent = `${full(hp)} life`;
+      B.querySelector<HTMLElement>("#bs-of")!.textContent = `of ${full(spawn)} · ${a.hitters} hitter${a.hitters === "1" ? "" : "s"}`;
+      B.querySelector<HTMLElement>("#bs-hp")!.style.width = `${spawn > 0n ? Number((hp * 10000n) / spawn) / 100 : 0}%`;
+      B.querySelector<HTMLElement>("#bs-rule")!.textContent = `Everyone shares his life bar. A hit costs one bullet and takes ${full(bps(spawn, P(c(), "boss_bps")))} life, then a ${every(A("boss_cooldown_ms"))} cooldown. When the bar empties he blasts: his stash, ${full(pot)} after a ${pct(P(c(), "boss_burn_bps"))} burn, is split by damage. Then he respawns.`;
+      const a2 = v?.arcade;
+      B.querySelector<HTMLElement>("#bs-next")!.innerHTML = !v ? "Only a vault can shoot him." : !enough ? `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to shoot him.` : v.boss_ready ? `Your hit now: <b class="yel">−${full(dmgNow)}</b> life.` : (a2?.bullets ?? 0) <= 0 ? `Clip empty. Reload to shoot him.` : `Next hit in <b data-until="${a2?.boss_next_ms}">${span(Number(a2?.boss_next_ms || 0) - chainNow())}</b>.`;
+      if (!go.classList.contains("busy")) { go.disabled = !(v && enough && v.boss_ready); go.textContent = v?.boss_ready ? "HIT" : (a2?.bullets ?? 0) <= 0 ? "HIT · reload first" : "HIT · cooling down"; }
+    } else if (!go.classList.contains("busy")) { go.disabled = !(v && enough && v.boss_ready); go.textContent = v?.boss_ready ? "HIT" : "HIT · on cooldown"; }
     const hits = w.feed.filter((f) => f.kind === "boss").slice(0, 5);
     B.querySelector<HTMLElement>("#bs-log")!.innerHTML = hits.map((f) => `<li><span class="av">${avatar(f.actor)}</span><span>${N(f.actor)} hit for <b>${full(f.amount)}</b></span><small>${ago(Number(f.at))}</small></li>`).join("") || `<li class="empty">Nobody has hit Satoshi yet.</li>`;
   }
@@ -2527,6 +2871,7 @@ export function play(root: HTMLElement) {
       <div class="set-list">
         <button type="button" class="set-item" id="st-act"><span>Activity</span><span>›</span></button>
         <button type="button" class="set-item" id="st-boss"><span>Satoshi boss fight</span><span>›</span></button>
+        ${ARC() && s.vault && w.vault?.arcade ? `<button type="button" class="set-item" id="st-break"><span>${w.vault.arcade.on_break ? "End your break" : "Take a break"}</span><span>${w.vault.arcade.on_break ? "On a break" : "Bots leave you alone"}</span></button>` : ""}
         <button type="button" class="set-item" id="st-net"><span>Switch arena</span><span>${MAIN ? "Mainnet" : "Practice"}</span></button>
         ${s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out</span><span>${MAIN ? "›" : "Practice NEAR ›"}</span></button>` : ""}
         ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>` : ""}
@@ -2543,6 +2888,8 @@ export function play(root: HTMLElement) {
     if (wout) wout.onclick = () => openWalletOut();
     B.querySelector<HTMLButtonElement>("#st-restore")!.onclick = () => openRestore();
     B.querySelector<HTMLButtonElement>("#st-act")!.onclick = () => openActivity();
+    const brk = B.querySelector<HTMLButtonElement>("#st-break");
+    if (brk) brk.onclick = () => { sheet?.close(); toggleBreak(); };
     B.querySelector<HTMLButtonElement>("#st-boss")!.onclick = () => openSatoshi();
     B.querySelector<HTMLButtonElement>("#st-net")!.onclick = () => openNetwork();
     const cash = B.querySelector<HTMLButtonElement>("#st-cash");
@@ -2740,6 +3087,7 @@ export function play(root: HTMLElement) {
     renderActions();
     renderLog();
     feedEvents();
+    arcadeTick();
     updateSheet();
   }
 

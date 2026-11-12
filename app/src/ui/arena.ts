@@ -28,6 +28,7 @@ export interface ArenaBody {
   focus?: boolean; // part of what matters right now; everyone else is a bystander
   showBag?: boolean; // bag number drawn (you, your target, your hunter)
   hint?: string; // why you cannot raid it, in a few words; shown as you come close
+  glow?: boolean; // arcade: a fresh Satoshi blast winner glows gold
 }
 /** What the guide points at in the world. */
 export type GuideTarget = { kind: "me" | "gate" | "boss" | "body"; id?: string } | null;
@@ -42,6 +43,7 @@ export interface ArenaMe {
   /** A quick move (a shot) is signing in the background: a small pip by your bag, no words. */
   signing?: boolean;
   svg: string;
+  glow?: boolean; // arcade: you just won a share of a Satoshi blast
 }
 export interface ArenaPlaces {
   gate: "hidden" | "open" | "home";
@@ -1212,6 +1214,7 @@ export class Arena {
       c.globalAlpha = a0;
     }
     this.outline(c, x, y + bob, rr, up < 1 ? this.colors.dim : color, hot ? 3 : 2);
+    if (b.glow) this.goldGlow(c, x, y + bob, rr);
     this.sprite(c, b.id, x, y, rr, s.face, bob, wobble, up);
     const fl = this.flashes.get(b.id);
     if (fl) { const op = c.globalCompositeOperation, a0 = c.globalAlpha; c.globalCompositeOperation = "lighter"; c.globalAlpha = Math.min(1, fl / 0.16) * 0.9; this.sprite(c, b.id, x, y, rr, s.face, bob, wobble, up); this.sprite(c, b.id, x, y, rr, s.face, bob, wobble, up); c.globalAlpha = a0; c.globalCompositeOperation = op; }
@@ -1379,6 +1382,7 @@ export class Arena {
       c.globalAlpha = 1;
     }
     this.outline(c, m.x, m.y + bob, m.r, this.colors.ink, 2);
+    if (info.glow) this.goldGlow(c, m.x, m.y + bob, m.r);
     this.sprite(c, info.kind === "vault" ? "__sack_gold__" : "__sack_red__", m.x, m.y, m.r, m.face, bob, wobble);
     if (this.blinkAt(77)) { c.fillStyle = info.kind === "vault" ? GOLD : RED; c.fillRect(Math.round(m.x - m.r * 0.6), Math.round(m.y + bob - m.r * 0.1), Math.round(m.r * 1.2), 3); }
     if (info.kind === "vault") { // vault door badge
@@ -1638,6 +1642,19 @@ export class Arena {
     }
   }
   /** Shield ring: one cyan ring per 10%, brighter while it takes a hit. */
+  /** A pulsing gold halo behind a body: it just won a share of Satoshi's blast. */
+  private goldGlow(c: CanvasRenderingContext2D, x: number, y: number, r: number) {
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+    const R = r * (2 + 0.25 * pulse);
+    c.save();
+    const g = c.createRadialGradient(x, y, r * 0.5, x, y, R);
+    g.addColorStop(0, `rgba(255,214,10,${0.45 + 0.25 * pulse})`);
+    g.addColorStop(1, "rgba(255,214,10,0)");
+    c.fillStyle = g;
+    c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.fill();
+    c.restore();
+  }
+
   private shieldRing(c: CanvasRenderingContext2D, key: string, x: number, y: number, r: number, bps: number) {
     if (bps <= 0) return;
     const n = Math.min(3, Math.ceil(bps / 1000));
