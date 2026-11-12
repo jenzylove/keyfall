@@ -2404,9 +2404,13 @@ export function play(root: HTMLElement) {
   }
 
   /** A raid on your vault: answer it your way. SHIELD spends a charge (the raid fails), SHOOT BACK spends a bullet. */
+  // A raid you just answered: the prompt goes at once, and comes back only if the answer failed and the clock still runs.
+  const answeredAt = new Map<string, number>();
+  const answer = (id: string) => { answeredAt.set(id, Date.now()); promptEl?.remove(); promptEl = null; promptKey = ""; };
   function renderPrompt() {
     const r = w.incoming, me = sess().vault?.accountId;
-    const live = !!r && !!me && r.target === me && r.status === "open" && r.deadline > chainNow() && inVault() && !busy;
+    const quiet = !!r && Date.now() - (answeredAt.get(r.id) ?? 0) < 12_000;
+    const live = !!r && !!me && r.target === me && r.status === "open" && r.deadline > chainNow() && inVault() && !busy && !quiet;
     if (!live) { promptEl?.remove(); promptEl = null; promptKey = ""; return; }
     const a = av();
     const sh = a?.shields ?? 0, bl = a?.bullets ?? 0;
@@ -2423,8 +2427,8 @@ export function play(root: HTMLElement) {
         <button type="button" class="ap-btn sb"${bl <= 0 ? " disabled" : ""}><b>SHOOT BACK</b><small>${bl > 0 ? `${bl} bullet${bl === 1 ? "" : "s"} left` : "no bullets"}</small></button>
       </div>`;
     if (late) { promptEl.innerHTML = `<p class="ap-t"><span class="av">${avatar(r!.attacker)}</span><span><b>${N(r!.attacker)}</b>'s shot is landing<small>Too late to answer this one. Watch the next.</small></span></p>`; return; }
-    promptEl.querySelector<HTMLButtonElement>(".sh")!.onclick = () => { const x = w.incoming; if (x) blockRaid(x, sh <= 0); };
-    promptEl.querySelector<HTMLButtonElement>(".sb")!.onclick = () => { const x = w.incoming; if (x) { arena.fly("me", x.attacker, "#27f0ff", 8); defendByShot(x); } };
+    promptEl.querySelector<HTMLButtonElement>(".sh")!.onclick = () => { const x = w.incoming; if (x) { answer(x.id); blockRaid(x, sh <= 0); } };
+    promptEl.querySelector<HTMLButtonElement>(".sb")!.onclick = () => { const x = w.incoming; if (x) { answer(x.id); arena.fly("me", x.attacker, "#27f0ff", 8); defendByShot(x); } };
     if (fresh) { sfx.play("alarm"); sfx.vibrate([60, 40, 60]); }
   }
 

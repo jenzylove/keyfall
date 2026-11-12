@@ -22,7 +22,7 @@ export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
 export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
 export const MAX_HUNTERS_ARCADE = 2; // arcade: at most 2 bots raid players per tick (steady pressure, never a pile on)
 export const MAX_BOSS_ARCADE = 3; // tuned for the 30 s page tick: 6 bot hits a minute take about 15% of his life bar, so he blasts in about 7 minutes alone and about 5 with a player shooting
-export const PACE_JITTER_MS = 30_000; // arcade: after a player's 90 s immunity ends, bots wait a random 0 to 30 s more
+export const PACE_JITTER_MS = 15_000; // arcade: after a player's 90 s immunity ends, bots wait a random 0 to 15 s more
 /** Deterministic jitter per (player, immunity end), so ticks agree on when a player is fair game again. */
 export function paceJitter(account, immuneUntil) {
   let h = 2166136261;
@@ -146,6 +146,17 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
       // arcade: block with a shield charge if it has one, else shoot back with a bullet
       else if ((t.arcade?.shields || 0) > 0) push({ npc: npcName(t.account), action: "block", raidId: String(r.id), reason: `${why} Blocks with a shield charge.` });
       else if ((t.arcade?.bullets ?? t.raids_left ?? 0) > 0) push({ npc: npcName(t.account), action: "defend", raidId: String(r.id), reason: `${why} No shield left: shoots back.` });
+    }
+  }
+
+  // 2b. Arcade: a hunter with an empty clip reloads (burns reload_price), like a player who cannot wait.
+  //     Only when it can afford several reloads, so a bot never spends itself out of the arena.
+  if (arcade && config.arcade?.reload_price) {
+    const price = big(config.arcade.reload_price);
+    for (const n of npcs) {
+      if (!npcName(n.account).startsWith("qubit-") && !["shor", "grover"].includes(npcName(n.account))) continue;
+      if ((n.arcade?.bullets ?? 1) > 0 || big(n.balance) < price * 4n || n.under_raid != null) continue;
+      push({ npc: npcName(n.account), action: "reload", reason: `Clip empty: burns ${fmt(price)} coins to reload and keep hunting.` });
     }
   }
 
