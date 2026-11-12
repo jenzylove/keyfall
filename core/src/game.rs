@@ -210,6 +210,14 @@ pub struct State {
     #[serde(with = "u128_str")]
     pub round_damage: u128,
     pub round_hitters: u64,
+    /// Round leaders: by raid take (wins a timed out round) and by raid take
+    /// plus the blast share the vault's damage earns (wins a blast round).
+    pub round_top: Option<String>,
+    #[serde(with = "u128_str")]
+    pub round_top_take: u128,
+    pub round_top_blast: Option<String>,
+    #[serde(with = "u128_str")]
+    pub round_top_blast_take: u128,
     /// Blast pots not yet claimed by the vaults that earned them.
     #[serde(with = "u128_str")]
     pub blast_escrow: u128,
@@ -244,6 +252,10 @@ pub struct RoundEnd {
     #[serde(with = "u128_str")]
     pub damage: u128,
     pub hitters: u64,
+    /// Whoever took the most this round: raids, plus blast share on a blast.
+    pub winner: Option<String>,
+    #[serde(with = "u128_str")]
+    pub winner_take: u128,
     /// Coins burned during the round.
     #[serde(with = "u128_str")]
     pub burned: u128,
@@ -428,6 +440,10 @@ impl State {
             kills: 0,
             round_damage: 0,
             round_hitters: 0,
+            round_top: None,
+            round_top_take: 0,
+            round_top_blast: None,
+            round_top_blast_take: 0,
             blast_escrow: 0,
             boss_spawn: life,
         }
@@ -1047,7 +1063,26 @@ impl<'a, S: Store> Game<'a, S> {
         }
         h.gain += gain;
         h.loss += loss;
-        let _ = id;
+        if r == self.s.round {
+            self.rank(id, h);
+        }
+    }
+
+    /// Update the round leaders with this vault's take. A hit is worth its
+    /// damage less the boss burn if he blasts (exact while his stash holds).
+    fn rank(&mut self, id: &str, h: &Holder) {
+        let round = self.s.round;
+        let raids = if h.stat_round == round { h.gain } else { 0 };
+        if raids > self.s.round_top_take {
+            self.s.round_top = Some(id.to_string());
+            self.s.round_top_take = raids;
+        }
+        let dmg = if h.dmg_round == round { h.dmg } else { 0 };
+        let both = raids + dmg - bps(dmg, self.p.boss_burn_bps);
+        if both > self.s.round_top_blast_take {
+            self.s.round_top_blast = Some(id.to_string());
+            self.s.round_top_blast_take = both;
+        }
     }
 
     fn start_round(&mut self, round: u64, at: u64) {
@@ -1056,6 +1091,10 @@ impl<'a, S: Store> Game<'a, S> {
         self.s.round_burn_start = self.s.burned;
         self.s.round_damage = 0;
         self.s.round_hitters = 0;
+        self.s.round_top = None;
+        self.s.round_top_take = 0;
+        self.s.round_top_blast = None;
+        self.s.round_top_blast_take = 0;
     }
 
     /// Arcade: end a round that ran out of time. Call before any move; returns
@@ -1073,6 +1112,8 @@ impl<'a, S: Store> Game<'a, S> {
             pot: 0,
             damage: self.s.round_damage,
             hitters: self.s.round_hitters,
+            winner: self.s.round_top.clone(),
+            winner_take: self.s.round_top_take,
             burned: self.s.burned - self.s.round_burn_start,
             started_ms: started,
             ended_ms: started + a.round_max_ms,
@@ -1119,6 +1160,11 @@ impl<'a, S: Store> Game<'a, S> {
         h.bullets = n - 1;
         h.bullet_ts = ts;
         h.last_boss_ms = now;
+        if h.stat_round != round {
+            // roll the vault's round stats so its raid take reads right
+            self.note(id, &mut h, now, 0, 0);
+        }
+        self.rank(id, &h);
         self.store.put_holder(id, h);
 
         let mut round_end = None;
@@ -1155,6 +1201,8 @@ impl<'a, S: Store> Game<'a, S> {
                 pot,
                 damage: self.s.round_damage,
                 hitters: self.s.round_hitters,
+                winner: self.s.round_top_blast.clone(),
+                winner_take: self.s.round_top_blast_take,
                 burned: round_burned,
                 started_ms: self.s.round_start_ms,
                 ended_ms: now,

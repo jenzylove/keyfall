@@ -310,7 +310,7 @@ impl Contract {
         emit(
             if blasted { "satoshi_blasted" } else { "round_ended" },
             json!({ "round": U64(e.round), "killer": e.killer, "pot": U128(e.pot), "damage": U128(e.damage), "hitters": U64(e.hitters),
-                    "burned": U128(e.burned), "respawn": U128(e.respawn), "recycled": U128(e.recycled) }),
+                    "winner": e.winner, "winner_take": U128(e.winner_take), "burned": U128(e.burned), "respawn": U128(e.respawn), "recycled": U128(e.recycled) }),
         );
         let actor = e.killer.clone().unwrap_or_else(|| "satoshi".to_string());
         self.push_feed(if blasted { "blast" } else { "round" }, &actor, None, e.pot, Some(e.round.to_string()));

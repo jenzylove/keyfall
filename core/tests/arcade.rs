@@ -183,6 +183,11 @@ fn boss_blast_splits_the_pot_by_damage_and_claims_once() {
     assert_eq!(e.pot, sat0 - sat0 * w.p.boss_burn_bps as u128 / 10_000);
     assert_eq!(e.damage, sat0);
     assert_eq!(e.hitters, 6);
+    // the winner is the hitter with the most damage (no raids this round)
+    let top = names.iter().map(|n| w.h(n).dmg).max().unwrap();
+    let wn = e.winner.clone().expect("a blast round has a winner");
+    assert_eq!(w.h(&wn).dmg, top);
+    assert_eq!(e.winner_take, top - top * w.p.boss_burn_bps as u128 / 10_000);
     assert_eq!(w.s.round, 1);
     assert_eq!(w.s.satoshi_balance(), a.boss_life, "respawned from the reserve");
     w.check();
@@ -220,7 +225,8 @@ fn timeout_drops_damage_without_a_blast() {
     let a = w.a();
     w.vault("v", 2);
     w.g().boss_raid("v", 10).unwrap();
-    assert!(w.g().roll(a.round_max_ms + 1).is_some());
+    let e = w.g().roll(a.round_max_ms + 1).unwrap();
+    assert_eq!(e.winner, None, "damage alone wins nothing when he survives");
     assert_eq!(w.g().boss_hp(), w.s.satoshi_balance(), "he heals when the round times out");
     assert_eq!(w.g().settle("v"), None);
     assert_eq!(w.h("v").dmg, 0);
@@ -253,4 +259,26 @@ fn percentage_shield_is_off_and_break_toggles() {
     assert!(w.h("v").on_break);
     w.g().set_break("v", false, 6).unwrap();
     assert!(!w.h("v").on_break);
+}
+
+#[test]
+fn raid_take_wins_a_timed_out_round_and_block_counts_for_the_defender() {
+    let mut w = World::new();
+    let a = w.a();
+    w.vault("att", 1);
+    w.g().register("e1", Kind::Exposed).unwrap();
+    w.g().buy("e1", 5 * N, 0, 0).unwrap();
+    w.vault("def", 1);
+    let st = w.p.min_stake;
+    let id = w.g().raid("att", "e1", st, 10).unwrap();
+    let dw = w.p.defend_window_ms;
+    let r = w.g().resolve(id, 10 + dw + 1).unwrap();
+    assert!(r.take > 0);
+    let st = w.p.min_stake;
+    let id2 = w.g().raid("def", "att", st, 20).ok();
+    let _ = id2;
+    let e = w.g().roll(a.round_max_ms + 1).unwrap();
+    assert_eq!(e.winner.as_deref(), Some("att"));
+    assert_eq!(e.winner_take, w.h("att").round_stats(0).0);
+    w.check();
 }
