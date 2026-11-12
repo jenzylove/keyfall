@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://keyfall.jdollar.site"><img alt="Play" src="https://img.shields.io/badge/play-keyfall.jdollar.site-FFD60A?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://nearblocks.io/address/keyfall.near"><img alt="Mainnet contract" src="https://img.shields.io/badge/NEAR%20mainnet-keyfall.near-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
-  <a href="https://testnet.nearblocks.io/address/keyfall-arcade4-mwbrut5g2vx.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice-NEAR%20testnet-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
+  <a href="https://testnet.nearblocks.io/address/keyfall-arcade5-mwdhcz2c13e.testnet"><img alt="Practice contract" src="https://img.shields.io/badge/practice-NEAR%20testnet-FF3D2E?style=flat-square&labelColor=0C0C0B"></a>
   <a href="https://github.com/jenzylove/keyfall/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/ci.yml?branch=main&style=flat-square&label=ci&labelColor=0C0C0B"></a>
   <a href="https://github.com/jenzylove/keyfall/actions/workflows/sandbox.yml"><img alt="Sandbox tests" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/sandbox.yml?branch=main&style=flat-square&label=sandbox%20tests&labelColor=0C0C0B"></a>
   <a href="https://github.com/jenzylove/keyfall/actions/workflows/verifiable-build.yml"><img alt="Verifiable build" src="https://img.shields.io/github/actions/workflow/status/jenzylove/keyfall/verifiable-build.yml?branch=main&style=flat-square&label=verifiable%20build&labelColor=0C0C0B"></a>
@@ -60,10 +60,10 @@ Prefer to check without playing? Open **Under the hood** (https://keyfall.jdolla
 
 | | Mainnet | Practice |
 |---|---|---|
-| Contract | [`keyfall.near`](https://nearblocks.io/address/keyfall.near), deployed keyless on 9 November 2026 ([deploy](https://nearblocks.io/txns/CVAtSwnxxq1pxwkV22EtsUPDLQA3GFH4bA61nsS3Eeh7), [`deployments/mainnet.json`](deployments/mainnet.json)) | [`keyfall-arcade4-mwbrut5g2vx.testnet`](https://testnet.nearblocks.io/address/keyfall-arcade4-mwbrut5g2vx.testnet), season 4, deployed keyless on 11 November 2026 ([`deployments/testnet-live.json`](deployments/testnet-live.json)) |
+| Contract | [`keyfall.near`](https://nearblocks.io/address/keyfall.near), deployed keyless on 9 November 2026 ([deploy](https://nearblocks.io/txns/CVAtSwnxxq1pxwkV22EtsUPDLQA3GFH4bA61nsS3Eeh7), [`deployments/mainnet.json`](deployments/mainnet.json)) | [`keyfall-arcade5-mwdhcz2c13e.testnet`](https://testnet.nearblocks.io/address/keyfall-arcade5-mwdhcz2c13e.testnet), season 5, deployed keyless on 12 November 2026 ([deploy](https://testnet.nearblocks.io/txns/DPVq7UCCDANCe5BCeVXK4UcDPERm3q4Yttr85oZ1Dgh), [`deployments/testnet-live.json`](deployments/testnet-live.json)) |
 | Money | Real NEAR, real $KEYFALL | Free testnet coins |
-| Q-Day | 23 November 2026, 04:56 UTC | 22 November 2026, 20:00 UTC |
-| Clock | The long season: 6 hour rounds, a 10 minute raid clock, 6 raids a round, 2 hours of rest after a raid ([`sim/params-mainnet.json`](sim/params-mainnet.json)) | The arcade season: 10 minute rounds, a **90 second** raid clock, 3 raids a round, 10 minutes of rest after a raid, a smaller leak every round ([`sim/params-arcade.json`](sim/params-arcade.json)) |
+| Q-Day | 23 November 2026, 04:56 UTC | 26 November 2026, 11:45 UTC |
+| Clock | The long season: 6 hour rounds, a 10 minute raid clock, 6 raids a round, 2 hours of rest after a raid ([`sim/params-mainnet.json`](sim/params-mainnet.json)) | The arcade loop: a 5 bullet clip that refills one bullet a minute, 3 shield charges, a **25 second** raid clock, 90 seconds of rest after a raid, and rounds that end when Satoshi blasts (10 minutes at most) ([`sim/params-arcade5.json`](sim/params-arcade5.json)) |
 
 Before locking the mainnet contract, a spike proved mainnet accepts transactions signed only by an ML-DSA-65 key: an account was created with only a quantum key and then deleted itself with that key ([docs/spikes/s3-mainnet.md](docs/spikes/s3-mainnet.md)).
 
@@ -76,7 +76,7 @@ Before locking the mainnet contract, a spike proved mainnet accepts transactions
 | Vaults are born quantum only | `/proof` reads every vault's key list live and counts how many hold exactly one `ml-dsa-65` key |
 | Nobody can change the rules | The contract accounts have **no access keys**, and `config()` equals the params file field by field |
 | The deployed code is this repo | `node scripts/judge-checks.mjs` compares your local wasm build hash with the deployed one. The mainnet wasm hash is in [`deployments/mainnet.json`](deployments/mainnet.json). How to rebuild it: [Rebuild the wasm](#rebuild-the-wasm) |
-| The books add up | exposed + vaults + market + escrow + burned = 21,000,000, checked live |
+| The books add up | exposed + vaults + market + escrow + burned = 21,000,000, checked live (practice also counts Satoshi's reserve and unclaimed blast pots) |
 | The whole season works, Q-Day included | 33 of 33 end to end checks on a fresh testnet season with real transactions, including frozen bags, stopped raids and `finalize()`: [docs/e2e/latest.md](docs/e2e/latest.md) |
 | Harvest cost does not grow with holders | Harvest gas was equal at 4 and 44 exposed holders in the recorded testnet run |
 
@@ -91,9 +91,10 @@ cd scripts && npm install && node judge-checks.mjs
 
 There are two routes, and they answer different questions.
 
-**The mainnet wasm** (`keyfall.near`, sha256 `9095039b…2ccf` in [`deployments/mainnet.json`](deployments/mainnet.json)) was built with the plain cargo near route, not inside Docker:
+**The mainnet wasm** (`keyfall.near`, sha256 `9095039b…2ccf` in [`deployments/mainnet.json`](deployments/mainnet.json)) was built with the plain cargo near route, not inside Docker, from the source tagged [`mainnet-v1`](https://github.com/jenzylove/keyfall/tree/mainnet-v1). `main` has moved on (the practice arcade rules), so check out the tag first:
 
 ```sh
+git checkout mainnet-v1
 cd contract && cargo near build non-reproducible-wasm --no-abi
 sha256sum ../target/near/qday_contract/qday_contract.wasm
 ```
@@ -116,6 +117,12 @@ Anyone with Docker gets the same bytes from the same commit, and the wasm record
 - **Raids:** a vault stakes coins against any holder. An exposed target cannot defend but can escape by moving into a vault before the clock runs out (10 minutes on mainnet, 90 seconds in practice). A vault target can defend and take the stake. The take is 7 to 10% of an exposed bag or 0.5 to 2% of a vault, reduced by its shield, capped at 3 times the stake. No punching down: the target must be at least a quarter (mainnet) or half (practice) of your size.
 - **Shields:** burn a share of your bag; strength is the square root of the share (1% buys 10%, 4% buys 20%).
 - **Satoshi:** once per round each vault can take a slice of Satoshi's stash (0.1% on mainnet; 0.05% of a bigger 3,000,000 stash in practice, about 1,500 coins a hit at the start, sized by simulation so he lasts to Q-Day). The bots hit him at most once every 6 hours, so on the short clock his stash is left for players.
+- **Practice arcade (season 5):** the practice contract adds arcade rules on top, all in its params (`config().arcade`); mainnet keeps the rules above.
+  - **Bullets.** A vault holds a clip of 5. A raid, a shot back or a hit on Satoshi costs one bullet. One comes back free every minute. `reload()` burns 50,000 coins and fills the clip.
+  - **Shield charges.** Up to 3; one comes back free every 2 minutes, and `buy_shield()` burns 4,000 for one. When someone raids you, you have 25 seconds to answer. `block()` spends a charge, `defend()` shoots back with a bullet; either way the raid fails and the stake is yours, less the 10% burn. After any raid you rest for 90 seconds.
+  - **Satoshi** is a shared life bar. Each hit costs a bullet, deals a fixed share of his life and puts that vault on a 20 second cooldown; no coins move on a hit. When his life reaches zero he **blasts**. His whole stash leaves him and 20% burns. The rest is split among everyone who hit him that round, by damage. Each share is credited on that vault's next move or by `claim_blast()`, so the contract never loops over hitters. The round ends there and is written on chain with its winner: whoever took the most that round, raids and blast share together. If 10 minutes pass first, the round ends and he heals.
+  - **Where his new life comes from.** He respawns from his own reserve: the part of his 3,000,000 supply not yet in his life bar. Once that reserve is spent, he is rebuilt only from the coins burned during that same round. Nothing is minted, and the 21,000,000 cap always holds.
+  - **A break.** `set_break(true)` tells the game's bots to leave a vault alone. Players still can raid it, and bullets and charges keep coming back.
 - **Q-Day:** raids, harvest and Satoshi stop; every exposed balance freezes for good; `finalize()` writes the season result on chain.
 
 These numbers came from simulation, not guesses: the same rules crate was run over 6 scenarios and 48 parameter sets, which caught small vaults being farmed and led to vault armour and the no punching down rule ([docs/BUILD_LOG.md](docs/BUILD_LOG.md)). The arcade clock was simulated the same way at 30 second steps: about 25 successful raids a day against about 1 on the long clock, with Satoshi lasting to Q-Day and the median small vault losing about 3% to raids ([sim/out/ARCADE.md](sim/out/ARCADE.md)).
@@ -129,7 +136,7 @@ The game's own bots are ordinary quantum vaults playing under the same contract 
 | Hunters | `shor`, `grover`, `qubit-01` to `qubit-08` | `shor`, `grover`, `qubit-01` |
 | Bagholders (red prey) | six: ordinary accounts that hold a big bag behind an old key, never move it, cannot defend, leak to the vaults every round and buy back in when they run low | none: on mainnet the prey is real players, so nobody farms a bot pot |
 
-Qubits raid a new player once their first three minutes are up, then keep hunting any player who is not resting, a few raids per tick, whenever the contract allows it (rest after a raid, raids left in the round, no punching down). Shor hunts the largest red bag it may raid, Grover the least shielded vault. They defend 1 raid in 3, late in the clock, and hit Satoshi at most once every 6 hours. They move whenever a player has the game open (each open page wakes them every 30 seconds) and on a scheduled GitHub Actions crank. The landing page shows how much of the vault total they hold.
+Qubits raid a new player once their first three minutes are up, then keep hunting any player who is not resting, whenever the contract allows it (rest after a raid, a bullet in the clip, no punching down). Shor hunts the largest red bag it may raid, Grover the least shielded vault. In the practice arcade, at most 2 bots go after players per tick, each player gets a random 0 to 30 extra seconds after their rest, bots also fight each other, they answer 1 raid in 3 with a shield charge (or a bullet when out of charges), they leave a vault on a break alone, and two of them hit Satoshi each tick so he blasts every few minutes. On mainnet they hit him at most once every 6 hours. They move whenever a player has the game open (each open page wakes them every 30 seconds) and on a scheduled GitHub Actions crank. The landing page shows how much of the vault total they hold.
 
 ## After Q-Day
 

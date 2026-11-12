@@ -96,8 +96,11 @@ check(`vault census: ${quantumOnly} of ${vaults.length} vaults are controlled on
 // 5. The books add up
 const s = await view(contract, "stats");
 // Satoshi's stash is an exposed balance, so it is inside exposed_tokens.
-const sum = ["exposed_tokens", "vault_tokens", "market_tokens", "escrow", "burned"].reduce((a, k) => a + BigInt(s[k]), 0n);
-check("exposed (incl. Satoshi) + vaults + market + escrow + burned = total supply", sum === BigInt(params.total_supply), `${sum} vs ${params.total_supply}`);
+let sum = ["exposed_tokens", "vault_tokens", "market_tokens", "escrow", "burned"].reduce((a, k) => a + BigInt(s[k]), 0n);
+// Arcade seasons also hold Satoshi's reserve (his next lives) and unclaimed blast pots.
+const arena = params.arcade ? await view(contract, "arena") : null;
+if (arena) sum += BigInt(arena.reserve) + BigInt(arena.blast_escrow);
+check(`exposed (incl. Satoshi) + vaults + market + escrow + burned${arena ? " + Satoshi's reserve + unclaimed blasts" : ""} = total supply`, sum === BigInt(params.total_supply), `${sum} vs ${params.total_supply}`);
 
 // 6. An ed25519 signed vault move is refused. Sending one would need a key,
 // so this reads the refusal the end-to-end run put on testnet and checks it
