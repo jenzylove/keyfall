@@ -589,15 +589,22 @@ export function play(root: HTMLElement) {
         html = "";
         startEl.hidden = false;
         const funded = MAIN && (w.walletNear ?? 0n) >= BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1));
-        const nearTxt = MAIN && w.walletNear !== null && w.walletNear > 0n ? `Your wallet holds <b>${chain.fmtNear(w.walletNear, 2)} NEAR</b>. ` : "";
+        const needY = BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1));
+        const haveY = w.walletNear ?? 0n;
+        const shortY = needY > haveY ? needY - haveY : 0n;
+        const nearTxt = !MAIN ? "" : haveY > 0n
+          ? `Your wallet holds <b>${chain.fmtNear(haveY, 2)} NEAR</b>. ${funded ? "" : `A first bag needs <b>${chain.fmtNear(needY, 2)} NEAR</b>, so add <b>${chain.fmtNear(shortY + BigInt(chain.nearToYocto(0.005)), 2)} more</b>. `}`
+          : `A first bag needs <b>${chain.fmtNear(needY, 2)} NEAR</b>. `;
         startEl.innerHTML = `<div class="start-card">
           <p class="kick gold">${NET_LABEL} arena · ${MAIN ? "real NEAR, real $KEYFALL" : "free, no wallet"}</p>
           <h2 class="start-title">Grab a bag</h2>
           <p class="s-text">${MAIN
-            ? `${nearTxt}${funded ? "Choose how much NEAR goes into your bag." : "Top up this device's wallet with NEAR, from another chain or from any NEAR wallet, then buy your first bag."} Then run it to the vault gate before a hunter catches you.`
+            ? `${nearTxt}${funded ? "Choose how much NEAR goes into your bag." : "Top up from another chain or any NEAR wallet."} Then run your bag to the vault gate before a hunter catches you.`
             : `You need coins to enter the arena. ${m.buyOnly ? "Buy your first bag." : "We make you a free practice wallet and buy your first bag."} Then run it to the vault gate before a hunter catches you.`}</p>
           <button class="btn wide big" id="m-go">${busy === "grab" ? esc(busyText) : MAIN ? (funded ? "Buy my bag" : "Top up") : m.buyOnly ? "Buy my bag" : "Grab my bag"}</button>
-          ${MAIN ? `<button type="button" class="btn ghost wide small" id="m-practice">Practice for free instead</button>` : chain.MAINNET_READY ? `<button type="button" class="btn ghost wide small" id="m-real">Play for real on mainnet</button>` : ""}
+          ${MAIN ? `<button type="button" class="btn ghost wide small" id="m-restore">I have a wallet or vault code</button>
+          ${haveY > BigInt(chain.nearToYocto(0.02)) ? `<button type="button" class="btn ghost wide small" id="m-out">Send this NEAR out</button>` : ""}
+          <button type="button" class="btn ghost wide small" id="m-practice">Practice for free instead</button>` : chain.MAINNET_READY ? `<button type="button" class="btn ghost wide small" id="m-real">Play for real on mainnet</button>` : ""}
           <p class="m-msg" id="m-msg" role="status"></p></div>`;
         break;
       }
@@ -674,6 +681,10 @@ export function play(root: HTMLElement) {
     };
     const real = root.querySelector<HTMLButtonElement>("#m-real");
     if (real) real.onclick = () => chain.switchNetwork("mainnet");
+    const rst = root.querySelector<HTMLButtonElement>("#m-restore");
+    if (rst) rst.onclick = () => openSettings(true);
+    const mout = root.querySelector<HTMLButtonElement>("#m-out");
+    if (mout) mout.onclick = () => openWalletOut();
     const prac = root.querySelector<HTMLButtonElement>("#m-practice");
     if (prac) prac.onclick = () => chain.switchNetwork("testnet");
     const bk = root.querySelector<HTMLButtonElement>("#m-backup");
@@ -1384,8 +1395,10 @@ export function play(root: HTMLElement) {
       <div class="row2"><button type="button" class="btn ghost" id="wb-copy">Copy</button><button type="button" class="btn ghost" id="wb-dl">Download</button></div>` : `<p class="s-msg bad">This browser cannot store a sealed key, so a wallet made here would not survive a reload. Open the game in a normal browser window.</p>`}
       <label class="m-check"><input type="checkbox" id="wb-ok"/> <span>I saved this code somewhere safe</span></label>
       <button class="btn wide" id="wb-go" disabled>Continue to top up</button>
+      <button type="button" class="btn ghost wide small" id="wb-have">I already have a wallet or vault code</button>
       <p class="s-msg" id="wb-msg" role="status"></p>`, "gold");
     const B = sheet!.body, out = B.querySelector<HTMLElement>("#wb-msg")!, ok = B.querySelector<HTMLInputElement>("#wb-ok")!, go = B.querySelector<HTMLButtonElement>("#wb-go")!;
+    B.querySelector<HTMLButtonElement>("#wb-have")!.onclick = () => openSettings(true);
     if (!code) { ok.disabled = true; return; }
     ok.onchange = () => { go.disabled = !ok.checked; };
     B.querySelector<HTMLButtonElement>("#wb-copy")!.onclick = async () => { try { await navigator.clipboard.writeText(code); out.className = "s-msg ok"; out.textContent = "Copied. Paste it somewhere safe, like a password manager."; } catch { out.className = "s-msg"; out.textContent = "Copy is blocked here. Write the 8 blocks down or download them."; } };
@@ -2314,7 +2327,33 @@ export function play(root: HTMLElement) {
 
   // ----- settings
 
-  function openSettings() {
+  /** Send the wallet's NEAR to any NEAR account: for a player who topped up but wants out before buying. */
+  function openWalletOut() {
+    const have = w.walletNear ?? 0n;
+    const maxY = have - BigInt(chain.nearToYocto(0.01)); // a little stays for gas
+    const maxN = maxY > 0n ? Math.floor(Number(maxY / 10n ** 21n)) / 1000 : 0;
+    show("walletout", "", "Send NEAR out", `
+      <p class="kick gold">Mainnet · your wallet</p>
+      <h2 class="s-title">Send NEAR out</h2>
+      <p class="s-text">This wallet holds <b>${chain.fmtNear(have, 3)} NEAR</b>. Send it to any NEAR account, like an exchange deposit address or your own wallet.</p>
+      <label class="m-field"><span>To NEAR account</span><input id="wo-to" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name.near or a 64 character address"/></label>
+      <label class="m-field"><span>Amount (max ${maxN})</span><input id="wo-n" inputmode="decimal" value="${maxN}"/></label>
+      <button class="btn wide" id="wo-go"${maxN > 0 ? "" : " disabled"}>Send</button>
+      <p class="s-msg" id="wo-msg" role="status"></p>`, "gold");
+    const B = sheet!.body, out = B.querySelector<HTMLElement>("#wo-msg")!;
+    B.querySelector<HTMLButtonElement>("#wo-go")!.onclick = async (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      const to = B.querySelector<HTMLInputElement>("#wo-to")!.value.trim().toLowerCase();
+      const n = Number(B.querySelector<HTMLInputElement>("#wo-n")!.value);
+      if (!NEAR_NAME.test(to)) { out.className = "s-msg bad"; out.textContent = "That is not a NEAR account."; return; }
+      if (!(n > 0) || n > maxN) { out.className = "s-msg bad"; out.textContent = `Send between 0 and ${maxN} NEAR.`; return; }
+      btn.disabled = true; out.className = "s-msg"; out.textContent = "Sending…";
+      try { const r = await chain.walletWithdraw(to, chain.nearToYocto(n)); out.className = "s-msg ok"; out.innerHTML = `Sent ${n} NEAR to ${esc(to)}.${r.hash ? ` <a href="https://nearblocks.io/txns/${r.hash}" target="_blank" rel="noopener">Receipt ↗</a>` : ""}`; void refresh(); }
+      catch (err) { btn.disabled = false; out.className = "s-msg bad"; out.textContent = plainError(err); }
+    };
+  }
+
+  function openSettings(restore = false) {
     const s = sess();
     const theme = document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     show("settings", "", "Menu", `
@@ -2333,13 +2372,14 @@ export function play(root: HTMLElement) {
         <button type="button" class="set-item" id="st-boss"><span>Satoshi boss fight</span><span>›</span></button>
         <button type="button" class="set-item" id="st-net"><span>Switch arena</span><span>${MAIN ? "Mainnet" : "Practice"}</span></button>
         ${MAIN && s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out NEAR</span><span>›</span></button>` : ""}
-        ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>` : ""}
+        ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>
+        <button type="button" class="set-item" id="st-wout"><span>Send wallet NEAR out</span><span>›</span></button>` : ""}
         <button type="button" class="set-item" id="st-theme"><span>Theme</span><span>${theme === "dark" ? "Dark" : "Light"}</span></button>
         ${MAIN && s.wallet ? `<button type="button" class="set-item" id="st-wbk"><span>Back up wallet code</span><span>${chain.walletBackedUp() ? "Saved" : "Not saved"}</span></button>` : ""}
-        ${MAIN ? `<details class="set-item det"><summary><span>Restore a wallet from a code</span><span>›</span></summary>
+        ${MAIN ? `<details class="set-item det"${restore ? " open" : ""}><summary><span>Restore a wallet from a code</span><span>›</span></summary>
           <div class="restore"><label class="m-field"><span>Wallet recovery code</span><input id="rw-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
           <button type="button" class="btn wide ghost" id="rw-go">Restore wallet</button></div></details>` : ""}
-        <details class="set-item det"><summary><span>Restore a vault from a code</span><span>›</span></summary>
+        <details class="set-item det"${restore ? " open" : ""}><summary><span>Restore a vault from a code</span><span>›</span></summary>
           <div class="restore"><label class="m-field"><span>Vault name</span><input id="rs-n" autocomplete="off" autocapitalize="off" spellcheck="false"/></label>
           <label class="m-field"><span>Recovery code</span><input id="rs-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
           <button type="button" class="btn wide ghost" id="rs-go">Restore vault</button></div></details>
@@ -2348,6 +2388,9 @@ export function play(root: HTMLElement) {
       </div>
       <p class="s-msg" id="st-msg" role="status"></p>`);
     const B = sheet!.body;
+    const wout = B.querySelector<HTMLButtonElement>("#st-wout");
+    if (wout) wout.onclick = () => openWalletOut();
+    if (restore) setTimeout(() => B.querySelector(".det[open]")?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
     const out = B.querySelector<HTMLElement>("#st-msg")!;
     B.querySelector<HTMLButtonElement>("#st-act")!.onclick = () => openActivity();
     B.querySelector<HTMLButtonElement>("#st-boss")!.onclick = () => openSatoshi();
