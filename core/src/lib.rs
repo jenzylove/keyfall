@@ -14,6 +14,7 @@ use std::collections::HashMap;
 pub struct MemStore {
     pub holders: HashMap<String, Holder>,
     pub raids: HashMap<u64, Raid>,
+    pub blasts: HashMap<u64, Blast>,
 }
 
 impl Store for MemStore {
@@ -28,5 +29,11 @@ impl Store for MemStore {
     }
     fn put_raid(&mut self, r: Raid) {
         self.raids.insert(r.id, r);
+    }
+    fn blast(&self, round: u64) -> Option<Blast> {
+        self.blasts.get(&round).cloned()
+    }
+    fn put_blast(&mut self, b: Blast) {
+        self.blasts.insert(b.round, b);
     }
 }

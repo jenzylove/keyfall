@@ -143,6 +143,8 @@ fn harvest_gas_is_constant_in_holder_count() {
         fn put_holder(&mut self, _: &str, _: Holder) { panic!("harvest must not write holders") }
         fn raid(&self, _: u64) -> Option<Raid> { panic!() }
         fn put_raid(&mut self, _: Raid) { panic!() }
+        fn blast(&self, _: u64) -> Option<Blast> { panic!() }
+        fn put_blast(&mut self, _: Blast) { panic!() }
     }
     let p = params();
     let mut s = State::genesis(&p, 0);

@@ -58,21 +58,20 @@ fn genesis_splits_satoshi_into_life_and_reserve() {
 fn raids_cost_bullets_and_bullets_regenerate() {
     let mut w = World::new();
     let a = w.a();
-    w.vault("att", 5);
-    w.vault("tgt", 5);
+    w.vault("att", 1);
     for i in 0..10 {
         w.g().register(&format!("e{i}"), Kind::Exposed).unwrap();
         w.g().buy(&format!("e{i}"), 2 * N, 0, 0).unwrap();
     }
     assert_eq!(w.h("att").bullets, a.clip_size);
     for i in 0..a.clip_size {
-        w.g().raid("att", &format!("e{i}"), w.p.min_stake, 1_000).unwrap();
+        { let st = w.p.min_stake; w.g().raid("att", &format!("e{i}"), st, 1_000) }.unwrap();
     }
-    assert_eq!(w.g().raid("att", "e9", w.p.min_stake, 1_000), Err(Error::NoBullets));
+    assert_eq!({ let st = w.p.min_stake; w.g().raid("att", "e9", st, 1_000) }, Err(Error::NoBullets));
     // one bullet comes back after bullet_regen_ms
     let t = 1_000 + a.bullet_regen_ms;
-    w.g().raid("att", "e9", w.p.min_stake, t).unwrap();
-    assert_eq!(w.g().raid("att", "e8", w.p.min_stake, t), Err(Error::TargetBusy));
+    { let st = w.p.min_stake; w.g().raid("att", "e9", st, t) }.unwrap();
+    assert_eq!({ let st = w.p.min_stake; w.g().raid("att", "e8", st, t) }, Err(Error::NoBullets));
     assert_eq!(regen(w.h("att").bullets, w.h("att").bullet_ts, a.clip_size, a.bullet_regen_ms, t), (0, t));
     w.check();
 }
@@ -131,7 +130,7 @@ fn no_shields_refuses_and_buy_shield_burns() {
     h.shields = 0;
     h.shield_ts = 0;
     w.m.holders.insert("tgt".into(), h);
-    let id = w.g().raid("att", "tgt", w.p.min_stake, 10).unwrap();
+    let id = { let st = w.p.min_stake; w.g().raid("att", "tgt", st, 10) }.unwrap();
     assert_eq!(w.g().block("tgt", id, 20), Err(Error::NoShields));
     let burned0 = w.s.burned;
     assert_eq!(w.g().buy_shield("tgt", 30).unwrap(), 1);
@@ -144,25 +143,30 @@ fn no_shields_refuses_and_buy_shield_burns() {
 }
 
 #[test]
-fn boss_cooldown_death_respawn_and_round_end() {
+fn boss_blast_splits_the_pot_by_damage_and_claims_once() {
     let mut w = World::new();
     let a = w.a();
     let names: Vec<String> = (0..8).map(|i| format!("v{i}")).collect();
     for n in &names {
         w.vault(n, 2);
     }
-    w.g().boss_raid("v0", 1_000).unwrap();
+    let before: Vec<u128> = names.iter().map(|n| w.bal(n)).collect();
+    let sat0 = w.s.satoshi_balance();
+    let o = w.g().boss_raid("v0", 1_000).unwrap();
+    assert_eq!(o.gained, 0, "a hit moves no coins");
+    assert_eq!(w.s.satoshi_balance(), sat0, "his stash stays until he blasts");
+    assert_eq!(w.g().boss_hp(), sat0 - o.taken);
     assert_eq!(w.g().boss_raid("v0", 1_000 + a.boss_cooldown_ms - 1), Err(Error::BossCooldown));
-    // everyone hits until he dies; bullets regenerate with time
     let mut t = 1_000 + a.boss_cooldown_ms;
     let mut hits = 1u32;
     let mut end = None;
     'outer: for _ in 0..10_000 {
-        for n in &names {
-            let mut g = w.g();
-            if let Some(r) = g.roll(t) {
-                panic!("timed out before a kill: {r:?}");
+        for (i, n) in names.iter().enumerate() {
+            if i % 3 == 2 {
+                continue; // these vaults never hit
             }
+            let mut g = w.g();
+            assert!(g.roll(t).is_none(), "timed out before a kill");
             if let Ok(o) = g.boss_raid(n, t) {
                 hits += 1;
                 if let Some(e) = o.round_end {
@@ -173,15 +177,53 @@ fn boss_cooldown_death_respawn_and_round_end() {
         }
         t += a.boss_cooldown_ms;
     }
-    let e = end.expect("Satoshi died");
-    println!("killed after {hits} hits, {} s", t / 1000);
+    let e = end.expect("Satoshi blasted");
+    println!("blast after {hits} hits, {} s, pot {}", t / 1000, e.pot / T);
     assert_eq!(e.round, 0);
-    assert!(e.killer.is_some());
-    assert!(e.winner.is_some());
-    assert!(e.respawn > 0);
+    assert_eq!(e.pot, sat0 - sat0 * w.p.boss_burn_bps as u128 / 10_000);
+    assert_eq!(e.damage, sat0);
+    assert_eq!(e.hitters, 6);
     assert_eq!(w.s.round, 1);
-    assert_eq!(w.s.round_start_ms, t);
-    assert!(w.s.satoshi_balance() >= a.boss_life - 1);
+    assert_eq!(w.s.satoshi_balance(), a.boss_life, "respawned from the reserve");
+    w.check();
+    // shares are pending until claimed, and the views can see them
+    let h0 = w.h("v0");
+    let share0 = w.g().pending_blast(&h0);
+    assert_eq!(share0, qday_core::math::mul_div(e.pot, h0.dmg, e.damage));
+    let h2 = w.h("v2");
+    assert_eq!(w.g().pending_blast(&h2), 0, "no damage, no share");
+    let (r, got) = w.g().settle("v0").unwrap();
+    assert_eq!((r, got), (0, share0));
+    assert_eq!(w.g().settle("v0"), None, "no double claim");
+    assert_eq!(w.bal("v0"), before[0] + share0);
+    assert_eq!(w.h("v0").round_stats(0).0, share0, "the share counts toward the round take");
+    // a move settles lazily
+    w.g().reload("v1", t + 1).ok();
+    w.g().set_break("v1", true, t + 1).unwrap();
+    assert_eq!(w.h("v1").dmg, 0);
+    assert!(w.bal("v1") > before[1] - a.reload_price);
+    let mut paid = 0;
+    for n in &names {
+        if let Some((_, c)) = w.g().settle(n) {
+            paid += c;
+        }
+    }
+    let b = w.m.blasts[&0].clone();
+    assert!(b.paid <= b.pot && b.pot - b.paid < 10, "dust only: {} left", b.pot - b.paid);
+    let _ = paid;
+    w.check();
+}
+
+#[test]
+fn timeout_drops_damage_without_a_blast() {
+    let mut w = World::new();
+    let a = w.a();
+    w.vault("v", 2);
+    w.g().boss_raid("v", 10).unwrap();
+    assert!(w.g().roll(a.round_max_ms + 1).is_some());
+    assert_eq!(w.g().boss_hp(), w.s.satoshi_balance(), "he heals when the round times out");
+    assert_eq!(w.g().settle("v"), None);
+    assert_eq!(w.h("v").dmg, 0);
     w.check();
 }
 

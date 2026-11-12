@@ -113,11 +113,10 @@ pub struct Arcade {
     /// A vault may hit Satoshi once per this many ms.
     pub boss_cooldown_ms: u64,
     /// Satoshi's stash at each spawn (his life bar), refilled from his reserve.
+    /// A hit deals `boss_bps` of it as damage; at zero life he blasts and his
+    /// stash, less `boss_burn_bps`, is shared by damage among the round's hitters.
     #[serde(with = "u128_str")]
     pub boss_life: u128,
-    /// He dies when his stash falls below this.
-    #[serde(with = "u128_str")]
-    pub boss_floor: u128,
     /// A round with no kill ends after this many ms.
     pub round_max_ms: u64,
 }
@@ -158,8 +157,8 @@ impl Params {
             if a.clip_size == 0 || a.bullet_regen_ms == 0 || a.shield_max == 0 || a.shield_regen_ms == 0 || a.round_max_ms == 0 {
                 return Err("arcade clip, shields, regen times and round length must be positive");
             }
-            if a.boss_life == 0 || a.boss_life > self.satoshi_supply || a.boss_floor >= a.boss_life {
-                return Err("arcade boss_life must be positive, within satoshi_supply and above boss_floor");
+            if a.boss_life == 0 || a.boss_life > self.satoshi_supply || self.boss_bps == 0 {
+                return Err("arcade boss_life and boss_bps must be positive, boss_life within satoshi_supply");
             }
         }
         Ok(())

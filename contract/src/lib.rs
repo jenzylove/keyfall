@@ -13,7 +13,8 @@ use near_sdk::json_types::{Base64VecU8, U128, U64};
 use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue};
 use qday_core::{
-    quote_buy as core_quote_buy, quote_sell as core_quote_sell, spot_price, Error, Game, Holder, Kind, Params, Raid, State, Store, DECIMALS,
+    quote_buy as core_quote_buy, quote_sell as core_quote_sell, regen, regen_next, spot_price, Blast, Error, Game, Holder, Kind, Params, Raid,
+    RoundEnd, State, Store, DECIMALS,
 };
 use serde_json::json;
 
@@ -66,12 +67,17 @@ pub struct Contract {
     feed: LookupMap<u64, FeedItem>,
     feed_count: u64,
     season: Option<SeasonResult>,
+    /// Arcade: Satoshi blast pots by round, and every finished round.
+    blasts: LookupMap<u64, Blast>,
+    rounds: LookupMap<u64, RoundEnd>,
+    last_round: Option<RoundEnd>,
 }
 
 /// Adapter so the core rules can read and write chain storage.
 struct ChainStore<'a> {
     holders: &'a mut LookupMap<String, Holder>,
     raids: &'a mut LookupMap<u64, Raid>,
+    blasts: &'a mut LookupMap<u64, Blast>,
 }
 
 impl<'a> Store for ChainStore<'a> {
@@ -87,6 +93,34 @@ impl<'a> Store for ChainStore<'a> {
     fn put_raid(&mut self, r: Raid) {
         self.raids.insert(r.id, r);
     }
+    fn blast(&self, round: u64) -> Option<Blast> {
+        self.blasts.get(&round).cloned()
+    }
+    fn put_blast(&mut self, b: Blast) {
+        self.blasts.insert(b.round, b);
+    }
+}
+
+/// Read only store for views (writes are ignored).
+struct ViewStore<'a> {
+    holders: &'a LookupMap<String, Holder>,
+    raids: &'a LookupMap<u64, Raid>,
+    blasts: &'a LookupMap<u64, Blast>,
+}
+
+impl<'a> Store for ViewStore<'a> {
+    fn holder(&self, id: &str) -> Option<Holder> {
+        self.holders.get(id).cloned()
+    }
+    fn put_holder(&mut self, _: &str, _: Holder) {}
+    fn raid(&self, id: u64) -> Option<Raid> {
+        self.raids.get(&id).cloned()
+    }
+    fn put_raid(&mut self, _: Raid) {}
+    fn blast(&self, round: u64) -> Option<Blast> {
+        self.blasts.get(&round).cloned()
+    }
+    fn put_blast(&mut self, _: Blast) {}
 }
 
 fn now_ms() -> u64 {
@@ -166,6 +200,54 @@ pub struct HolderView {
     pub under_raid: Option<U64>,
     pub raids_left: u32,
     pub boss_ready: bool,
+    /// Arcade only (absent on older seasons).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arcade: Option<ArcadeView>,
+}
+
+#[near(serializers = [json])]
+pub struct ArcadeView {
+    pub bullets: u32,
+    /// When the next free bullet arrives (0 = clip full).
+    pub next_bullet_ms: U64,
+    pub shields: u32,
+    pub next_shield_ms: U64,
+    /// When this vault may hit Satoshi again (0 = now).
+    pub boss_next_ms: U64,
+    pub on_break: bool,
+    pub break_since: U64,
+    /// Blast coins earned and not claimed yet (already counted in `balance`).
+    pub blast_pending: U128,
+    pub blast_round: Option<U64>,
+    /// Damage dealt to Satoshi this round.
+    pub damage: U128,
+    /// Coins won and lost in the current round and the one before
+    /// (pending blast coins included in the won column).
+    pub round: U64,
+    pub round_gain: U128,
+    pub round_loss: U128,
+    pub prev_gain: U128,
+    pub prev_loss: U128,
+}
+
+#[near(serializers = [json])]
+pub struct ArenaView {
+    pub now_ms: U64,
+    pub round: U64,
+    pub round_started_ms: U64,
+    /// The round ends here at the latest (if Satoshi survives).
+    pub round_ends_ms: U64,
+    /// Satoshi's life left this round, and at his last spawn.
+    pub boss_hp: U128,
+    pub boss_spawn: U128,
+    pub boss_stash: U128,
+    pub damage: U128,
+    pub hitters: U64,
+    pub reserve: U128,
+    pub kills: U64,
+    pub round_burned: U128,
+    pub blast_escrow: U128,
+    pub last_round: Option<RoundEnd>,
 }
 
 #[near]
@@ -193,6 +275,9 @@ impl Contract {
             feed: LookupMap::new(b"f"),
             feed_count: 0,
             season: None,
+            blasts: LookupMap::new(b"b"),
+            rounds: LookupMap::new(b"o"),
+            last_round: None,
         }
     }
 
@@ -202,8 +287,60 @@ impl Contract {
         (
             &self.params,
             &mut self.state,
-            ChainStore { holders: &mut self.holders, raids: &mut self.raids },
+            ChainStore { holders: &mut self.holders, raids: &mut self.raids, blasts: &mut self.blasts },
         )
+    }
+
+    fn view_store(&self) -> ViewStore<'_> {
+        ViewStore { holders: &self.holders, raids: &self.raids, blasts: &self.blasts }
+    }
+
+    /// Unclaimed blast coins of a holder (0 off arcade).
+    fn pending_of(&self, h: &Holder) -> u128 {
+        if self.params.arcade.is_none() || h.dmg == 0 || h.dmg_round >= self.state.round_now(&self.params, now_ms()) {
+            return 0;
+        }
+        let mut st = self.state.clone();
+        let mut vs = self.view_store();
+        Game::new(&self.params, &mut st, &mut vs).pending_blast(h)
+    }
+
+    fn record_round(&mut self, e: RoundEnd) {
+        let blasted = e.killer.is_some();
+        emit(
+            if blasted { "satoshi_blasted" } else { "round_ended" },
+            json!({ "round": U64(e.round), "killer": e.killer, "pot": U128(e.pot), "damage": U128(e.damage), "hitters": U64(e.hitters),
+                    "burned": U128(e.burned), "respawn": U128(e.respawn), "recycled": U128(e.recycled) }),
+        );
+        let actor = e.killer.clone().unwrap_or_else(|| "satoshi".to_string());
+        self.push_feed(if blasted { "blast" } else { "round" }, &actor, None, e.pot, Some(e.round.to_string()));
+        self.rounds.insert(e.round, e.clone());
+        self.last_round = Some(e);
+    }
+
+    /// Arcade bookkeeping before any move: end a round that ran out of time,
+    /// and credit blast shares owed to the accounts this move touches.
+    fn arcade_pre(&mut self, ids: &[&str]) {
+        if self.params.arcade.is_none() {
+            return;
+        }
+        let now = now_ms();
+        let (p, s, mut st) = self.game_parts();
+        let mut g = Game::new(p, s, &mut st);
+        let ended = g.roll(now);
+        let mut paid = vec![];
+        for id in ids {
+            if let Some((round, coins)) = g.settle(id) {
+                paid.push((id.to_string(), round, coins));
+            }
+        }
+        if let Some(e) = ended {
+            self.record_round(e);
+        }
+        for (id, round, coins) in paid {
+            emit("blast_claimed", json!({ "account": id, "round": U64(round), "coins": U128(coins) }));
+            emit_ft("ft_mint", json!({ "owner_id": id, "amount": U128(coins), "memo": "blast" }));
+        }
     }
 
     fn push_feed(&mut self, kind: &str, actor: &str, target: Option<&str>, amount: u128, extra: Option<String>) {
@@ -264,7 +401,7 @@ impl Contract {
     fn view_holder(&self, id: &AccountId, h: &Holder) -> HolderView {
         let now = now_ms();
         let epoch = self.state.epoch(&self.params, now);
-        HolderView {
+        let mut v = HolderView {
             account: id.clone(),
             kind: h.kind,
             balance: U128(self.state.balance(h.kind, h.shares)),
@@ -279,7 +416,39 @@ impl Contract {
                 self.params.max_raids_per_epoch
             },
             boss_ready: h.kind == Kind::Vault && h.last_boss_epoch != epoch && !self.state.after_q_day(&self.params, now),
+            arcade: None,
+        };
+        if let (Some(a), Kind::Vault) = (&self.params.arcade, h.kind) {
+            let (bullets, _) = regen(h.bullets, h.bullet_ts, a.clip_size, a.bullet_regen_ms, now);
+            let (shields, _) = regen(h.shields, h.shield_ts, a.shield_max, a.shield_regen_ms, now);
+            let pending = self.pending_of(h);
+            let round = epoch;
+            let (g, l) = h.round_stats(round);
+            let (pg, pl) = h.round_stats(round.wrapping_sub(1));
+            let pending_round = h.dmg_round;
+            let boss_next = if h.last_boss_ms == 0 { 0 } else { h.last_boss_ms + a.boss_cooldown_ms };
+            v.balance = U128(v.balance.0 + pending);
+            v.raids_left = bullets;
+            v.boss_ready = !self.state.after_q_day(&self.params, now) && bullets > 0 && boss_next <= now;
+            v.arcade = Some(ArcadeView {
+                bullets,
+                next_bullet_ms: U64(regen_next(h.bullets, h.bullet_ts, a.clip_size, a.bullet_regen_ms, now)),
+                shields,
+                next_shield_ms: U64(regen_next(h.shields, h.shield_ts, a.shield_max, a.shield_regen_ms, now)),
+                boss_next_ms: U64(if boss_next > now { boss_next } else { 0 }),
+                on_break: h.on_break,
+                break_since: U64(h.break_since),
+                blast_pending: U128(pending),
+                blast_round: if pending > 0 { Some(U64(pending_round)) } else { None },
+                damage: U128(if h.dmg_round == round { h.dmg } else { 0 }),
+                round: U64(round),
+                round_gain: U128(g + if pending_round == round { pending } else { 0 }),
+                round_loss: U128(l),
+                prev_gain: U128(pg + if pending_round.wrapping_add(1) == round { pending } else { 0 }),
+                prev_loss: U128(pl),
+            });
         }
+        v
     }
 
     // ------------------------------------------------------------ vaults
@@ -370,6 +539,7 @@ impl Contract {
             Some(Kind::Vault) => Self::require_quantum_direct(&me),
             Some(Kind::Exposed) => {}
         }
+        self.arcade_pre(&[me.as_str()]);
         let now = now_ms();
         let (p, s, mut st) = self.game_parts();
         let o = Game::new(p, s, &mut st)
@@ -385,6 +555,7 @@ impl Contract {
     pub fn sell(&mut self, amount: U128, min_near: Option<U128>) -> U128 {
         let me = env::predecessor_account_id();
         self.guard_outflow(&me);
+        self.arcade_pre(&[me.as_str()]);
         let now = now_ms();
         let (p, s, mut st) = self.game_parts();
         let o = Game::new(p, s, &mut st)
@@ -401,6 +572,7 @@ impl Contract {
 
     /// Permissionless: apply every harvest that is due.
     pub fn harvest(&mut self) -> U128 {
+        self.arcade_pre(&[]);
         let now = now_ms();
         let actor = env::predecessor_account_id();
         let (p, s, mut st) = self.game_parts();
@@ -415,6 +587,7 @@ impl Contract {
 
     pub fn raid(&mut self, target: AccountId, stake: U128) -> U64 {
         let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str(), target.as_str()]);
         let now = now_ms();
         let (p, s, mut st) = self.game_parts();
         let id = Game::new(p, s, &mut st).raid(me.as_str(), target.as_str(), stake.0, now).unwrap_or_else(|e| fail(e));
@@ -426,6 +599,7 @@ impl Contract {
 
     pub fn defend(&mut self, raid_id: U64) -> U128 {
         let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str()]);
         let now = now_ms();
         let (p, s, mut st) = self.game_parts();
         let r = Game::new(p, s, &mut st).defend(me.as_str(), raid_id.0, now).unwrap_or_else(|e| fail(e));
@@ -437,6 +611,7 @@ impl Contract {
 
     /// Permissionless: settle a raid whose defend window has ended.
     pub fn resolve(&mut self, raid_id: U64) -> U128 {
+        self.arcade_pre(&[]);
         let now = now_ms();
         let actor = env::predecessor_account_id();
         let (p, s, mut st) = self.game_parts();
@@ -451,6 +626,7 @@ impl Contract {
 
     pub fn charge_shield(&mut self, amount: U128) -> u32 {
         let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str()]);
         let now = now_ms();
         let (p, s, mut st) = self.game_parts();
         let strength = Game::new(p, s, &mut st).charge_shield(me.as_str(), amount.0, now).unwrap_or_else(|e| fail(e));
@@ -462,12 +638,88 @@ impl Contract {
 
     pub fn boss_raid(&mut self) -> U128 {
         let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str()]);
         let now = now_ms();
         let (p, s, mut st) = self.game_parts();
         let o = Game::new(p, s, &mut st).boss_raid(me.as_str(), now).unwrap_or_else(|e| fail(e));
+        if self.params.arcade.is_some() {
+            // Arcade: a hit is damage only; the coins move when he blasts.
+            emit("boss_hit", json!({ "vault": me, "damage": U128(o.taken) }));
+            self.push_feed("boss", me.as_str(), None, o.taken, Some("hit".to_string()));
+            if let Some(e) = o.round_end {
+                self.record_round(e);
+            }
+            return U128(o.taken);
+        }
         emit("boss_raid", json!({ "vault": me, "taken": U128(o.taken), "burned": U128(o.burned), "gained": U128(o.gained) }));
         self.push_feed("boss", me.as_str(), None, o.taken, None);
         U128(o.gained)
+    }
+
+    /// Arcade: answer a raid with a shield charge. The raid fails; the stake,
+    /// less the burn, goes to you.
+    pub fn block(&mut self, raid_id: U64) -> U128 {
+        let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str()]);
+        let now = now_ms();
+        let (p, s, mut st) = self.game_parts();
+        let r = Game::new(p, s, &mut st).block(me.as_str(), raid_id.0, now).unwrap_or_else(|e| fail(e));
+        let won = r.stake - r.burned;
+        emit("blocked", json!({ "id": raid_id, "attacker": r.attacker, "defender": me, "won": U128(won), "burned": U128(r.burned) }));
+        self.push_feed("block", me.as_str(), Some(r.attacker.as_str()), won, Some(raid_id.0.to_string()));
+        U128(won)
+    }
+
+    /// Arcade: burn `reload_price` coins and fill the clip.
+    pub fn reload(&mut self) -> U128 {
+        let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str()]);
+        let now = now_ms();
+        let (p, s, mut st) = self.game_parts();
+        let burned = Game::new(p, s, &mut st).reload(me.as_str(), now).unwrap_or_else(|e| fail(e));
+        emit_ft("ft_burn", json!({ "owner_id": me, "amount": U128(burned), "memo": "reload" }));
+        emit("reload", json!({ "vault": me, "burned": U128(burned) }));
+        self.push_feed("reload", me.as_str(), None, burned, None);
+        U128(burned)
+    }
+
+    /// Arcade: burn `shield_price` coins for one shield charge.
+    pub fn buy_shield(&mut self) -> u32 {
+        let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str()]);
+        let now = now_ms();
+        let (p, s, mut st) = self.game_parts();
+        let charges = Game::new(p, s, &mut st).buy_shield(me.as_str(), now).unwrap_or_else(|e| fail(e));
+        let price = self.params.arcade.as_ref().map(|a| a.shield_price).unwrap_or(0);
+        emit_ft("ft_burn", json!({ "owner_id": me, "amount": U128(price), "memo": "shield" }));
+        emit("shield_bought", json!({ "vault": me, "burned": U128(price), "charges": charges }));
+        self.push_feed("shield", me.as_str(), None, price, Some(charges.to_string()));
+        charges
+    }
+
+    /// Arcade: take a break (the game's bots leave you alone) or come back.
+    pub fn set_break(&mut self, on: bool) {
+        let me = self.require_vault_quantum();
+        self.arcade_pre(&[me.as_str()]);
+        let now = now_ms();
+        let (p, s, mut st) = self.game_parts();
+        Game::new(p, s, &mut st).set_break(me.as_str(), on, now).unwrap_or_else(|e| fail(e));
+        emit("break", json!({ "vault": me, "on": on }));
+        self.push_feed("break", me.as_str(), None, 0, Some(if on { "on" } else { "off" }.to_string()));
+    }
+
+    /// Arcade, permissionless: credit a vault its share of a Satoshi blast.
+    /// Shares are also credited on the vault's next move, so calling this is
+    /// only ever early, never needed. Returns the coins credited.
+    pub fn claim_blast(&mut self, account_id: Option<AccountId>) -> U128 {
+        let who = account_id.unwrap_or_else(env::predecessor_account_id);
+        require!(self.params.arcade.is_some(), Error::NotArcade.code());
+        let before = self.holders.get(who.as_str()).map(|h| (h.dmg, h.dmg_round));
+        require!(matches!(before, Some((d, _)) if d > 0), "E_NOTHING_TO_CLAIM: no blast share waiting");
+        let earned = self.holders.get(who.as_str()).map(|h| self.pending_of(h)).unwrap_or(0);
+        self.arcade_pre(&[who.as_str()]);
+        require!(earned > 0, "E_NOTHING_TO_CLAIM: no blast share waiting");
+        U128(earned)
     }
 
     /// Permissionless, after Q-Day: write the season result on chain once.
@@ -510,14 +762,15 @@ impl Contract {
         let p = &self.params;
         let s = &self.state;
         let epoch = s.epoch(p, now);
+        let (_, epoch_ends) = s.epoch_bounds(p, now);
         let held = s.e_tokens + s.q_tokens;
         Stats {
             now_ms: U64(now),
             epoch: U64(epoch),
-            epoch_ends_ms: U64(s.start_ms + (epoch + 1) * p.epoch_ms),
+            epoch_ends_ms: U64(epoch_ends),
             q_day_ms: U64(s.q_day_ms(p)),
             after_q_day: s.after_q_day(p, now),
-            harvest_due: s.harvested < epoch.min(p.season_epochs),
+            harvest_due: s.harvested < s.harvest_due_total(p, now),
             harvested: U64(s.harvested),
             exposed_tokens: U128(s.e_tokens),
             vault_tokens: U128(s.q_tokens),
@@ -599,6 +852,62 @@ impl Contract {
         self.season.clone()
     }
 
+    /// Arcade: the round and Satoshi's life bar (None on older seasons).
+    pub fn arena(&self) -> Option<ArenaView> {
+        self.params.arcade.as_ref()?;
+        let now = now_ms();
+        let p = &self.params;
+        let s = &self.state;
+        let round = s.epoch(p, now);
+        let (start, end) = s.epoch_bounds(p, now);
+        let timed_out = round > s.round;
+        let stash = s.satoshi_balance();
+        let damage = if timed_out { 0 } else { s.round_damage };
+        Some(ArenaView {
+            now_ms: U64(now),
+            round: U64(round),
+            round_started_ms: U64(start),
+            round_ends_ms: U64(end),
+            boss_hp: U128(stash.saturating_sub(damage)),
+            boss_spawn: U128(s.boss_spawn),
+            boss_stash: U128(stash),
+            damage: U128(damage),
+            hitters: U64(if timed_out { 0 } else { s.round_hitters }),
+            reserve: U128(s.sat_reserve),
+            kills: U64(s.kills),
+            round_burned: U128(if timed_out { 0 } else { s.burned - s.round_burn_start }),
+            blast_escrow: U128(s.blast_escrow),
+            last_round: self.last_round.clone(),
+        })
+    }
+
+    /// A finished arcade round.
+    pub fn round(&self, round: U64) -> Option<RoundEnd> {
+        self.rounds.get(&round.0).cloned()
+    }
+
+    /// The last `limit` finished rounds (default 10, at most 50), newest first.
+    pub fn rounds(&self, limit: Option<u64>) -> Vec<RoundEnd> {
+        let Some(last) = &self.last_round else { return vec![] };
+        let mut out = vec![];
+        let mut r = last.round + 1;
+        while r > 0 && (out.len() as u64) < limit.unwrap_or(10).min(50) {
+            r -= 1;
+            if let Some(e) = self.rounds.get(&r) {
+                out.push(e.clone());
+            }
+            if last.round - r > 200 {
+                break;
+            }
+        }
+        out
+    }
+
+    /// A Satoshi blast pot (shared by damage).
+    pub fn blast(&self, round: U64) -> Option<Blast> {
+        self.blasts.get(&round.0).cloned()
+    }
+
     pub fn quote_buy(&self, near: U128) -> Option<U128> {
         core_quote_buy(&self.params, &self.state, near.0).map(U128)
     }
@@ -665,6 +974,7 @@ impl Contract {
 
     fn internal_transfer(&mut self, from: &AccountId, to: &AccountId, amount: u128, memo: Option<String>) {
         self.guard_outflow(from);
+        self.arcade_pre(&[from.as_str(), to.as_str()]);
         let now = now_ms();
         let (p, s, mut st) = self.game_parts();
         Game::new(p, s, &mut st).transfer(from.as_str(), to.as_str(), amount, now).unwrap_or_else(|e| fail(e));
@@ -678,7 +988,7 @@ impl Contract {
     }
 
     pub fn ft_balance_of(&self, account_id: AccountId) -> U128 {
-        U128(self.holders.get(account_id.as_str()).map(|h| self.state.balance(h.kind, h.shares)).unwrap_or(0))
+        U128(self.holders.get(account_id.as_str()).map(|h| self.state.balance(h.kind, h.shares) + self.pending_of(h)).unwrap_or(0))
     }
 
     pub fn ft_metadata(&self) -> serde_json::Value {

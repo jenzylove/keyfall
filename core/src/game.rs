@@ -58,6 +58,12 @@ pub struct Holder {
     pub prev_gain: u128,
     #[serde(with = "u128_str")]
     pub prev_loss: u128,
+    /// Damage dealt to Satoshi in round `dmg_round`, not yet settled. When that
+    /// round ends in a blast, the vault's share of the pot is credited on its
+    /// next move or by `claim_blast`.
+    pub dmg_round: u64,
+    #[serde(with = "u128_str")]
+    pub dmg: u128,
 }
 
 impl Holder {
@@ -85,6 +91,8 @@ impl Holder {
             prev_round: u64::MAX,
             prev_gain: 0,
             prev_loss: 0,
+            dmg_round: 0,
+            dmg: 0,
         }
     }
 
@@ -198,10 +206,30 @@ pub struct State {
     #[serde(with = "u128_str")]
     pub sat_reserve: u128,
     pub kills: u64,
-    /// Who took the most this round (raids and Satoshi hits together) and how much.
-    pub round_top: Option<String>,
+    /// Damage dealt to Satoshi this round and how many vaults dealt it.
     #[serde(with = "u128_str")]
-    pub round_top_take: u128,
+    pub round_damage: u128,
+    pub round_hitters: u64,
+    /// Blast pots not yet claimed by the vaults that earned them.
+    #[serde(with = "u128_str")]
+    pub blast_escrow: u128,
+    /// Satoshi's life at his last spawn; a hit deals `boss_bps` of it.
+    #[serde(with = "u128_str")]
+    pub boss_spawn: u128,
+}
+
+/// The pot of one Satoshi blast, shared by damage among the round's hitters.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct Blast {
+    pub round: u64,
+    #[serde(with = "u128_str")]
+    pub pot: u128,
+    #[serde(with = "u128_str")]
+    pub damage: u128,
+    pub hitters: u64,
+    /// Coins already credited to hitters.
+    #[serde(with = "u128_str")]
+    pub paid: u128,
 }
 
 /// One finished arcade round.
@@ -210,18 +238,23 @@ pub struct RoundEnd {
     pub round: u64,
     /// The vault whose hit killed Satoshi; None when the round timed out.
     pub killer: Option<String>,
-    /// Whoever took the most this round, raids and Satoshi hits together.
-    pub winner: Option<String>,
+    /// Satoshi's blast: the pot shared by damage, the damage dealt and by how many vaults.
     #[serde(with = "u128_str")]
-    pub winner_take: u128,
+    pub pot: u128,
+    #[serde(with = "u128_str")]
+    pub damage: u128,
+    pub hitters: u64,
     /// Coins burned during the round.
     #[serde(with = "u128_str")]
     pub burned: u128,
     pub started_ms: u64,
     pub ended_ms: u64,
-    /// Coins moved from the reserve into his new life bar.
+    /// Coins put into his new life bar (reserve first, then this round's burns).
     #[serde(with = "u128_str")]
     pub respawn: u128,
+    /// The part of `respawn` that came back from this round's burns.
+    #[serde(with = "u128_str")]
+    pub recycled: u128,
     /// His stash when the next round starts.
     #[serde(with = "u128_str")]
     pub boss_hp: u128,
@@ -232,6 +265,8 @@ pub trait Store {
     fn put_holder(&mut self, id: &str, h: Holder);
     fn raid(&self, id: u64) -> Option<Raid>;
     fn put_raid(&mut self, r: Raid);
+    fn blast(&self, round: u64) -> Option<Blast>;
+    fn put_blast(&mut self, b: Blast);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -391,8 +426,10 @@ impl State {
             round_burn_start: 0,
             sat_reserve: p.satoshi_supply - life,
             kills: 0,
-            round_top: None,
-            round_top_take: 0,
+            round_damage: 0,
+            round_hitters: 0,
+            blast_escrow: 0,
+            boss_spawn: life,
         }
     }
 
@@ -403,6 +440,11 @@ impl State {
             None => now.saturating_sub(self.start_ms) / p.epoch_ms,
             Some(a) => self.round + now.saturating_sub(self.round_start_ms) / a.round_max_ms,
         }
+    }
+
+    /// The round a blast for `dmg_round` must be older than (same as `epoch`).
+    pub fn round_now(&self, p: &Params, now: u64) -> u64 {
+        self.epoch(p, now)
     }
 
     /// When the current epoch (round) started and when it ends at the latest.
@@ -447,7 +489,8 @@ impl State {
 
     /// Accounting invariant. True in every reachable state.
     pub fn balanced(&self, p: &Params) -> bool {
-        self.e_tokens + self.q_tokens + self.curve_left(p) + self.escrow + self.burned + self.sat_reserve == p.total_supply
+        self.e_tokens + self.q_tokens + self.curve_left(p) + self.escrow + self.burned + self.sat_reserve + self.blast_escrow
+            == p.total_supply
     }
 
     pub fn satoshi_balance(&self) -> u128 {
@@ -659,6 +702,8 @@ impl<'a, S: Store> Game<'a, S> {
         if from == to {
             return Err(Error::SameAccount);
         }
+        self.settle(from);
+        self.settle(to);
         let mut hf = self.get(from)?;
         let mut ht = self.get(to)?;
         if self.s.after_q_day(self.p, now) && (hf.kind == Kind::Exposed || ht.kind == Kind::Exposed) {
@@ -677,6 +722,7 @@ impl<'a, S: Store> Game<'a, S> {
         if near_in == 0 {
             return Err(Error::Zero);
         }
+        self.settle(buyer);
         let mut h = self.get(buyer)?;
         if self.s.after_q_day(self.p, now) && h.kind == Kind::Exposed {
             return Err(Error::Frozen);
@@ -699,6 +745,7 @@ impl<'a, S: Store> Game<'a, S> {
         if amount == 0 {
             return Err(Error::Zero);
         }
+        self.settle(seller);
         let mut h = self.get(seller)?;
         if self.s.after_q_day(self.p, now) && h.kind == Kind::Exposed {
             return Err(Error::Frozen);
@@ -760,6 +807,8 @@ impl<'a, S: Store> Game<'a, S> {
         if attacker == target {
             return Err(Error::SameAccount);
         }
+        self.settle(attacker);
+        self.settle(target);
         let mut ha = self.get(attacker)?;
         if ha.kind != Kind::Vault {
             return Err(Error::NotVault);
@@ -849,6 +898,7 @@ impl<'a, S: Store> Game<'a, S> {
         if r.target != defender {
             return Err(Error::NotTarget);
         }
+        self.settle(defender);
         let mut hd = self.get(defender)?;
         if hd.kind != Kind::Vault {
             return Err(Error::NotVault);
@@ -903,6 +953,8 @@ impl<'a, S: Store> Game<'a, S> {
         if now <= r.deadline {
             return Err(Error::WindowOpen);
         }
+        self.settle(&r.target);
+        self.settle(&r.attacker);
         let mut ht = self.get(&r.target)?;
         let mut ha = self.get(&r.attacker)?;
         let bal = self.s.balance(ht.kind, ht.shares);
@@ -950,6 +1002,8 @@ impl<'a, S: Store> Game<'a, S> {
         }
         let p = self.p;
         if let Some(a) = &p.arcade {
+            self.settle(id);
+            h = self.get(id)?;
             return self.boss_hit(a, id, h, now);
         }
         let epoch = self.s.epoch(self.p, now);
@@ -993,18 +1047,15 @@ impl<'a, S: Store> Game<'a, S> {
         }
         h.gain += gain;
         h.loss += loss;
-        if r == self.s.round && gain > 0 && h.gain > self.s.round_top_take {
-            self.s.round_top = Some(id.to_string());
-            self.s.round_top_take = h.gain;
-        }
+        let _ = id;
     }
 
     fn start_round(&mut self, round: u64, at: u64) {
         self.s.round = round;
         self.s.round_start_ms = at;
         self.s.round_burn_start = self.s.burned;
-        self.s.round_top = None;
-        self.s.round_top_take = 0;
+        self.s.round_damage = 0;
+        self.s.round_hitters = 0;
     }
 
     /// Arcade: end a round that ran out of time. Call before any move; returns
@@ -1019,12 +1070,14 @@ impl<'a, S: Store> Game<'a, S> {
         let end = RoundEnd {
             round: self.s.round,
             killer: None,
-            winner: self.s.round_top.clone(),
-            winner_take: self.s.round_top_take,
+            pot: 0,
+            damage: self.s.round_damage,
+            hitters: self.s.round_hitters,
             burned: self.s.burned - self.s.round_burn_start,
             started_ms: started,
             ended_ms: started + a.round_max_ms,
             respawn: 0,
+            recycled: 0,
             boss_hp: self.s.satoshi_balance(),
         };
         let at = started + (cur - self.s.round) * a.round_max_ms;
@@ -1032,9 +1085,16 @@ impl<'a, S: Store> Game<'a, S> {
         Some(end)
     }
 
+    /// Satoshi's life left this round.
+    pub fn boss_hp(&self) -> u128 {
+        self.s.satoshi_balance().saturating_sub(self.s.round_damage)
+    }
+
+    /// Arcade hit: one bullet, records damage only. No coins move until he
+    /// blasts; then the pot is shared by damage (see `settle`).
     fn boss_hit(&mut self, a: &Arcade, id: &str, mut h: Holder, now: u64) -> Res<BossOutcome> {
-        let stash = self.s.satoshi_balance();
-        if stash < a.boss_floor {
+        let hp = self.boss_hp();
+        if hp == 0 {
             return Err(Error::BossEmpty);
         }
         if h.last_boss_ms != 0 && now < h.last_boss_ms + a.boss_cooldown_ms {
@@ -1047,48 +1107,110 @@ impl<'a, S: Store> Game<'a, S> {
         if self.s.balance(h.kind, h.shares) < self.p.boss_min_balance {
             return Err(Error::BossMinBalance);
         }
-        let amt = bps(stash, self.p.boss_bps).min(self.p.boss_cap);
-        if amt == 0 {
-            return Err(Error::BossEmpty);
+        let dmg = bps(self.s.boss_spawn, self.p.boss_bps).max(1).min(hp);
+        let round = self.s.round;
+        if h.dmg_round != round || h.dmg == 0 {
+            h.dmg_round = round;
+            h.dmg = 0;
+            self.s.round_hitters += 1;
         }
-        let sat_shares = self.s.satoshi_shares;
-        let used = self.s.withdraw(Bucket::E, sat_shares, amt)?;
-        self.s.satoshi_shares -= used;
-        let burn = bps(amt, self.p.boss_burn_bps);
-        self.s.burned += burn;
-        self.credit(id, &mut h, amt - burn);
-        self.note(id, &mut h, now, amt - burn, 0);
+        h.dmg += dmg;
+        self.s.round_damage += dmg;
         h.bullets = n - 1;
         h.bullet_ts = ts;
         h.last_boss_ms = now;
         self.store.put_holder(id, h);
 
         let mut round_end = None;
-        if self.s.satoshi_balance() < a.boss_floor {
-            // Satoshi dies: the round ends now and he respawns from his reserve.
-            let left = self.s.satoshi_balance();
-            let add = a.boss_life.saturating_sub(left).min(self.s.sat_reserve);
+        let mut burned = 0;
+        if self.boss_hp() == 0 {
+            // Satoshi blasts: his whole stash leaves him. The boss burn share
+            // burns; the rest is the pot, held until each hitter claims.
+            let stash = self.s.satoshi_balance();
+            let sat_shares = self.s.satoshi_shares;
+            let used = self.s.withdraw(Bucket::E, sat_shares, stash)?;
+            self.s.satoshi_shares -= used;
+            burned = bps(stash, self.p.boss_burn_bps);
+            let pot = stash - burned;
+            self.s.burned += burned;
+            self.s.blast_escrow += pot;
+            self.store.put_blast(Blast { round, pot, damage: self.s.round_damage, hitters: self.s.round_hitters, paid: 0 });
+            // He respawns from his reserve. Once the reserve is spent he is
+            // rebuilt from the coins this round burned (never more than that,
+            // so the 21M cap holds and nothing is minted).
+            let from_reserve = a.boss_life.min(self.s.sat_reserve);
+            self.s.sat_reserve -= from_reserve;
+            let round_burned = self.s.burned - self.s.round_burn_start;
+            let from_burns = (a.boss_life - from_reserve).min(round_burned);
+            self.s.burned -= from_burns;
+            let add = from_reserve + from_burns;
             if add > 0 {
                 let minted = self.s.deposit(Bucket::E, add);
                 self.s.satoshi_shares += minted;
-                self.s.sat_reserve -= add;
             }
+            self.s.boss_spawn = self.s.satoshi_balance();
             let end = RoundEnd {
-                round: self.s.round,
+                round,
                 killer: Some(id.to_string()),
-                winner: self.s.round_top.clone(),
-                winner_take: self.s.round_top_take,
-                burned: self.s.burned - self.s.round_burn_start,
+                pot,
+                damage: self.s.round_damage,
+                hitters: self.s.round_hitters,
+                burned: round_burned,
                 started_ms: self.s.round_start_ms,
                 ended_ms: now,
                 respawn: add,
+                recycled: from_burns,
                 boss_hp: self.s.satoshi_balance(),
             };
             self.s.kills += 1;
-            self.start_round(self.s.round + 1, now);
+            self.start_round(round + 1, now);
             round_end = Some(end);
         }
-        Ok(BossOutcome { taken: amt, burned: burn, gained: amt - burn, round_end })
+        Ok(BossOutcome { taken: dmg, burned, gained: 0, round_end })
+    }
+
+    /// Blast coins `h` has earned and not claimed yet (0 if none).
+    pub fn pending_blast(&self, h: &Holder) -> u128 {
+        if h.dmg == 0 || self.p.arcade.is_none() {
+            return 0;
+        }
+        match self.store.blast(h.dmg_round) {
+            Some(b) if b.damage > 0 => mul_div(b.pot, h.dmg, b.damage),
+            _ => 0,
+        }
+    }
+
+    /// Credit a vault's share of a finished blast. Lazy: called at the start
+    /// of every move that touches the vault, and by `claim_blast`. A damage
+    /// record from a round that timed out (no blast) is dropped. Returns
+    /// (round, coins) when coins were credited.
+    pub fn settle(&mut self, id: &str) -> Option<(u64, u128)> {
+        self.p.arcade.as_ref()?;
+        let mut h = self.store.holder(id)?;
+        if h.dmg == 0 || h.dmg_round >= self.s.round {
+            return None;
+        }
+        let round = h.dmg_round;
+        let share = self.pending_blast(&h);
+        h.dmg = 0;
+        let mut out = None;
+        if share > 0 {
+            if let Some(mut b) = self.store.blast(round) {
+                let share = share.min(b.pot - b.paid).min(self.s.blast_escrow);
+                b.paid += share;
+                self.store.put_blast(b);
+                self.s.blast_escrow -= share;
+                self.credit(id, &mut h, share);
+                if h.stat_round == round {
+                    h.gain += share;
+                } else if h.prev_round == round {
+                    h.prev_gain += share;
+                }
+                out = Some((round, share));
+            }
+        }
+        self.store.put_holder(id, h);
+        out
     }
 
     fn arcade_vault(&self, id: &str, now: u64) -> Res<(&'a Arcade, Holder)> {
@@ -1106,6 +1228,7 @@ impl<'a, S: Store> Game<'a, S> {
 
     /// Burn `reload_price` coins to fill the clip.
     pub fn reload(&mut self, id: &str, now: u64) -> Res<u128> {
+        self.settle(id);
         let (a, mut h) = self.arcade_vault(id, now)?;
         let (n, _) = regen(h.bullets, h.bullet_ts, a.clip_size, a.bullet_regen_ms, now);
         if n >= a.clip_size {
@@ -1122,6 +1245,7 @@ impl<'a, S: Store> Game<'a, S> {
 
     /// Burn `shield_price` coins for one shield charge.
     pub fn buy_shield(&mut self, id: &str, now: u64) -> Res<u32> {
+        self.settle(id);
         let (a, mut h) = self.arcade_vault(id, now)?;
         let (n, ts) = regen(h.shields, h.shield_ts, a.shield_max, a.shield_regen_ms, now);
         if n >= a.shield_max {
@@ -1141,6 +1265,7 @@ impl<'a, S: Store> Game<'a, S> {
         if self.p.arcade.is_none() {
             return Err(Error::NotArcade);
         }
+        self.settle(id);
         let mut h = self.get(id)?;
         if h.kind != Kind::Vault {
             return Err(Error::NotVault);
