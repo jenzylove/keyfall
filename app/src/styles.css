@@ -1045,3 +1045,5 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .pick.tu-amt button small { white-space: normal; line-height: 1.25; font-size: 9.5px; }
 .sheet { overflow-x: hidden; }
 .sheet-body > * { min-width: 0; }
+/* a guide card speaks alone: any toast already up hides under it */
+body:has(.guide-slot .guide) .ev { visibility: hidden; }
