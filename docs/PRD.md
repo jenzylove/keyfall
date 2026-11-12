@@ -174,4 +174,4 @@ The game's own bots (`shor`, `grover`, `qubit-01` to `qubit-08`) are ordinary qu
 
 ## 13. Submission checklist
 
-Kept in `docs/SUBMISSION_CHECKLIST.md`, ticked only from the live app.
+Ticked from the live app before submitting; the result is the submitted entry.

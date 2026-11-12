@@ -38,7 +38,7 @@ CI runs `ci.yml` (Rust tests and the wasm build), `sandbox.yml` (the near-worksp
 
 ## Rules
 
-- **Never redeploy or touch `keyfall.near`.** It is keyless on purpose, and judges rebuild its hash from tag `mainnet-v1`. Contract changes ship as a new practice season through `scripts/deploy.mjs` with a new params file.
+- **Never redeploy or touch `keyfall.near`.** It is keyless on purpose, and anyone can rebuild its hash from tag `mainnet-v1`. Contract changes ship as a new practice season through `scripts/deploy.mjs` with a new params file.
 - **Never commit or print keys.** Bot seeds live outside the repo and reach CI and Vercel only as the `NPC_SEEDS` secret.
 - **Every number on screen comes from the chain.** Animations may run ahead of a transaction, but the amount shown is the confirmed one.
 - **Copy:** short plain sentences, and no hyphens or dashes in visible text (names such as Q-Day and ML-DSA-65 are fine).

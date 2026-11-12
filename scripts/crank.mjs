@@ -39,4 +39,5 @@ if (process.env.GITHUB_STEP_SUMMARY) {
   const md = [`### Crank ${result.at}${dryRun ? " (dry run)" : ""}`, "", ...(lines.length ? lines.map((l) => `- ${l}`) : ["- nothing to do"]), ""].join("\n");
   fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
 }
-process.exit(result.moves.some((m) => m.error) ? 2 : 0);
+// A refused bot move is logged above; the heartbeat itself only fails when nothing could be sent at all.
+process.exit(result.moves.length && result.moves.every((m) => m.error) ? 2 : 0);

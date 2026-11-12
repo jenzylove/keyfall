@@ -25,10 +25,11 @@ export function landing(root: HTMLElement) {
   document.body.classList.add("on-title");
   root.innerHTML = `
     <section class="title" aria-label="KEYFALL">
-      <div class="t-radar" id="t-radar"></div>
+      <div class="t-radar" id="t-radar" aria-hidden="true"></div>
       <div class="t-copy">
         <h1 class="wordmark glitch">${logotype()}</h1>
         <p class="premise">The year is 2031 and quantum computers can crack old crypto keys. Run your coins into a quantum vault before the hunters catch you. Then hunt everyone who didn't.</p>
+        <p class="premise-sub">$KEYFALL is a memecoin on NEAR. Coins behind an old key leak to quantum vaults every round.</p>
         <a class="btn play pulse" href="/play${MAINNET_READY ? "?net=practice" : ""}" data-link id="t-play"><span class="tri" aria-hidden="true"></span>PLAY</a>
         ${MAINNET_READY ? `<a class="btn ghost play-real" href="/play?net=mainnet" data-link id="t-real">Play for real on mainnet</a>` : ""}
         <a class="t-restore" href="/play?${MAINNET_READY ? "net=mainnet&" : ""}restore=1" data-link id="t-restore">I have a wallet or vault code</a>

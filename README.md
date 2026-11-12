@@ -75,7 +75,7 @@ Before locking the mainnet contract, a spike proved mainnet accepts transactions
 | Only quantum signed moves are accepted | The same `boss_raid` refused with `E_NOT_QUANTUM` when signed with ed25519, accepted with ML-DSA-65: transactions in [docs/e2e/latest.md](docs/e2e/latest.md) |
 | Vaults are born quantum only | `/proof` reads every vault's key list live and counts how many hold exactly one `ml-dsa-65` key |
 | Nobody can change the rules | The contract accounts have **no access keys**, and `config()` equals the params file field by field |
-| The deployed code is this repo | `node scripts/judge-checks.mjs` compares your local wasm build hash with the deployed one. The mainnet wasm hash is in [`deployments/mainnet.json`](deployments/mainnet.json). How to rebuild it: [Rebuild the wasm](#rebuild-the-wasm) |
+| The deployed code is this repo | `node scripts/judge-checks.mjs` compares your local wasm build hash with the deployed one when cargo near is installed; otherwise it prints the deployed sha256 for you to compare. The mainnet wasm hash is in [`deployments/mainnet.json`](deployments/mainnet.json). How to rebuild it: [Rebuild the wasm](#rebuild-the-wasm) |
 | The books add up | exposed + vaults + market + escrow + burned = 21,000,000, checked live (practice also counts Satoshi's reserve and unclaimed blast pots) |
 | The whole season works, Q-Day included | 33 of 33 end to end checks on a fresh testnet season with real transactions, including frozen bags, stopped raids and `finalize()`: [docs/e2e/latest.md](docs/e2e/latest.md) |
 | Harvest cost does not grow with holders | Harvest gas was equal at 4 and 44 exposed holders in the recorded testnet run |
@@ -99,7 +99,7 @@ cd contract && cargo near build non-reproducible-wasm --no-abi
 sha256sum ../target/near/qday_contract/qday_contract.wasm
 ```
 
-This route depends on your Rust and cargo near versions, so the hash only matches with the toolchain it was built with. Judges have rebuilt `9095039b…` this way on their own machines. A stock GitHub runner (Rust 1.99.1, latest cargo near) gives a different hash for the same source; the [verifiable build](https://github.com/jenzylove/keyfall/actions/workflows/verifiable-build.yml) job prints both side by side.
+This route depends on your Rust and cargo near versions, so the hash only matches with the toolchain it was built with. A stock GitHub runner (Rust 1.99.1, latest cargo near) gives a different hash for the same source; the [verifiable build](https://github.com/jenzylove/keyfall/actions/workflows/verifiable-build.yml) job prints both side by side.
 
 **The reproducible route** (NEP-330) pins the whole toolchain in a Docker image chosen by digest in [`contract/Cargo.toml`](contract/Cargo.toml) (`sourcescan/cargo-near:0.22.0-rust-1.99.1`):
 
@@ -203,7 +203,7 @@ CI runs the Rust tests and the wasm build on every push, the sandbox suite plays
 
 ## Scope
 
-Unaudited. The mainnet contract holds real money; play with what you can lose. A vault owner could later add a classical key to their own vault with their quantum key; `/proof` reads every vault's keys and flags any that did. Moves must be signed directly by the vault: a relayed (gasless) transaction shows the relayer's key, so the contract refuses it.
+Unaudited. The mainnet contract holds real money; play with what you can lose. A vault owner could later add a classical key to their own vault with their quantum key; `/proof` reads every vault's keys and flags any that did. Moves must be signed directly by the vault: a relayed (gasless) transaction shows the relayer's key, so the contract refuses it. The bot tick endpoints are public and rate limited; they only send moves the contract itself accepts.
 
 ## Built with
 

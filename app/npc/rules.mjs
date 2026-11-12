@@ -17,7 +17,7 @@ export const GREET_DELAY_MS = 3 * 60 * 1000; // ...but never in a holder's first
 export const HUNTS_PER_TICK = 3; // repeat raids on players per tick, beyond the greeting
 export const GREET_TAIL = 10; // with no registration times, "newest" = last N holders
 export const STAKE_BALANCE_CAP_BPS = 2000n; // never stake more than 20% of the NPC's bag
-export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC pays for its gas
+export const FUEL_LOW_YOCTO = 15n * 10n ** 22n; // 0.15 NEAR: above the ~0.1 NEAR one ML-DSA-65 move reserves, so a bot refuels while it still can
 export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
 export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
 export const MAX_HUNTERS_ARCADE = 3; // arcade: at most 3 bots raid players per tick (steady pressure, never a pile on)

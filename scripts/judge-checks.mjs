@@ -55,8 +55,12 @@ console.log(`KEYFALL judge checks against ${contract} on ${target}\n`);
 const keys = await keyList(contract);
 check("contract account has no access keys", keys.length === 0, `${keys.length} keys`);
 const cfg = await view(contract, "config");
-const diffs = Object.keys(params).filter((k) => String(cfg[k]) !== String(params[k]));
-check(`config() equals ${paramsFile}`, diffs.length === 0 && Object.keys(cfg).length === Object.keys(params).length, diffs.join(", ") || "all fields equal");
+// flatten nested blocks (the arcade rules) so every sub field is compared on its own
+const flat = (o, pre = "") => Object.entries(o).flatMap(([k, v]) => (v && typeof v === "object" ? flat(v, `${pre}${k}.`) : [[`${pre}${k}`, String(v)]]));
+const cfgF = Object.fromEntries(flat(cfg)), parF = Object.fromEntries(flat(params));
+const allK = [...new Set([...Object.keys(cfgF), ...Object.keys(parF)])];
+const diffs = allK.filter((k) => cfgF[k] !== parF[k]);
+check(`config() equals ${paramsFile}`, diffs.length === 0, diffs.join(", ") || `all ${allK.length} fields equal`);
 
 // 2. Deployed code is the code recorded at deploy time, and the code in this repo
 const onChain = (await account(contract)).code_hash;
@@ -127,7 +131,7 @@ else {
   }
   const outcome = JSON.stringify(tx?.receipts_outcome || []) + JSON.stringify(tx?.status || {});
   check(
-    "an ed25519 signed vault move is refused on chain (E_NOT_QUANTUM)",
+    `an ed25519 signed vault move is refused on chain (E_NOT_QUANTUM), on ${e2e.contract}, a testnet copy of the mainnet code`,
     Boolean(tx) && tx.transaction.public_key.startsWith("ed25519:") && /E_NOT_QUANTUM/.test(outcome),
     tx ? `${tx.transaction.signer_id} signed ${tx.transaction.public_key.slice(0, 16)}…, ${refused.link}` : `tx ${refused?.hash} not found`,
   );
@@ -136,7 +140,7 @@ else {
   const e2eCode = ran[0] || (await account(e2e.contract, "testnet")).code_hash;
   if (target === "mainnet") check("that refusal ran on the same code as mainnet", e2eCode === onChain, `${e2e.contract} ran code_hash ${e2eCode}`);
   else console.log(`INFO  the refusal ran on ${e2e.contract}, code_hash ${e2eCode}${e2eCode === onChain ? " (same as this contract)" : `; this contract runs ${onChain}`}`);
-  check(`e2e run on ${e2e.contract}: ${e2e.checks.filter((c) => c.pass).length} of ${e2e.checks.length} checks pass`, e2e.all_pass, e2e.ran_at);
+  check(`e2e run on ${e2e.contract} (a testnet copy of the mainnet code): ${e2e.checks.filter((c) => c.pass).length} of ${e2e.checks.length} checks pass`, e2e.all_pass, e2e.ran_at);
 }
 
 console.log(`\nSeason: epoch ${s.epoch}, Q-Day ${new Date(Number(s.q_day_ms)).toISOString()}, ${s.vaults} vaults, ${s.exposed_holders} exposed holders, ${s.raids} raids, ${(s.vault_share_bps / 100).toFixed(2)}% of holdings in vaults`);

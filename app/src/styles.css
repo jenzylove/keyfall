@@ -786,6 +786,7 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 @keyframes fallpx { 0% { transform: translateY(-1px); opacity: 0; } 15% { opacity: 1; } 80% { transform: translateY(1px); opacity: 1; } 100% { transform: translateY(1.6px); opacity: 0; } }
 .glitch { animation: glitch 6s steps(1) infinite; }
 @keyframes glitch { 0%, 92%, 100% { transform: none; clip-path: none; } 93% { transform: translate(-3px, 0); clip-path: inset(10% 0 60% 0); } 94% { transform: translate(3px, 0); clip-path: inset(50% 0 20% 0); } 95% { transform: translate(-2px, 1px); clip-path: none; opacity: 0.6; } 96% { transform: none; opacity: 1; } }
+.premise-sub { margin: 8px 0 0; max-width: 40ch; font-size: 12.5px; line-height: 1.45; color: var(--ink2, var(--ink)); opacity: 0.8; text-wrap: balance; }
 .premise { margin: 18px 0 0; max-width: 34ch; font-size: 14.5px; line-height: 1.5; color: var(--ink); text-wrap: balance; }
 .btn.play { margin-top: 24px; min-height: 70px; width: min(100%, 320px); font-size: 34px; letter-spacing: 0.16em; }
 .btn.play .tri { width: 0; height: 0; border-left: 16px solid currentColor; border-block: 10px solid transparent; }

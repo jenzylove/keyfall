@@ -60,11 +60,14 @@ export function proof(root: HTMLElement) {
   (async () => {
     if (!simParams) { verdict("p-config", "fail", "No file"); return; }
     try {
-      const c = await chain.getConfig();
-      const keys = [...new Set([...Object.keys(simParams), ...Object.keys(c)])];
+      // nested blocks (the arcade rules) become one row per field
+      const flat = (o: any, pre = ""): [string, any][] => Object.entries(o || {}).flatMap(([k, v]) => (v && typeof v === "object" ? flat(v, `${pre}${k}.`) : [[`${pre}${k}`, v] as [string, any]]));
+      const c = Object.fromEntries(flat(await chain.getConfig()));
+      const sp = Object.fromEntries(flat(simParams));
+      const keys = [...new Set([...Object.keys(sp), ...Object.keys(c)])];
       let bad = 0;
       const rows = keys.map((k) => {
-        const a = simParams![k], b = c[k];
+        const a = sp[k], b = c[k];
         const same = a !== undefined && b !== undefined && String(a) === String(b);
         if (!same) bad++;
         return `<tr><td class="mono">${esc(k)}</td><td>${b === undefined ? "missing" : esc(fmtParam(k, b))}</td><td>${a === undefined ? "missing" : esc(fmtParam(k, a))}</td><td class="r">${same ? '<span class="okmark">same</span>' : '<span class="badmark">differs</span>'}</td></tr>`;
@@ -191,7 +194,7 @@ async function mainnetSection(root: HTMLElement) {
     if (!sec) return;
     const n = (keys?.keys || []).length;
     const qd = new Date(Number(stats.q_day_ms));
-    $("#mn-calc", sec).innerHTML = `<div><span>Access keys on ${esc(MAINNET_ID)}</span><span class="big${n ? " red" : ""}">${n}</span></div><div><span>Vaults</span><span class="big">${esc(String(stats.vaults))}</span></div><div><span>Players holding coins</span><span class="big">${esc(String(Number(stats.vaults) + Number(stats.exposed_holders)))}</span></div><div><span>Q-Day</span><b>${esc(qd.toUTCString().replace(" GMT", " UTC"))}</b></div>`;
+    $("#mn-calc", sec).innerHTML = `<div><span>Access keys on ${esc(MAINNET_ID)}</span><span class="big${n ? " red" : ""}">${n}</span></div><div><span>Vaults</span><span class="big">${esc(String(stats.vaults))}</span></div><div><span>Holders, including 3 bots and Satoshi</span><span class="big">${esc(String(Number(stats.vaults) + Number(stats.exposed_holders)))}</span></div><div><span>Q-Day</span><b>${esc(qd.toUTCString().replace(" GMT", " UTC"))}</b></div>`;
     $("#mn-foot", sec).innerHTML = `${n === 0 ? "No keys: nobody can change the mainnet contract." : "The mainnet contract still has keys."}${MAINNET_DEPLOY?.deploy_tx ? ` Deployed with no keys in one transaction: <a class="tx nowrap" href="https://nearblocks.io/txns/${esc(MAINNET_DEPLOY.deploy_tx)}" target="_blank" rel="noopener">see it ↗</a>` : ""}`;
     sec.hidden = false;
   } catch { /* mainnet not reachable from here: the section stays hidden */ }

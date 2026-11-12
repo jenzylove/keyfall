@@ -334,7 +334,7 @@ test("arcade: at most MAX_HUNTERS_ARCADE bots raid players a tick", () => {
   assert.ok(raids(decide(base({ npcs: bots, holders: people, random: () => 0.5 }))).length > MAX_HUNTERS_ARCADE);
 });
 
-test("arcade: after a player's immunity ends, bots wait a random 0 to 30 s more", async () => {
+test("arcade: after a player's immunity ends, bots wait a random 0 to 15 s more", async () => {
   const { paceJitter, PACE_JITTER_MS } = await import("./rules.mjs");
   const q = npc("qubit-01", { arcade: av() });
   const imm = NOW - 1;
