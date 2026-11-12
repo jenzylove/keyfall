@@ -14,13 +14,13 @@ export const DEFEND_CHANCE = 1 / 3; // an NPC defends 1 raid in 3 (2 in 3 made e
 export const DEFEND_AFTER = 0.5; // ...and only in the second half of the clock, so a raid on a bot is a real gamble
 export const GREET_WINDOW_MS = 30 * 60 * 1000; // qubits greet holders newer than this
 export const GREET_DELAY_MS = 3 * 60 * 1000; // ...but never in a holder's first minutes: the arena guide runs then
-export const HUNTS_PER_TICK = 2; // repeat raids on players per tick, beyond the greeting
+export const HUNTS_PER_TICK = 3; // repeat raids on players per tick, beyond the greeting
 export const GREET_TAIL = 10; // with no registration times, "newest" = last N holders
 export const STAKE_BALANCE_CAP_BPS = 2000n; // never stake more than 20% of the NPC's bag
 export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC pays for its gas
 export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
 export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
-export const MAX_HUNTERS_ARCADE = 2; // arcade: at most 2 bots raid players per tick (steady pressure, never a pile on)
+export const MAX_HUNTERS_ARCADE = 3; // arcade: at most 3 bots raid players per tick (steady pressure, never a pile on)
 export const MAX_BOSS_ARCADE = 3; // tuned for the 30 s page tick: 6 bot hits a minute take about 15% of his life bar, so he blasts in about 7 minutes alone and about 5 with a player shooting
 export const PACE_JITTER_MS = 15_000; // arcade: after a player's 90 s immunity ends, bots wait a random 0 to 15 s more
 /** Deterministic jitter per (player, immunity end), so ticks agree on when a player is fair game again. */

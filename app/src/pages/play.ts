@@ -1276,7 +1276,7 @@ export function play(root: HTMLElement) {
       busy = "build"; busyText = "creating your vault account…"; renderArena();
       stepOn(1);
       // not enough NEAR left for the vault (an older reserve, or a big buy): sell just enough $KEYFALL back first
-      if (MAIN && (w.walletNear ?? 0n) < BigInt(chain.nearToYocto(VAULT_NEEDS)) && w.walletBal > 0n) {
+      if ((w.walletNear ?? 0n) < BigInt(chain.nearToYocto(VAULT_NEEDS)) && w.walletBal > 0n) {
         busyText = "selling a little $KEYFALL to pay for the vault…"; renderArena();
         const needY = BigInt(chain.nearToYocto(VAULT_NEEDS + 0.02)) - (w.walletNear ?? 0n);
         let amt = w.walletBal / 20n; // start at 5% of the bag and grow until the contract's own quote covers it

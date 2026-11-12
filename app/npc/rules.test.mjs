@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, decideHunt, isNpc, ROSTER, MAX_MOVES, GREET_DELAY_MS, explainRaid } from "./rules.mjs";
+import { decide, decideHunt, isNpc, ROSTER, MAX_MOVES, GREET_DELAY_MS, explainRaid, MAX_HUNTERS_ARCADE } from "./rules.mjs";
 
 const C = "qday-test.testnet";
 const Q = (n) => (BigInt(n) * 10n ** 18n).toString();
@@ -325,13 +325,13 @@ test("arcade: bot hits on Satoshi are capped a tick, any round", () => {
   assert.equal(m.filter((x) => x.action === "boss").length, 3);
 });
 
-test("arcade: at most 2 bots raid players a tick", () => {
+test("arcade: at most MAX_HUNTERS_ARCADE bots raid players a tick", () => {
   const bots = ["shor", "grover", "qubit-01", "qubit-02", "qubit-03"].map((n) => npc(n, { arcade: av() }));
   const people = Array.from({ length: 6 }, (_, i) => holder(`p${i}.testnet`, { kind: i % 2 ? "vault" : "exposed" }));
   const r = raids(decide(base({ config: arcadeConfig, npcs: bots, holders: people, random: () => 0.5 })));
-  assert.equal(r.filter((x) => !x.target.endsWith(C)).length, 2);
+  assert.equal(r.filter((x) => !x.target.endsWith(C)).length, MAX_HUNTERS_ARCADE);
   // off arcade the old caps apply
-  assert.ok(raids(decide(base({ npcs: bots, holders: people, random: () => 0.5 }))).length > 2);
+  assert.ok(raids(decide(base({ npcs: bots, holders: people, random: () => 0.5 }))).length > MAX_HUNTERS_ARCADE);
 });
 
 test("arcade: after a player's immunity ends, bots wait a random 0 to 30 s more", async () => {
