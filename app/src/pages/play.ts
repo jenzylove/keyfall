@@ -2405,8 +2405,8 @@ export function play(root: HTMLElement) {
 
   /** A raid on your vault: answer it your way. SHIELD spends a charge (the raid fails), SHOOT BACK spends a bullet. */
   // A raid you just answered: the prompt goes at once, and comes back only if the answer failed and the clock still runs.
-  const answeredAt = new Map<string, number>();
-  const answer = (id: string) => { answeredAt.set(id, Date.now()); promptEl?.remove(); promptEl = null; promptKey = ""; };
+  const answeredAt = new Map<number, number>();
+  const answer = (id: number) => { answeredAt.set(id, Date.now()); promptEl?.remove(); promptEl = null; promptKey = ""; };
   function renderPrompt() {
     const r = w.incoming, me = sess().vault?.accountId;
     const quiet = !!r && Date.now() - (answeredAt.get(r.id) ?? 0) < 12_000;
