@@ -21,7 +21,7 @@ export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC p
 export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
 export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
 export const MAX_HUNTERS_ARCADE = 2; // arcade: at most 2 bots raid players per tick (steady pressure, never a pile on)
-export const MAX_BOSS_ARCADE = 2; // tuned in the v10 play test: with one player hitting, Satoshi dies in about 5 to 8 minutes
+export const MAX_BOSS_ARCADE = 3; // tuned for the 30 s page tick: 6 bot hits a minute take about 15% of his life bar, so he blasts in about 7 minutes alone and about 5 with a player shooting
 export const PACE_JITTER_MS = 30_000; // arcade: after a player's 90 s immunity ends, bots wait a random 0 to 30 s more
 /** Deterministic jitter per (player, immunity end), so ticks agree on when a player is fair game again. */
 export function paceJitter(account, immuneUntil) {

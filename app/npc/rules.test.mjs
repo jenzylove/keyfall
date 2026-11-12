@@ -322,7 +322,7 @@ test("arcade: a raided bot blocks with a shield charge, else shoots back", () =>
 test("arcade: bot hits on Satoshi are capped a tick, any round", () => {
   const ns = ["qubit-01", "qubit-02", "qubit-03"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
   const m = decide(base({ config: arcadeConfig, stats: { ...stats, epoch: "7" }, npcs: ns }));
-  assert.equal(m.filter((x) => x.action === "boss").length, 2);
+  assert.equal(m.filter((x) => x.action === "boss").length, 3);
 });
 
 test("arcade: at most 2 bots raid players a tick", () => {
@@ -348,7 +348,7 @@ test("arcade: after a player's immunity ends, bots wait a random 0 to 30 s more"
   assert.ok(js.size > 5, "gaps vary");
 });
 
-test("arcade: two bot hits on Satoshi a tick", () => {
-  const ns = ["qubit-01", "qubit-02", "qubit-03"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
-  assert.equal(decide(base({ config: arcadeConfig, npcs: ns })).filter((x) => x.action === "boss").length, 2);
+test("arcade: three bot hits on Satoshi a tick", () => {
+  const ns = ["qubit-01", "qubit-02", "qubit-03", "qubit-04"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
+  assert.equal(decide(base({ config: arcadeConfig, npcs: ns })).filter((x) => x.action === "boss").length, 3);
 });

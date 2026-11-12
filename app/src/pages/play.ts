@@ -2411,7 +2411,8 @@ export function play(root: HTMLElement) {
     const a = av();
     const sh = a?.shields ?? 0, bl = a?.bullets ?? 0;
     const won = BigInt(r!.stake) - bps(BigInt(r!.stake), P(c(), "raid_burn_bps"));
-    const key = `${r!.id}:${sh}:${bl}`;
+    const late = r!.deadline - chainNow() < 4000; // a signature needs a few seconds: past this point an answer would land after the clock
+    const key = `${r!.id}:${sh}:${bl}:${late}`;
     if (key === promptKey && promptEl) return;
     const fresh = !promptKey.startsWith(`${r!.id}:`);
     promptKey = key;
@@ -2421,6 +2422,7 @@ export function play(root: HTMLElement) {
         <button type="button" class="ap-btn sh"${sh <= 0 && w.vaultBal < AB("shield_price") ? " disabled" : ""}><b>SHIELD</b><small>${sh > 0 ? `${sh} charge${sh === 1 ? "" : "s"} left` : `buy one · ${short(AB("shield_price"))}`}</small></button>
         <button type="button" class="ap-btn sb"${bl <= 0 ? " disabled" : ""}><b>SHOOT BACK</b><small>${bl > 0 ? `${bl} bullet${bl === 1 ? "" : "s"} left` : "no bullets"}</small></button>
       </div>`;
+    if (late) { promptEl.innerHTML = `<p class="ap-t"><span class="av">${avatar(r!.attacker)}</span><span><b>${N(r!.attacker)}</b>'s shot is landing<small>Too late to answer this one. Watch the next.</small></span></p>`; return; }
     promptEl.querySelector<HTMLButtonElement>(".sh")!.onclick = () => { const x = w.incoming; if (x) blockRaid(x, sh <= 0); };
     promptEl.querySelector<HTMLButtonElement>(".sb")!.onclick = () => { const x = w.incoming; if (x) { arena.fly("me", x.attacker, "#27f0ff", 8); defendByShot(x); } };
     if (fresh) { sfx.play("alarm"); sfx.vibrate([60, 40, 60]); }
