@@ -19,6 +19,8 @@ export const GREET_TAIL = 10; // with no registration times, "newest" = last N h
 export const STAKE_BALANCE_CAP_BPS = 2000n; // never stake more than 20% of the NPC's bag
 export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC pays for its gas
 export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
+export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
+export const MAX_BOSS_ARCADE = 1; // arcade: bot hits on Satoshi per tick (the blast pot is mostly for players)
 
 const QUBITS = Array.from({ length: 8 }, (_, i) => ({
   name: `qubit-${String(i + 1).padStart(2, "0")}`,
@@ -86,6 +88,9 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
   const npcIds = new Set(npcs.map((n) => n.account));
   const npcOf = (id) => npcIds.has(id) || isNpc(id, home);
   const view = (n) => ({ ...n, balance: big(n.balance) });
+  // Arcade season: raids cost bullets, shields are charges, a vault on a break is left alone by bots.
+  const arcade = !!config?.arcade;
+  const onBreak = (h) => !!h?.arcade?.on_break;
 
   // 0. Fuel: an NPC low on NEAR for gas sells part of its bag, like any player would.
   //    `fuel` maps NPC account -> NEAR balance in yocto (missing = unknown, skip).
@@ -128,7 +133,11 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     if (r.opened_at && now < Number(r.opened_at) + window * DEFEND_AFTER) continue; // too early to answer
     const roll = random();
     if (roll < DEFEND_CHANCE) {
-      push({ npc: npcName(t.account), action: "defend", raidId: String(r.id), reason: `Raided by ${short(r.attacker)}; defends 1 in 3 times, late in the clock (rolled ${roll.toFixed(2)}).` });
+      const why = `Raided by ${short(r.attacker)}; answers 1 in 3 times, late in the clock (rolled ${roll.toFixed(2)}).`;
+      if (!arcade) push({ npc: npcName(t.account), action: "defend", raidId: String(r.id), reason: why });
+      // arcade: block with a shield charge if it has one, else shoot back with a bullet
+      else if ((t.arcade?.shields || 0) > 0) push({ npc: npcName(t.account), action: "block", raidId: String(r.id), reason: `${why} Blocks with a shield charge.` });
+      else if ((t.arcade?.bullets ?? t.raids_left ?? 0) > 0) push({ npc: npcName(t.account), action: "defend", raidId: String(r.id), reason: `${why} No shield left: shoots back.` });
     }
   }
 
@@ -138,9 +147,10 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
   const targeted = new Set(); // a target is raided at most once per tick
 
   // Would the contract accept this raid? (mirrors Game::raid)
-  const eligible = (att, t) =>
+  const eligible = (att, t, bots = false) =>
     t.account !== att.account &&
-    !npcOf(t.account) &&
+    (bots ? npcIds.has(t.account) : !npcOf(t.account)) &&
+    !(onBreak(t) && !bots) &&
     big(t.immune_until) <= BigInt(now) &&
     t.under_raid == null &&
     !targeted.has(t.account) &&
@@ -196,10 +206,33 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     if (t) launch(grover, t, `Least shielded vault in range: ${(t.shield_bps || 0) / 100}% shield, ${fmt(t.balance)} coins.`);
   }
 
+  // 3b. Arcade: bots raid bots. After every player raid, one free bot picks a fight with another bot
+  //     (same contract checks), so there is always a fight on screen. Bagholders stay out of it.
+  if (arcade) {
+    let brawls = 0;
+    const busy = new Set(openRaids.filter((r) => Number(r.deadline) >= now).flatMap((r) => [r.attacker, r.target]));
+    const prey = npcs.map(view).filter((t) => !busy.has(t.account));
+    for (const att of [...attackers].sort(() => random() - 0.5)) {
+      if (brawls >= BRAWLS_PER_TICK) break;
+      if (spent.has(att.account) || busy.has(att.account)) continue;
+      const t = prey.filter((x) => eligible(att, x, true)).sort(() => random() - 0.5)[0];
+      if (t && launch(att, t, `Bot fight: ${npcName(att.account)} raids ${npcName(t.account)} (${fmt(t.balance)} coins).`)) brawls++;
+    }
+  }
+
   // 4. Boss (after raids, so a greeting is never delayed): NPCs with boss_ready and enough balance, at most MAX_BOSS per tick.
+  //    Arcade: one bot hit per tick at most, whenever its bullets and cooldown allow (rounds are short).
   let boss = 0;
   for (const n of npcs) {
-    if (boss >= MAX_BOSS) break;
+    if (boss >= (arcade ? MAX_BOSS_ARCADE : MAX_BOSS)) break;
+    if (arcade) {
+      if (spent.has(n.account)) continue; // used its bullet on a raid this tick
+      if (n.boss_ready && big(n.balance) >= big(config.boss_min_balance)) {
+        boss += 1;
+        push({ npc: npcName(n.account), action: "boss", reason: `Shoots Satoshi: ${n.arcade?.bullets ?? "?"} bullets, his life bar is shared by damage when he blasts.` });
+      }
+      continue;
+    }
     // bots hit Satoshi at most once every 6 hours of play whatever the round length, so on a short clock
     // his stash is left for players (on the 6 hour mainnet clock that is every round)
     const every = Math.max(1, Math.round(6 * 3600_000 / Number(config.epoch_ms || 21600000)));
@@ -231,6 +264,7 @@ export function decideHunt({ now, config, stats, npcs = [], holders = [], openRa
   if (npcOf(raw.account)) return { skipped: "NPCs do not hunt each other." };
   const t = { ...raw, balance: big(raw.balance) };
   if (t.under_raid != null) return { skipped: "Already under raid." };
+  if (config?.arcade && t.arcade?.on_break) return { skipped: "On a break: bots leave this vault alone." };
   if (big(t.immune_until) > BigInt(now)) return { skipped: "Resting after a raid." };
   if (t.balance < big(config.min_target_balance)) return { skipped: "Too small to raid." };
   const live = openRaids.filter((r) => Number(r.deadline) >= now);

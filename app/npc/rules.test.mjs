@@ -271,3 +271,56 @@ test("qubits keep hunting a player who already met them, once the rest is over",
   const resting = holder("player.testnet", { immune_until: String(NOW + 60_000) });
   assert.equal(raids(decide(base({ npcs: qs, holders: [resting] }))).length, 0);
 });
+
+// ---- arcade season
+const arcadeConfig = { ...config, arcade: { clip_size: 5, shield_max: 3 } };
+const av = (o = {}) => ({ bullets: 5, shields: 0, on_break: false, ...o });
+
+test("arcade: bots raid bots, at most one fight a tick, never bagholders or busy bots", () => {
+  const a = npc("qubit-01", { arcade: av() });
+  const b = npc("qubit-02", { arcade: av() });
+  const m = decide(base({ config: arcadeConfig, npcs: [a, b], holders: [a, b], random: () => 0.5 }));
+  const r = raids(m);
+  assert.equal(r.length, 1);
+  assert.ok([a.account, b.account].includes(r[0].target));
+  assert.match(r[0].reason, /Bot fight/);
+  // off arcade, bots never fight
+  assert.equal(raids(decide(base({ npcs: [a, b], holders: [a, b], random: () => 0.5 }))).length, 0);
+  // a bot already in a raid is left out
+  const busy = [{ id: "1", attacker: "human.testnet", target: b.account, deadline: NOW + 60000, opened_at: NOW }];
+  assert.equal(raids(decide(base({ config: arcadeConfig, npcs: [a, b], holders: [a, b], openRaids: busy, random: () => 0.9 }))).length, 0);
+});
+
+test("arcade: players come first, then the bot fight", () => {
+  const a = npc("shor", { arcade: av() });
+  const b = npc("qubit-02", { arcade: av() });
+  const c = npc("qubit-03", { arcade: av() });
+  const m = decide(base({ config: arcadeConfig, npcs: [a, b, c], holders: [a, b, c, holder("rich.testnet")], random: () => 0.5 }));
+  const r = raids(m);
+  assert.equal(r.filter((x) => x.target === "rich.testnet").length >= 1, true);
+  assert.equal(r.filter((x) => /Bot fight/.test(x.reason)).length, 1);
+});
+
+test("arcade: a vault on a break is left alone by bots", () => {
+  const s = npc("grover", { arcade: av() });
+  const rest = holder("rest.testnet", { kind: "vault", arcade: av({ on_break: true }) });
+  assert.equal(raids(decide(base({ config: arcadeConfig, npcs: [s], holders: [rest], random: () => 0.5 }))).length, 0);
+  const h = decideHunt({ now: NOW, config: arcadeConfig, stats, npcs: [s], holders: [rest], target: rest.account, contract: C });
+  assert.match(h.skipped, /break/);
+});
+
+test("arcade: a raided bot blocks with a shield charge, else shoots back", () => {
+  const raid = (t) => [{ id: "9", attacker: "human.testnet", target: t.account, opened_at: NOW - 60000, deadline: NOW + 1000 }];
+  const g = npc("grover", { arcade: av({ shields: 1 }) });
+  assert.equal(decide(base({ config: arcadeConfig, npcs: [g], openRaids: raid(g), random: () => 0 }))[0].action, "block");
+  const h = npc("grover", { arcade: av({ shields: 0 }) });
+  assert.equal(decide(base({ config: arcadeConfig, npcs: [h], openRaids: raid(h), random: () => 0 }))[0].action, "defend");
+  const e = npc("grover", { arcade: av({ shields: 0, bullets: 0 }), raids_left: 0 });
+  assert.equal(decide(base({ config: arcadeConfig, npcs: [e], openRaids: raid(e), random: () => 0 })).length, 0);
+});
+
+test("arcade: one bot hit on Satoshi a tick, any round", () => {
+  const ns = ["qubit-01", "qubit-02", "qubit-03"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
+  const m = decide(base({ config: arcadeConfig, stats: { ...stats, epoch: "7" }, npcs: ns }));
+  assert.equal(m.filter((x) => x.action === "boss").length, 1);
+});

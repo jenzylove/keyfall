@@ -122,7 +122,7 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
       else {
         const args =
           m.action === "raid" ? { target: m.target, stake: m.stake } :
-          m.action === "defend" || m.action === "resolve" ? { raid_id: m.raidId } :
+          m.action === "defend" || m.action === "block" || m.action === "resolve" ? { raid_id: m.raidId } :
           m.action === "sell" ? { amount: m.amount } : {};
         const methodName = m.action === "boss" ? "boss_raid" : m.action;
         const deposit = m.action === "buy" ? (BigInt(m.near) * 10n ** 24n).toString() : "0";
