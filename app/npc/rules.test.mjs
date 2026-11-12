@@ -319,10 +319,10 @@ test("arcade: a raided bot blocks with a shield charge, else shoots back", () =>
   assert.equal(decide(base({ config: arcadeConfig, npcs: [e], openRaids: raid(e), random: () => 0 })).length, 0);
 });
 
-test("arcade: one bot hit on Satoshi a tick, any round", () => {
+test("arcade: bot hits on Satoshi are capped a tick, any round", () => {
   const ns = ["qubit-01", "qubit-02", "qubit-03"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
   const m = decide(base({ config: arcadeConfig, stats: { ...stats, epoch: "7" }, npcs: ns }));
-  assert.equal(m.filter((x) => x.action === "boss").length, 1);
+  assert.equal(m.filter((x) => x.action === "boss").length, 2);
 });
 
 test("arcade: at most 2 bots raid players a tick", () => {
@@ -332,4 +332,23 @@ test("arcade: at most 2 bots raid players a tick", () => {
   assert.equal(r.filter((x) => !x.target.endsWith(C)).length, 2);
   // off arcade the old caps apply
   assert.ok(raids(decide(base({ npcs: bots, holders: people, random: () => 0.5 }))).length > 2);
+});
+
+test("arcade: after a player's immunity ends, bots wait a random 0 to 30 s more", async () => {
+  const { paceJitter, PACE_JITTER_MS } = await import("./rules.mjs");
+  const q = npc("qubit-01", { arcade: av() });
+  const imm = NOW - 1;
+  const p1 = holder("p1.testnet", { kind: "vault", immune_until: String(imm), arcade: av() });
+  const j = paceJitter(p1.account, String(imm));
+  assert.ok(j >= 0 && j < PACE_JITTER_MS);
+  const at = (t) => raids(decide(base({ now: t, config: arcadeConfig, npcs: [q], holders: [p1], random: () => 0.5 }))).filter((r) => r.target === p1.account).length;
+  if (j > 2) assert.equal(at(imm + 1), 0);
+  assert.equal(at(imm + PACE_JITTER_MS + 1), 1);
+  const js = new Set(Array.from({ length: 20 }, (_, i) => Math.round(paceJitter(`p${i}`, "123") / 1000)));
+  assert.ok(js.size > 5, "gaps vary");
+});
+
+test("arcade: two bot hits on Satoshi a tick", () => {
+  const ns = ["qubit-01", "qubit-02", "qubit-03"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
+  assert.equal(decide(base({ config: arcadeConfig, npcs: ns })).filter((x) => x.action === "boss").length, 2);
 });

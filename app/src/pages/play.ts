@@ -2387,7 +2387,7 @@ export function play(root: HTMLElement) {
   let promptKey = "";
   const breakChip = document.createElement("button");
   breakChip.type = "button"; breakChip.className = "break-chip"; breakChip.hidden = true;
-  breakChip.onclick = () => toggleBreak();
+  breakChip.onclick = () => toggleBreak(false);
   field.appendChild(breakChip);
   let seenRound: string | null = null;
   let awayChecked = false;
@@ -2452,7 +2452,7 @@ export function play(root: HTMLElement) {
       <div class="who"><span class="av big icon gold">${I.shoot}</span><div><h2 class="s-title">${a.bullets <= 0 ? "Clip empty" : `${a.bullets} of ${clip} bullets`}</h2><p class="who-sub" id="rl-next"></p></div></div>
       <div class="rl-pips">${Array.from({ length: clip }, (_, i) => `<i class="${i < a.bullets ? "on" : ""}"></i>`).join("")}</div>
       <p class="s-text">Reload now: burn <b class="yel">${full(price)}</b> coins and your clip is back to <b>${clip}</b> bullets. The burn leaves the supply for good.</p>
-      <p class="s-text dim">Or keep playing: one bullet comes back free every ${every(A("bullet_regen_ms"))}. Shield charges block raids without a bullet.</p>
+      <p class="s-text dim">Or keep playing: one bullet comes back free ${every(A("bullet_regen_ms"))}. Shield charges block raids without a bullet.</p>
       <button class="btn wide hot" id="rl-go">Reload · ${short(price)}</button>
       <button class="btn wide ghost" id="rl-no">Keep playing</button>
       <p class="s-msg" id="rl-msg" role="status"></p>`, "gold");
@@ -2465,7 +2465,7 @@ export function play(root: HTMLElement) {
     const B = sheet!.body, a = av();
     if (!a || !B.isConnected) return;
     const nx = B.querySelector<HTMLElement>("#rl-next");
-    if (nx) nx.innerHTML = Number(a.next_bullet_ms) > 0 ? `Next free bullet in <b data-until="${a.next_bullet_ms}">${span(Number(a.next_bullet_ms) - chainNow())}</b>` : "Clip full";
+    if (nx) nx.innerHTML = Number(a.next_bullet_ms) > 0 && Number(a.next_bullet_ms) <= chainNow() ? "A free bullet is landing now" : Number(a.next_bullet_ms) > 0 ? `Next free bullet in <b data-until="${a.next_bullet_ms}">${span(Number(a.next_bullet_ms) - chainNow())}</b>` : "Clip full";
     const go = B.querySelector<HTMLButtonElement>("#rl-go");
     if (go && !go.classList.contains("busy")) {
       const full_ = a.bullets >= A("clip_size"), poor = w.vaultBal < AB("reload_price");
@@ -2482,7 +2482,7 @@ export function play(root: HTMLElement) {
       <div class="who"><span class="av big icon gold">${I.shield}</span><div><h2 class="s-title">Shield charges</h2><p class="who-sub" id="sa-next"></p></div></div>
       <div class="rl-pips sh" id="sa-pips"></div>
       <p class="s-text">When someone shoots at you, a charge blocks it: the raid fails and their stake is yours, less a ${pct(P(c(), "raid_burn_bps"))} burn. Blocking never spends a bullet.</p>
-      <p class="s-text dim">One charge comes back free every ${every(A("shield_regen_ms"))}, up to ${smax}. A charge costs ${full(price)}, far less than a reload, so save your bullets for Satoshi.</p>
+      <p class="s-text dim">One charge comes back free ${every(A("shield_regen_ms"))}, up to ${smax}. A charge costs ${full(price)}, far less than a reload, so save your bullets for Satoshi.</p>
       <button class="btn wide" id="sa-go">Buy a charge · ${short(price)}</button>
       <p class="s-msg" id="sa-msg" role="status"></p>`, "gold");
     const B = sheet!.body;
@@ -2567,15 +2567,17 @@ export function play(root: HTMLElement) {
     breakChip.hidden = !on;
     if (on) { const t = `On a break · bots leave you alone · <b>Come back</b>`; if (breakChip.innerHTML !== t) breakChip.innerHTML = t; }
   }
-  function toggleBreak() {
+  /** Start or end a break. A move already in flight is waited for, so the tap is never dropped. */
+  async function toggleBreak(on: boolean) {
     const a = av();
     if (!a) return;
-    const on = !a.on_break;
     const since = Number(a.break_since || 0);
+    breakChip.innerHTML = on ? "Starting your break…" : "Coming back…";
+    for (let i = 0; i < 60 && busy; i++) await new Promise((r) => setTimeout(r, 250));
     void act("break", on ? "starting your break…" : "coming back…", () => chain.setBreak(on), () => {
       toast({ tone: "ink", title: on ? "On a break. The bots leave you alone. Players can still raid you, and your shield charges still answer." : "Back in the fight." });
       if (!on && since > 0) void showAway({ t: since, bal: "" }, true);
-    });
+    }, (why) => { toast({ tone: "hot", title: `${on ? "The break" : "Coming back"} did not go through: ${esc(why)}. Tap again.` }); renderBreak(); });
   }
 
   // ----- while you were away
@@ -2683,7 +2685,7 @@ export function play(root: HTMLElement) {
       B.querySelector<HTMLElement>("#bs-stash")!.textContent = `${full(hp)} life`;
       B.querySelector<HTMLElement>("#bs-of")!.textContent = `of ${full(spawn)} · ${a.hitters} hitter${a.hitters === "1" ? "" : "s"}`;
       B.querySelector<HTMLElement>("#bs-hp")!.style.width = `${spawn > 0n ? Number((hp * 10000n) / spawn) / 100 : 0}%`;
-      B.querySelector<HTMLElement>("#bs-rule")!.textContent = `Everyone shares his life bar. A hit costs one bullet and takes ${full(bps(spawn, P(c(), "boss_bps")))} life, then a ${every(A("boss_cooldown_ms"))} cooldown. When the bar empties he blasts: his stash, ${full(pot)} after a ${pct(P(c(), "boss_burn_bps"))} burn, is split by damage. Then he respawns.`;
+      B.querySelector<HTMLElement>("#bs-rule")!.textContent = `Everyone shares his life bar. A hit costs one bullet and takes ${full(bps(spawn, P(c(), "boss_bps")))} life, then you wait ${minutes(A("boss_cooldown_ms"))} to hit again. When the bar empties he blasts: his stash, ${full(pot)} after a ${pct(P(c(), "boss_burn_bps"))} burn, is split by damage. Then he respawns.`;
       const a2 = v?.arcade;
       B.querySelector<HTMLElement>("#bs-next")!.innerHTML = !v ? "Only a vault can shoot him." : !enough ? `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to shoot him.` : v.boss_ready ? `Your hit now: <b class="yel">−${full(dmgNow)}</b> life.` : (a2?.bullets ?? 0) <= 0 ? `Clip empty. Reload to shoot him.` : `Next hit in <b data-until="${a2?.boss_next_ms}">${span(Number(a2?.boss_next_ms || 0) - chainNow())}</b>.`;
       if (!go.classList.contains("busy")) { go.disabled = !(v && enough && v.boss_ready); go.textContent = v?.boss_ready ? "HIT" : (a2?.bullets ?? 0) <= 0 ? "HIT · reload first" : "HIT · cooling down"; }
@@ -2889,7 +2891,7 @@ export function play(root: HTMLElement) {
     B.querySelector<HTMLButtonElement>("#st-restore")!.onclick = () => openRestore();
     B.querySelector<HTMLButtonElement>("#st-act")!.onclick = () => openActivity();
     const brk = B.querySelector<HTMLButtonElement>("#st-break");
-    if (brk) brk.onclick = () => { sheet?.close(); toggleBreak(); };
+    if (brk) brk.onclick = () => { const on = !w.vault?.arcade?.on_break; sheet?.close(); toggleBreak(on); };
     B.querySelector<HTMLButtonElement>("#st-boss")!.onclick = () => openSatoshi();
     B.querySelector<HTMLButtonElement>("#st-net")!.onclick = () => openNetwork();
     const cash = B.querySelector<HTMLButtonElement>("#st-cash");

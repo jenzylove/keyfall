@@ -54,6 +54,8 @@ export function hudClock(ms: number): string {
 
 /** "every 6 hours", "10 minutes" */
 export function every(ms: number): string {
+  if (ms < 60_000) return `every ${Math.round(ms / 1000)} seconds`;
+  if (ms === 60_000) return "every minute";
   const h = ms / 3_600_000;
   if (h >= 1 && Number.isInteger(h)) return h === 1 ? "every hour" : `every ${h} hours`;
   const m = ms / 60_000;

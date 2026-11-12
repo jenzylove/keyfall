@@ -21,7 +21,14 @@ export const FUEL_LOW_YOCTO = 5n * 10n ** 22n; // 0.05 NEAR: below this an NPC p
 export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
 export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
 export const MAX_HUNTERS_ARCADE = 2; // arcade: at most 2 bots raid players per tick (steady pressure, never a pile on)
-export const MAX_BOSS_ARCADE = 1; // arcade: bot hits on Satoshi per tick (the blast pot is mostly for players)
+export const MAX_BOSS_ARCADE = 2; // tuned in the v10 play test: with one player hitting, Satoshi dies in about 5 to 8 minutes
+export const PACE_JITTER_MS = 30_000; // arcade: after a player's 90 s immunity ends, bots wait a random 0 to 30 s more
+/** Deterministic jitter per (player, immunity end), so ticks agree on when a player is fair game again. */
+export function paceJitter(account, immuneUntil) {
+  let h = 2166136261;
+  for (const ch of `${account}:${immuneUntil}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return (h % 1000) / 1000 * PACE_JITTER_MS;
+} // arcade: bot hits on Satoshi per tick (the blast pot is mostly for players)
 
 const QUBITS = Array.from({ length: 8 }, (_, i) => ({
   name: `qubit-${String(i + 1).padStart(2, "0")}`,
@@ -153,6 +160,7 @@ export function decide({ now, config, stats, npcs = [], holders = [], openRaids 
     (bots ? npcIds.has(t.account) : !npcOf(t.account)) &&
     !(onBreak(t) && !bots) &&
     big(t.immune_until) <= BigInt(now) &&
+    (bots || !arcade || big(t.immune_until) === 0n || Number(t.immune_until) + paceJitter(t.account, String(t.immune_until)) <= now) &&
     t.under_raid == null &&
     !targeted.has(t.account) &&
     t.balance >= big(config.min_target_balance) &&
