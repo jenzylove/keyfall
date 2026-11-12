@@ -68,6 +68,9 @@ async function firstSeenFromFeed(view) {
   return seen;
 }
 
+const FUEL_TTL_MS = 5 * 60_000;
+const fuelCache = new Map();
+
 export async function tick({ contract, seeds, network = "testnet", dryRun = false }) {
   const view = (methodName, args = {}) => near.view({ contractId: contract, methodName, args, network });
   const [config, stats, holders, openRaids] = await Promise.all([
@@ -77,18 +80,25 @@ export async function tick({ contract, seeds, network = "testnet", dryRun = fals
     view("open_raids", { scan: 100 }),
   ]);
 
+  // NPC and bagholder views come from the holders list already read (one call, not one per bot)
+  const byId = new Map(holders.map((h) => [h.account, h]));
   const names = ROSTER.map((r) => r.name).filter((n) => seeds[n]);
-  const npcViews = (await Promise.all(names.map((n) => view("holder", { account_id: `${n}.${contract}` })))).filter(Boolean);
+  const npcViews = names.map((n) => byId.get(`${n}.${contract}`)).filter(Boolean);
   const firstSeen = await firstSeenFromFeed(view).catch(() => ({}));
   // red bots: their own accounts (not vaults); seeds keyed by the full account id, "ed25519:..."
   const bagIds = bagholdersOf(contract).filter((id) => seeds[id]);
-  const bagViews = (await Promise.all(bagIds.map((id) => view("holder", { account_id: id }).then((h) => h || { account: id, balance: "0", kind: "exposed" })))).filter(Boolean);
+  const bagViews = bagIds.map((id) => byId.get(id) || { account: id, balance: "0", kind: "exposed" });
 
+  // NEAR left for gas changes slowly: read each bot's account at most every 5 minutes
   const fuel = {};
   await Promise.all(
     [...npcViews, ...bagViews].map(async (n) => {
+      const c = fuelCache.get(n.account);
+      if (c && Date.now() - c.at < FUEL_TTL_MS) { fuel[n.account] = c.v; return; }
       try {
-        fuel[n.account] = BigInt(unwrap(await near.queryAccount({ accountId: n.account, network })).amount);
+        const v = BigInt(unwrap(await near.queryAccount({ accountId: n.account, network })).amount);
+        fuel[n.account] = v;
+        fuelCache.set(n.account, { v, at: Date.now() });
       } catch {
         /* unknown: decide() skips it */
       }
