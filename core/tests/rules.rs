@@ -30,6 +30,7 @@ fn params() -> Params {
         boss_cap: 10_000 * T,
         boss_burn_bps: 2_000,
         boss_min_balance: 1_000 * T,
+        arcade: None,
     }
 }
 

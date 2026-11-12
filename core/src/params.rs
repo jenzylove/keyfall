@@ -85,6 +85,41 @@ pub struct Params {
     /// A vault needs at least this balance to hit the boss.
     #[serde(with = "u128_str")]
     pub boss_min_balance: u128,
+
+    /// Arcade rules (practice seasons from season 5): bullets, shield charges,
+    /// a Satoshi life bar and rounds that end when he dies. Absent on older
+    /// seasons and on mainnet, which keep raids per epoch and burned shields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arcade: Option<Arcade>,
+}
+
+/// Arcade rule numbers. Every one of them is readable through `config()`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct Arcade {
+    /// Bullets a vault holds at most. One raid, one defend or one Satoshi hit costs one.
+    pub clip_size: u32,
+    /// One free bullet comes back every this many ms, up to the clip.
+    pub bullet_regen_ms: u64,
+    /// `reload()` burns this many coins and fills the clip.
+    #[serde(with = "u128_str")]
+    pub reload_price: u128,
+    /// Shield charges a vault holds at most. `block()` spends one.
+    pub shield_max: u32,
+    /// One free shield charge comes back every this many ms, up to the max.
+    pub shield_regen_ms: u64,
+    /// `buy_shield()` burns this many coins for one charge.
+    #[serde(with = "u128_str")]
+    pub shield_price: u128,
+    /// A vault may hit Satoshi once per this many ms.
+    pub boss_cooldown_ms: u64,
+    /// Satoshi's stash at each spawn (his life bar), refilled from his reserve.
+    #[serde(with = "u128_str")]
+    pub boss_life: u128,
+    /// He dies when his stash falls below this.
+    #[serde(with = "u128_str")]
+    pub boss_floor: u128,
+    /// A round with no kill ends after this many ms.
+    pub round_max_ms: u64,
 }
 
 impl Params {
@@ -118,6 +153,14 @@ impl Params {
         }
         if self.stake_mult == 0 || self.max_raids_per_epoch == 0 || self.punch_down_band == 0 {
             return Err("stake_mult, max_raids_per_epoch and punch_down_band must be positive");
+        }
+        if let Some(a) = &self.arcade {
+            if a.clip_size == 0 || a.bullet_regen_ms == 0 || a.shield_max == 0 || a.shield_regen_ms == 0 || a.round_max_ms == 0 {
+                return Err("arcade clip, shields, regen times and round length must be positive");
+            }
+            if a.boss_life == 0 || a.boss_life > self.satoshi_supply || a.boss_floor >= a.boss_life {
+                return Err("arcade boss_life must be positive, within satoshi_supply and above boss_floor");
+            }
         }
         Ok(())
     }

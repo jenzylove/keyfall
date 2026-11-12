@@ -5,7 +5,7 @@ pub mod math;
 pub mod params;
 
 pub use game::*;
-pub use params::{Params, DECIMALS, ONE, ONE_NEAR};
+pub use params::{Arcade, Params, DECIMALS, ONE, ONE_NEAR};
 
 use std::collections::HashMap;
 

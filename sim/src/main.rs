@@ -423,6 +423,7 @@ fn candidate(harvest_bps: u32, take_bps: u32, vault_take_bps: u32, band: u32, bo
         boss_cap: 20_000 * T,
         boss_burn_bps: 2_000,
         boss_min_balance: 10_000 * T,
+        arcade: None,
     }
 }
 

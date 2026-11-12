@@ -5,7 +5,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::math::{bps, div_ceil_256, isqrt, mul_div, mul_div_ceil, U256};
-use crate::params::{u128_str, Params};
+use crate::params::{u128_str, Arcade, Params};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 #[serde(rename_all = "lowercase")]
@@ -34,6 +34,30 @@ pub struct Holder {
     pub raids_in_epoch: u32,
     /// Open raid against this holder, if any.
     pub under_raid: Option<u64>,
+
+    // Arcade (season 5 practice). Counts regenerate lazily from the anchors.
+    /// Bullets at `bullet_ts`; one more every `bullet_regen_ms`, up to the clip.
+    pub bullets: u32,
+    pub bullet_ts: u64,
+    /// Shield charges at `shield_ts`; one more every `shield_regen_ms`, up to the max.
+    pub shields: u32,
+    pub shield_ts: u64,
+    /// Time of the last Satoshi hit (0 = never).
+    pub last_boss_ms: u64,
+    /// Taking a break: the game's bots leave this vault alone (players still may not).
+    pub on_break: bool,
+    pub break_since: u64,
+    /// Coins won and lost in round `stat_round`, and in the round before it.
+    pub stat_round: u64,
+    #[serde(with = "u128_str")]
+    pub gain: u128,
+    #[serde(with = "u128_str")]
+    pub loss: u128,
+    pub prev_round: u64,
+    #[serde(with = "u128_str")]
+    pub prev_gain: u128,
+    #[serde(with = "u128_str")]
+    pub prev_loss: u128,
 }
 
 impl Holder {
@@ -48,7 +72,56 @@ impl Holder {
             raid_epoch: u64::MAX,
             raids_in_epoch: 0,
             under_raid: None,
+            bullets: 0,
+            bullet_ts: 0,
+            shields: 0,
+            shield_ts: 0,
+            last_boss_ms: 0,
+            on_break: false,
+            break_since: 0,
+            stat_round: 0,
+            gain: 0,
+            loss: 0,
+            prev_round: u64::MAX,
+            prev_gain: 0,
+            prev_loss: 0,
         }
+    }
+
+    /// Coins (won, lost) in `round`, if this holder kept a record of it.
+    pub fn round_stats(&self, round: u64) -> (u128, u128) {
+        if self.stat_round == round {
+            (self.gain, self.loss)
+        } else if self.prev_round == round {
+            (self.prev_gain, self.prev_loss)
+        } else {
+            (0, 0)
+        }
+    }
+}
+
+/// Lazy regeneration: `count` at anchor `ts`, one more every `period`, up to
+/// `max`. Returns the count now and the new anchor (now, when full).
+pub fn regen(count: u32, ts: u64, max: u32, period: u64, now: u64) -> (u32, u64) {
+    if count >= max {
+        return (max, now);
+    }
+    let k = now.saturating_sub(ts) / period;
+    let n = (count as u64).saturating_add(k);
+    if n >= max as u64 {
+        (max, now)
+    } else {
+        (n as u32, ts + k * period)
+    }
+}
+
+/// When the next free unit arrives (0 when already full).
+pub fn regen_next(count: u32, ts: u64, max: u32, period: u64, now: u64) -> u64 {
+    let (n, t) = regen(count, ts, max, period, now);
+    if n >= max {
+        0
+    } else {
+        t + period
     }
 }
 
@@ -58,6 +131,8 @@ pub enum RaidStatus {
     Open,
     Defended,
     Resolved,
+    /// Arcade: the target spent a shield charge; the raid failed.
+    Blocked,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -110,6 +185,46 @@ pub struct State {
     pub next_raid_id: u64,
     pub vaults: u64,
     pub exposed_holders: u64,
+
+    // Arcade. Unused (zero) on older seasons.
+    /// Current round (the arcade epoch) and when it started.
+    pub round: u64,
+    pub round_start_ms: u64,
+    /// `burned` when the round started, for the round's burn total.
+    #[serde(with = "u128_str")]
+    pub round_burn_start: u128,
+    /// Satoshi's reserve: the part of his supply not yet in his life bar.
+    /// Each respawn refills his stash from here; it never grows.
+    #[serde(with = "u128_str")]
+    pub sat_reserve: u128,
+    pub kills: u64,
+    /// Who took the most this round (raids and Satoshi hits together) and how much.
+    pub round_top: Option<String>,
+    #[serde(with = "u128_str")]
+    pub round_top_take: u128,
+}
+
+/// One finished arcade round.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct RoundEnd {
+    pub round: u64,
+    /// The vault whose hit killed Satoshi; None when the round timed out.
+    pub killer: Option<String>,
+    /// Whoever took the most this round, raids and Satoshi hits together.
+    pub winner: Option<String>,
+    #[serde(with = "u128_str")]
+    pub winner_take: u128,
+    /// Coins burned during the round.
+    #[serde(with = "u128_str")]
+    pub burned: u128,
+    pub started_ms: u64,
+    pub ended_ms: u64,
+    /// Coins moved from the reserve into his new life bar.
+    #[serde(with = "u128_str")]
+    pub respawn: u128,
+    /// His stash when the next round starts.
+    #[serde(with = "u128_str")]
+    pub boss_hp: u128,
 }
 
 pub trait Store {
@@ -148,6 +263,13 @@ pub enum Error {
     BossDone,
     BossMinBalance,
     BossEmpty,
+    NoBullets,
+    NoShields,
+    ClipFull,
+    ShieldsFull,
+    BossCooldown,
+    NotArcade,
+    Arcade,
 }
 
 impl Error {
@@ -180,6 +302,13 @@ impl Error {
             Error::BossDone => "E_BOSS_DONE: already hit Satoshi this epoch",
             Error::BossMinBalance => "E_BOSS_MIN_BALANCE: vault balance too low to hit Satoshi",
             Error::BossEmpty => "E_BOSS_EMPTY: Satoshi has nothing left",
+            Error::NoBullets => "E_NO_BULLETS: the clip is empty; reload or wait for a free bullet",
+            Error::NoShields => "E_NO_SHIELDS: no shield charges left; buy one or shoot back",
+            Error::ClipFull => "E_CLIP_FULL: the clip is already full",
+            Error::ShieldsFull => "E_SHIELDS_FULL: shield charges are already full",
+            Error::BossCooldown => "E_BOSS_COOLDOWN: wait for your next shot at Satoshi",
+            Error::NotArcade => "E_NOT_ARCADE: this season has no bullets or shield charges",
+            Error::Arcade => "E_ARCADE: shields are charges this season; use buy_shield",
         }
     }
 }
@@ -228,6 +357,8 @@ pub struct BossOutcome {
     pub burned: u128,
     #[serde(with = "u128_str")]
     pub gained: u128,
+    /// Arcade: set when this hit killed Satoshi and ended the round.
+    pub round_end: Option<RoundEnd>,
 }
 
 pub struct Game<'a, S: Store> {
@@ -238,13 +369,15 @@ pub struct Game<'a, S: Store> {
 
 impl State {
     pub fn genesis(p: &Params, start_ms: u64) -> State {
+        // Arcade: Satoshi spawns with `boss_life`; the rest of his supply waits in his reserve.
+        let life = p.arcade.as_ref().map(|a| a.boss_life.min(p.satoshi_supply)).unwrap_or(p.satoshi_supply);
         State {
             start_ms,
-            e_tokens: p.satoshi_supply,
-            e_shares: p.satoshi_supply,
+            e_tokens: life,
+            e_shares: life,
             q_tokens: 0,
             q_shares: 0,
-            satoshi_shares: p.satoshi_supply,
+            satoshi_shares: life,
             sold: 0,
             near_reserve: 0,
             escrow: 0,
@@ -253,11 +386,46 @@ impl State {
             next_raid_id: 1,
             vaults: 0,
             exposed_holders: 0,
+            round: 0,
+            round_start_ms: start_ms,
+            round_burn_start: 0,
+            sat_reserve: p.satoshi_supply - life,
+            kills: 0,
+            round_top: None,
+            round_top_take: 0,
         }
     }
 
+    /// The epoch. On arcade seasons this is the round: it moves on when
+    /// Satoshi dies, or `round_max_ms` after the round started.
     pub fn epoch(&self, p: &Params, now: u64) -> u64 {
-        now.saturating_sub(self.start_ms) / p.epoch_ms
+        match &p.arcade {
+            None => now.saturating_sub(self.start_ms) / p.epoch_ms,
+            Some(a) => self.round + now.saturating_sub(self.round_start_ms) / a.round_max_ms,
+        }
+    }
+
+    /// When the current epoch (round) started and when it ends at the latest.
+    pub fn epoch_bounds(&self, p: &Params, now: u64) -> (u64, u64) {
+        match &p.arcade {
+            None => {
+                let e = self.epoch(p, now);
+                (self.start_ms + e * p.epoch_ms, self.start_ms + (e + 1) * p.epoch_ms)
+            }
+            Some(a) => {
+                let skipped = now.saturating_sub(self.round_start_ms) / a.round_max_ms;
+                let start = self.round_start_ms + skipped * a.round_max_ms;
+                (start, start + a.round_max_ms)
+            }
+        }
+    }
+
+    /// Harvests due in total by `now` (one per epoch until Q-Day).
+    pub fn harvest_due_total(&self, p: &Params, now: u64) -> u64 {
+        match &p.arcade {
+            None => self.epoch(p, now).min(p.season_epochs),
+            Some(_) => self.epoch(p, now.min(self.q_day_ms(p))),
+        }
     }
 
     pub fn q_day_ms(&self, p: &Params) -> u64 {
@@ -279,7 +447,7 @@ impl State {
 
     /// Accounting invariant. True in every reachable state.
     pub fn balanced(&self, p: &Params) -> bool {
-        self.e_tokens + self.q_tokens + self.curve_left(p) + self.escrow + self.burned == p.total_supply
+        self.e_tokens + self.q_tokens + self.curve_left(p) + self.escrow + self.burned + self.sat_reserve == p.total_supply
     }
 
     pub fn satoshi_balance(&self) -> u128 {
@@ -441,7 +609,12 @@ impl<'a, S: Store> Game<'a, S> {
         if self.store.holder(id).is_some() {
             return Err(Error::AlreadyRegistered);
         }
-        self.store.put_holder(id, Holder::new(kind));
+        let mut h = Holder::new(kind);
+        if let (Some(a), Kind::Vault) = (&self.p.arcade, kind) {
+            h.bullets = a.clip_size;
+            h.shields = a.shield_max;
+        }
+        self.store.put_holder(id, h);
         match kind {
             Kind::Vault => self.s.vaults += 1,
             Kind::Exposed => self.s.exposed_holders += 1,
@@ -456,7 +629,7 @@ impl<'a, S: Store> Game<'a, S> {
     // ---------------------------------------------------------------- harvest
 
     pub fn harvest(&mut self, now: u64) -> Res<HarvestOutcome> {
-        let due_total = self.s.epoch(self.p, now).min(self.p.season_epochs);
+        let due_total = self.s.harvest_due_total(self.p, now);
         if self.s.harvested >= due_total {
             return Err(Error::NothingDue);
         }
@@ -552,6 +725,9 @@ impl<'a, S: Store> Game<'a, S> {
         if amount == 0 {
             return Err(Error::Zero);
         }
+        if self.p.arcade.is_some() {
+            return Err(Error::Arcade);
+        }
         if self.s.after_q_day(self.p, now) {
             return Err(Error::QDayPassed);
         }
@@ -606,17 +782,29 @@ impl<'a, S: Store> Game<'a, S> {
         if tbal.saturating_mul(self.p.punch_down_band as u128) < abal {
             return Err(Error::PunchDown);
         }
-        let epoch = self.s.epoch(self.p, now);
-        if ha.raid_epoch != epoch {
-            ha.raid_epoch = epoch;
-            ha.raids_in_epoch = 0;
+        let p = self.p;
+        if let Some(a) = &p.arcade {
+            // A raid is a shot: it costs one bullet.
+            let (n, ts) = regen(ha.bullets, ha.bullet_ts, a.clip_size, a.bullet_regen_ms, now);
+            if n == 0 {
+                return Err(Error::NoBullets);
+            }
+            self.debit(&mut ha, stake)?;
+            ha.bullets = n - 1;
+            ha.bullet_ts = ts;
+        } else {
+            let epoch = self.s.epoch(self.p, now);
+            if ha.raid_epoch != epoch {
+                ha.raid_epoch = epoch;
+                ha.raids_in_epoch = 0;
+            }
+            if ha.raids_in_epoch >= self.p.max_raids_per_epoch {
+                return Err(Error::RaidLimit);
+            }
+            self.debit(&mut ha, stake)?;
+            ha.raids_in_epoch += 1;
         }
-        if ha.raids_in_epoch >= self.p.max_raids_per_epoch {
-            return Err(Error::RaidLimit);
-        }
-        self.debit(&mut ha, stake)?;
         self.s.escrow += stake;
-        ha.raids_in_epoch += 1;
 
         let id = self.s.next_raid_id;
         self.s.next_raid_id += 1;
@@ -639,7 +827,21 @@ impl<'a, S: Store> Game<'a, S> {
         Ok(id)
     }
 
+    /// Shoot back. On arcade seasons it costs one bullet.
     pub fn defend(&mut self, defender: &str, raid_id: u64, now: u64) -> Res<Raid> {
+        self.answer(defender, raid_id, now, false)
+    }
+
+    /// Arcade: spend one shield charge; the raid fails like a defended one
+    /// (the stake, less the burn, goes to the target).
+    pub fn block(&mut self, defender: &str, raid_id: u64, now: u64) -> Res<Raid> {
+        if self.p.arcade.is_none() {
+            return Err(Error::NotArcade);
+        }
+        self.answer(defender, raid_id, now, true)
+    }
+
+    fn answer(&mut self, defender: &str, raid_id: u64, now: u64, block: bool) -> Res<Raid> {
         let mut r = self.store.raid(raid_id).ok_or(Error::RaidNotOpen)?;
         if r.status != RaidStatus::Open {
             return Err(Error::RaidNotOpen);
@@ -654,14 +856,40 @@ impl<'a, S: Store> Game<'a, S> {
         if now > r.deadline {
             return Err(Error::WindowClosed);
         }
+        let p = self.p;
+        if let Some(a) = &p.arcade {
+            if block {
+                let (n, ts) = regen(hd.shields, hd.shield_ts, a.shield_max, a.shield_regen_ms, now);
+                if n == 0 {
+                    return Err(Error::NoShields);
+                }
+                hd.shields = n - 1;
+                hd.shield_ts = ts;
+            } else {
+                let (n, ts) = regen(hd.bullets, hd.bullet_ts, a.clip_size, a.bullet_regen_ms, now);
+                if n == 0 {
+                    return Err(Error::NoBullets);
+                }
+                hd.bullets = n - 1;
+                hd.bullet_ts = ts;
+            }
+        }
         let burn = bps(r.stake, self.p.raid_burn_bps);
         self.s.escrow -= r.stake;
         self.s.burned += burn;
         self.credit(defender, &mut hd, r.stake - burn);
+        self.note(defender, &mut hd, now, r.stake - burn, 0);
         hd.under_raid = None;
         hd.immune_until = now + self.p.immunity_ms;
-        r.status = RaidStatus::Defended;
+        r.status = if block { RaidStatus::Blocked } else { RaidStatus::Defended };
         r.burned = burn;
+        if self.p.arcade.is_some() {
+            let attacker = r.attacker.clone();
+            if let Some(mut ha) = self.store.holder(&attacker) {
+                self.note(&attacker, &mut ha, now, 0, r.stake);
+                self.store.put_holder(&attacker, ha);
+            }
+        }
         self.store.put_holder(defender, hd);
         self.store.put_raid(r.clone());
         Ok(r)
@@ -694,6 +922,9 @@ impl<'a, S: Store> Game<'a, S> {
         self.s.escrow -= r.stake;
         self.s.burned += burn;
         self.credit(&r.attacker, &mut ha, r.stake + take - burn);
+        let (att, tgt) = (r.attacker.clone(), r.target.clone());
+        self.note(&att, &mut ha, now, take - burn, 0);
+        self.note(&tgt, &mut ht, now, 0, take);
         ht.under_raid = None;
         ht.immune_until = now + self.p.immunity_ms;
         r.status = RaidStatus::Resolved;
@@ -717,6 +948,10 @@ impl<'a, S: Store> Game<'a, S> {
         if h.kind != Kind::Vault {
             return Err(Error::NotVault);
         }
+        let p = self.p;
+        if let Some(a) = &p.arcade {
+            return self.boss_hit(a, id, h, now);
+        }
         let epoch = self.s.epoch(self.p, now);
         if h.last_boss_epoch == epoch {
             return Err(Error::BossDone);
@@ -737,7 +972,183 @@ impl<'a, S: Store> Game<'a, S> {
         self.credit(id, &mut h, amt - burn);
         h.last_boss_epoch = epoch;
         self.store.put_holder(id, h);
-        Ok(BossOutcome { taken: amt, burned: burn, gained: amt - burn })
+        Ok(BossOutcome { taken: amt, burned: burn, gained: amt - burn, round_end: None })
+    }
+
+    // ---------------------------------------------------------------- arcade
+
+    /// Record coins won or lost in the current round, and the round's top taker.
+    fn note(&mut self, id: &str, h: &mut Holder, now: u64, gain: u128, loss: u128) {
+        if self.p.arcade.is_none() {
+            return;
+        }
+        let r = self.s.epoch(self.p, now);
+        if h.stat_round != r {
+            h.prev_round = h.stat_round;
+            h.prev_gain = h.gain;
+            h.prev_loss = h.loss;
+            h.stat_round = r;
+            h.gain = 0;
+            h.loss = 0;
+        }
+        h.gain += gain;
+        h.loss += loss;
+        if r == self.s.round && gain > 0 && h.gain > self.s.round_top_take {
+            self.s.round_top = Some(id.to_string());
+            self.s.round_top_take = h.gain;
+        }
+    }
+
+    fn start_round(&mut self, round: u64, at: u64) {
+        self.s.round = round;
+        self.s.round_start_ms = at;
+        self.s.round_burn_start = self.s.burned;
+        self.s.round_top = None;
+        self.s.round_top_take = 0;
+    }
+
+    /// Arcade: end a round that ran out of time. Call before any move; returns
+    /// the finished round when one ended since the last call.
+    pub fn roll(&mut self, now: u64) -> Option<RoundEnd> {
+        let a = self.p.arcade.as_ref()?;
+        let cur = self.s.epoch(self.p, now);
+        if cur <= self.s.round {
+            return None;
+        }
+        let started = self.s.round_start_ms;
+        let end = RoundEnd {
+            round: self.s.round,
+            killer: None,
+            winner: self.s.round_top.clone(),
+            winner_take: self.s.round_top_take,
+            burned: self.s.burned - self.s.round_burn_start,
+            started_ms: started,
+            ended_ms: started + a.round_max_ms,
+            respawn: 0,
+            boss_hp: self.s.satoshi_balance(),
+        };
+        let at = started + (cur - self.s.round) * a.round_max_ms;
+        self.start_round(cur, at);
+        Some(end)
+    }
+
+    fn boss_hit(&mut self, a: &Arcade, id: &str, mut h: Holder, now: u64) -> Res<BossOutcome> {
+        let stash = self.s.satoshi_balance();
+        if stash < a.boss_floor {
+            return Err(Error::BossEmpty);
+        }
+        if h.last_boss_ms != 0 && now < h.last_boss_ms + a.boss_cooldown_ms {
+            return Err(Error::BossCooldown);
+        }
+        let (n, ts) = regen(h.bullets, h.bullet_ts, a.clip_size, a.bullet_regen_ms, now);
+        if n == 0 {
+            return Err(Error::NoBullets);
+        }
+        if self.s.balance(h.kind, h.shares) < self.p.boss_min_balance {
+            return Err(Error::BossMinBalance);
+        }
+        let amt = bps(stash, self.p.boss_bps).min(self.p.boss_cap);
+        if amt == 0 {
+            return Err(Error::BossEmpty);
+        }
+        let sat_shares = self.s.satoshi_shares;
+        let used = self.s.withdraw(Bucket::E, sat_shares, amt)?;
+        self.s.satoshi_shares -= used;
+        let burn = bps(amt, self.p.boss_burn_bps);
+        self.s.burned += burn;
+        self.credit(id, &mut h, amt - burn);
+        self.note(id, &mut h, now, amt - burn, 0);
+        h.bullets = n - 1;
+        h.bullet_ts = ts;
+        h.last_boss_ms = now;
+        self.store.put_holder(id, h);
+
+        let mut round_end = None;
+        if self.s.satoshi_balance() < a.boss_floor {
+            // Satoshi dies: the round ends now and he respawns from his reserve.
+            let left = self.s.satoshi_balance();
+            let add = a.boss_life.saturating_sub(left).min(self.s.sat_reserve);
+            if add > 0 {
+                let minted = self.s.deposit(Bucket::E, add);
+                self.s.satoshi_shares += minted;
+                self.s.sat_reserve -= add;
+            }
+            let end = RoundEnd {
+                round: self.s.round,
+                killer: Some(id.to_string()),
+                winner: self.s.round_top.clone(),
+                winner_take: self.s.round_top_take,
+                burned: self.s.burned - self.s.round_burn_start,
+                started_ms: self.s.round_start_ms,
+                ended_ms: now,
+                respawn: add,
+                boss_hp: self.s.satoshi_balance(),
+            };
+            self.s.kills += 1;
+            self.start_round(self.s.round + 1, now);
+            round_end = Some(end);
+        }
+        Ok(BossOutcome { taken: amt, burned: burn, gained: amt - burn, round_end })
+    }
+
+    fn arcade_vault(&self, id: &str, now: u64) -> Res<(&'a Arcade, Holder)> {
+        let p: &'a Params = self.p;
+        let a = p.arcade.as_ref().ok_or(Error::NotArcade)?;
+        if self.s.after_q_day(self.p, now) {
+            return Err(Error::QDayPassed);
+        }
+        let h = self.get(id)?;
+        if h.kind != Kind::Vault {
+            return Err(Error::NotVault);
+        }
+        Ok((a, h))
+    }
+
+    /// Burn `reload_price` coins to fill the clip.
+    pub fn reload(&mut self, id: &str, now: u64) -> Res<u128> {
+        let (a, mut h) = self.arcade_vault(id, now)?;
+        let (n, _) = regen(h.bullets, h.bullet_ts, a.clip_size, a.bullet_regen_ms, now);
+        if n >= a.clip_size {
+            return Err(Error::ClipFull);
+        }
+        self.debit(&mut h, a.reload_price)?;
+        self.s.burned += a.reload_price;
+        self.note(id, &mut h, now, 0, a.reload_price);
+        h.bullets = a.clip_size;
+        h.bullet_ts = now;
+        self.store.put_holder(id, h);
+        Ok(a.reload_price)
+    }
+
+    /// Burn `shield_price` coins for one shield charge.
+    pub fn buy_shield(&mut self, id: &str, now: u64) -> Res<u32> {
+        let (a, mut h) = self.arcade_vault(id, now)?;
+        let (n, ts) = regen(h.shields, h.shield_ts, a.shield_max, a.shield_regen_ms, now);
+        if n >= a.shield_max {
+            return Err(Error::ShieldsFull);
+        }
+        self.debit(&mut h, a.shield_price)?;
+        self.s.burned += a.shield_price;
+        self.note(id, &mut h, now, 0, a.shield_price);
+        h.shields = n + 1;
+        h.shield_ts = if n + 1 >= a.shield_max { now } else { ts };
+        self.store.put_holder(id, h);
+        Ok(n + 1)
+    }
+
+    /// Take a break (the game's bots leave the vault alone) or come back.
+    pub fn set_break(&mut self, id: &str, on: bool, now: u64) -> Res<()> {
+        if self.p.arcade.is_none() {
+            return Err(Error::NotArcade);
+        }
+        let mut h = self.get(id)?;
+        if h.kind != Kind::Vault {
+            return Err(Error::NotVault);
+        }
+        h.on_break = on;
+        h.break_since = if on { now } else { 0 };
+        self.store.put_holder(id, h);
+        Ok(())
     }
 
     /// Shield in force for a holder right now.
