@@ -122,6 +122,8 @@ export class ChainError extends Error {
   hash?: string;
   /** Set when this refusal came on a resend after a network error: the first send may have landed. */
   maybeLanded = false;
+  /** E_REPLACE_WALLET: the NEAR held by the wallet a restore would replace. */
+  near?: bigint;
   constructor(message: string, hash?: string) {
     super(friendly(message));
     this.code = (message.match(/E_[A-Z_]+/) || ["E_UNKNOWN"])[0];
@@ -147,6 +149,9 @@ const MESSAGES: Record<string, string> = {
   E_QDAY_PASSED: "Q-Day has passed. The season is over.",
   E_TAKEN: "That vault name is taken.",
   E_SLIPPAGE: "Price moved. Try again.",
+  E_NO_WALLET: "No wallet matches this code. Check each block and try again.",
+  E_NO_VAULT: "No vault by that name.",
+  E_REPLACE_WALLET: "This replaces the wallet on this device. Save its code first.",
 };
 function friendly(raw: string): string {
   const code = (raw.match(/E_[A-Z_]+/) || [""])[0];
@@ -293,10 +298,28 @@ export async function walletRecoveryCode(): Promise<string | null> {
   await walletSaving;
   return walletSecret ? seedToCode(seedOfSecret(walletSecret)) : null;
 }
-/** Restore a wallet on this device from its recovery code. */
-export async function restoreWallet(code: string): Promise<{ accountId: string }> {
+/** Whether an account exists on this network (view_account). Throws on a network failure, so a dropped
+ * connection is never read as "no such account". */
+export async function accountExists(accountId: string): Promise<boolean> {
+  try {
+    await withRpc(() => near.queryAccount({ accountId, network: NETWORK }));
+    return true;
+  } catch (e: any) {
+    if (/does not exist|UNKNOWN_ACCOUNT|doesn't exist|AccountDoesNotExist/i.test(String(e?.message || e) + JSON.stringify(e?.data || ""))) return false;
+    throw e;
+  }
+}
+/** Restore a wallet on this device from its recovery code. The account the code opens must exist on chain,
+ * so a mistyped code never replaces the wallet here. When a different wallet that holds NEAR is on this
+ * device, it refuses with E_REPLACE_WALLET (and that wallet's balance) until `replaceOk` is set. */
+export async function restoreWallet(code: string, replaceOk = false): Promise<{ accountId: string }> {
   const secretKey = secretFromSeed(codeToSeed(code));
   const accountId = implicitOf(secretKey);
+  if (!(await accountExists(accountId))) throw new ChainError("E_NO_WALLET: no account for this code");
+  if (walletSigner && walletSigner.accountId !== accountId && !replaceOk) {
+    const held = await nearBalance(walletSigner.accountId);
+    if (held > 0n) { const e = new ChainError("E_REPLACE_WALLET: another wallet with NEAR is on this device"); e.near = held; throw e; }
+  }
   await storeWallet(accountId, secretKey);
   useWallet(accountId, secretKey);
   try { localStorage.setItem(LS_WALLET_SAVED, accountId); } catch {}
@@ -634,9 +657,11 @@ export async function vaultRecoveryCode(): Promise<string | null> {
 
 /** Restore a vault on this device from its recovery code. */
 export async function restoreVault(name: string, code: string) {
+  const nm = name.trim().toLowerCase();
   const seed = codeToSeed(code);
   const signer = signerFromSeed(seed);
-  const accountId = name.includes(".") ? name : `${name}.${CONTRACT}`;
+  const accountId = nm.includes(".") ? nm : `${nm}.${CONTRACT}`;
+  if (!(await accountExists(accountId))) throw new ChainError("E_NO_VAULT: no such vault account");
   const keys = await keyList(accountId);
   const handle = String(publicKeyToHandle(signer.publicKey as any));
   if (!keys.some((k) => k.public_key === signer.publicKey || k.public_key === handle)) throw new ChainError("That code does not control this vault.");

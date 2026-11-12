@@ -88,12 +88,15 @@ const PLAIN: Record<string, string> = {
   E_INSUFFICIENT: "You do not have enough coins for that.",
   E_WINDOW_CLOSED: "Too late: the defend window has closed.",
   E_WINDOW_OPEN: "The defend window is still open.",
-  E_BOSS_DONE: "You already hit Satoshi. Come back after the next harvest.",
-  E_BOSS_MIN_BALANCE: "Your vault needs a bigger bag to hit Satoshi.",
+  E_BOSS_DONE: "You already shot his stash. Come back after the next harvest.",
+  E_BOSS_MIN_BALANCE: "Your vault needs a bigger bag to shoot his stash.",
   E_FROZEN: "Those coins froze at Q-Day.",
   E_QDAY_PASSED: "Q-Day has passed. The season is over.",
   E_TAKEN: "That vault name is taken. Try another.",
   E_SLIPPAGE: "The price moved. Try again.",
+  E_NO_WALLET: "No wallet matches this code. Check each block and try again.",
+  E_NO_VAULT: "No vault by that name. Check the name on your saved code file.",
+  E_REPLACE_WALLET: "This replaces the wallet on this device. Save its code first.",
 };
 export const FALLBACK = "That did not go through. Try again.";
 
@@ -101,10 +104,10 @@ export const FALLBACK = "That did not go through. Try again.";
 export function plainError(e: unknown): string {
   const raw = String((e as any)?.message || e || "");
   if (raw) console.warn("[keyfall] move failed:", raw.slice(0, 400)); // the plain sentence goes on screen; the raw reason stays in the console
-  if (raw && !/E_TARGET_BUSY|E_IMMUNE|Join first|Create your quantum vault/.test(raw)) { try { fetch(apiUrl("/api/clientlog"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ net: NETWORK, err: raw.slice(0, 4000), who: session().vault?.accountId || session().wallet?.accountId || "" }) }).catch(() => {}); } catch {} }
+  if (raw && !/E_TARGET_BUSY|E_IMMUNE|E_NO_WALLET|E_NO_VAULT|E_REPLACE_WALLET|Join first|Create your quantum vault/.test(raw)) { try { fetch(apiUrl("/api/clientlog"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ net: NETWORK, err: raw.slice(0, 4000), who: session().vault?.accountId || session().wallet?.accountId || "" }) }).catch(() => {}); } catch {} }
   const code = e instanceof ChainError ? e.code : (raw.match(/E_[A-Z_]+/) || [""])[0];
   if (PLAIN[code]) return PLAIN[code];
-  if (/No free testnet wallet|faucet|sponsor|not funded|Could not create a testnet wallet/i.test(raw)) return "No free wallet is available right now. Try again in a minute.";
+  if (/No free testnet wallet|faucet|sponsor|not funded|Could not create a testnet wallet/i.test(raw)) return "Free practice wallets ran out for now. Try again within the hour, or play on mainnet.";
   if (/recovery code has 64/i.test(raw)) return "A recovery code has 64 letters and digits.";
   if (/does not control this vault/i.test(raw)) return "That code does not open this vault.";
   if (/not created/i.test(raw)) return "The vault did not appear in time. Try again.";

@@ -60,6 +60,7 @@ let cleanup: (() => void) | null = null;
 
 function render() {
   const path = location.pathname;
+  shownPath = path;
   const page = document.getElementById("page")!;
   cleanup?.();
   cleanup = null;
@@ -103,7 +104,9 @@ document.addEventListener("pointerdown", (e) => {
   const t = (e.target as HTMLElement).closest?.("button, a.btn, .blip");
   if (t && !t.classList.contains("snd") && !(t as HTMLButtonElement).disabled) sfx.play("blip");
 }, { passive: true });
-window.addEventListener("popstate", render);
+// Back and forward re-render only when the page changes: a sheet's own history entry (ui/sheet.ts) or an in page anchor keeps the game running.
+let shownPath = location.pathname;
+window.addEventListener("popstate", () => { if (location.pathname === shownPath) return; render(); });
 
 chrome();
 render();

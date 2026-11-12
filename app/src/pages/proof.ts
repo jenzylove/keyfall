@@ -14,10 +14,16 @@ export function proof(root: HTMLElement) {
 
   root.innerHTML = `
     <section class="wrap page-title">
-      <p class="eyebrow"><span class="dot safe"></span>Judge checks · run live in your browser</p>
-      <h1 class="display h1" style="font-size:clamp(64px,15vw,160px)">Proof</h1>
-      <p class="lede">Every check below reads NEAR ${chain.NETWORK === "mainnet" ? "mainnet" : "testnet (the free practice arena)"} now, from this page, or shows a recorded run with its date and transaction links. Contract <a class="break" href="${accountLink(CONTRACT)}" target="_blank" rel="noopener">${esc(CONTRACT)} ↗</a></p>
+      <p class="eyebrow"><span class="dot safe"></span>Checked live in your browser</p>
+      <h1 class="display h1" style="font-size:clamp(48px,12vw,140px)">Under the hood</h1>
+      <p class="lede">How you can tell the game is fair. Every check below reads NEAR ${chain.NETWORK === "mainnet" ? "mainnet" : "testnet (the free practice arena)"} now, from this page, or shows a recorded run with its date and transaction links. Contract <a class="break" href="${accountLink(CONTRACT)}" target="_blank" rel="noopener">${esc(CONTRACT)} ↗</a></p>
     </section>
+    ${chain.NETWORK === "mainnet" ? "" : `<section class="wrap mn-sec" id="mainnet" hidden>
+      <h2 class="sec-h"><span>MN</span>The mainnet arena</h2>
+      <p class="dim" style="font-size:13px;margin:0 0 14px">Read live from NEAR mainnet: the real money arena at <a class="break" href="https://nearblocks.io/address/${MAINNET_ID}" target="_blank" rel="noopener">${MAINNET_ID} ↗</a>.</p>
+      <div class="calc" id="mn-calc"></div>
+      <p class="tx" id="mn-foot"></p>
+    </section>`}
     <section class="wrap" style="padding-bottom:80px"><ol class="checks">
       ${item(1, "p-keys", "No keys on the contract", "Read live: the contract's access key list. Empty means nobody can upgrade or change it.")}
       ${item(2, "p-config", "Rules equal the simulation", `Read live: config(), compared field by field with ${simParamsFile}, the file this season was deployed with, bundled with this page.`)}
@@ -29,6 +35,7 @@ export function proof(root: HTMLElement) {
       ${item(8, "p-deploy", "Deployment record", `From deployments/${chain.NETWORK === "mainnet" ? "mainnet" : "testnet-live"}.json, bundled with this page.`)}
     </ol></section>`;
 
+  if (chain.NETWORK !== "mainnet" && chain.MAINNET_READY) void mainnetSection(root);
   const body = (id: string) => $(`#${id} .check-body`, root);
   const verdict = (id: string, state: "pass" | "fail" | "wait", label?: string) => ($(`#${id} .v`, root).innerHTML = V(state, label));
   let alive = true;
@@ -151,6 +158,41 @@ export function proof(root: HTMLElement) {
   } else verdict("p-deploy", "fail", "No file");
 
   return () => { alive = false; stopSim(); };
+}
+
+// ------------------------------------------------------------------ the mainnet arena, read from mainnet
+
+const MAINNET_ID = String(import.meta.env.VITE_CONTRACT_MAINNET || "keyfall.near");
+const MAINNET_DEPLOY = Object.values(import.meta.glob("../../../deployments/mainnet.json", { eager: true, import: "default" }))[0] as { deploy_tx?: string; deployed_at?: string; keyless?: boolean } | undefined;
+async function mainnetRpc(method: string, params: object): Promise<any> {
+  for (const url of ["https://rpc.mainnet.fastnear.com", "https://free.rpc.fastnear.com", "https://rpc.mainnet.near.org"]) {
+    try {
+      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+      const j = await r.json();
+      if (j?.result && !j.result.error) return j.result;
+    } catch { /* next node */ }
+  }
+  throw new Error("mainnet unreachable");
+}
+const mainnetView = async (method: string, args: object = {}) => {
+  const r = await mainnetRpc("query", { request_type: "call_function", finality: "final", account_id: MAINNET_ID, method_name: method, args_base64: btoa(JSON.stringify(args)) });
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(r.result)));
+};
+/** On the practice page, a short live read of the mainnet contract: its keys, its vaults, its Q-Day. Hidden if mainnet does not answer. */
+async function mainnetSection(root: HTMLElement) {
+  try {
+    const [keys, stats] = await Promise.all([
+      mainnetRpc("query", { request_type: "view_access_key_list", finality: "final", account_id: MAINNET_ID }),
+      mainnetView("stats"),
+    ]);
+    const sec = maybe("#mainnet", root);
+    if (!sec) return;
+    const n = (keys?.keys || []).length;
+    const qd = new Date(Number(stats.q_day_ms));
+    $("#mn-calc", sec).innerHTML = `<div><span>Access keys on ${esc(MAINNET_ID)}</span><span class="big${n ? " red" : ""}">${n}</span></div><div><span>Vaults</span><span class="big">${esc(String(stats.vaults))}</span></div><div><span>Players holding coins</span><span class="big">${esc(String(Number(stats.vaults) + Number(stats.exposed_holders)))}</span></div><div><span>Q-Day</span><b>${esc(qd.toUTCString().replace(" GMT", " UTC"))}</b></div>`;
+    $("#mn-foot", sec).innerHTML = `${n === 0 ? "No keys: nobody can change the mainnet contract." : "The mainnet contract still has keys."}${MAINNET_DEPLOY?.deploy_tx ? ` Deployed with no keys in one transaction: <a class="tx nowrap" href="https://nearblocks.io/txns/${esc(MAINNET_DEPLOY.deploy_tx)}" target="_blank" rel="noopener">see it ↗</a>` : ""}`;
+    sec.hidden = false;
+  } catch { /* mainnet not reachable from here: the section stays hidden */ }
 }
 
 // ------------------------------------------------------------------ simulation replay

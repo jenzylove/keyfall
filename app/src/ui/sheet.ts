@@ -4,6 +4,24 @@ export interface Sheet { el: HTMLElement; body: HTMLElement; close(): void; clos
 
 let current: Sheet | null = null;
 
+// The phone's back button closes the open sheet instead of leaving the game: one history entry stands for
+// "a sheet is open". Closing a sheet any other way takes that entry back off, so history stays clean.
+let entry = 0; // the id of our history entry while it is on top, else 0
+let skipPop = false; // the next popstate is our own history.back(), not the player's
+const isOurs = () => !!entry && (history.state as any)?.keyfallSheet === entry;
+window.addEventListener("popstate", () => {
+  if (skipPop) { skipPop = false; return; }
+  if (entry && !isOurs()) { entry = 0; current?.close(); }
+});
+function dropEntry() {
+  setTimeout(() => {
+    if (current || !entry) return; // another sheet opened in its place: it keeps the entry
+    const ours = isOurs();
+    entry = 0;
+    if (ours) { skipPop = true; history.back(); } // only our own entry: never step back over a page change
+  }, 0);
+}
+
 export function openSheet(opts: { tone?: "hot" | "gold" | ""; label: string; html: string; onClose?: () => void; host?: HTMLElement }): Sheet {
   current?.close();
   const wrap = document.createElement("div");
@@ -30,6 +48,7 @@ export function openSheet(opts: { tone?: "hot" | "gold" | ""; label: string; htm
       wrap.classList.add("out");
       setTimeout(() => wrap.remove(), 220);
       if (current === s) current = null;
+      dropEntry();
       opts.onClose?.();
     },
   };
@@ -39,6 +58,7 @@ export function openSheet(opts: { tone?: "hot" | "gold" | ""; label: string; htm
   requestAnimationFrame(() => wrap.classList.add("in"));
   setTimeout(() => wrap.querySelector<HTMLElement>(".sheet")?.focus({ preventScroll: true }), 60);
   current = s;
+  if (!entry) { try { const id = Date.now(); history.pushState({ ...(history.state || {}), keyfallSheet: id }, "", location.href); entry = id; } catch {} }
   return s;
 }
 

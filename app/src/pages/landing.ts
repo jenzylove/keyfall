@@ -1,7 +1,9 @@
 // The title screen: pixel logotype over the live radar, PLAY, how to play,
 // the rivals, the high score table and a real footer. Every number is live.
 
-import { MAINNET_READY, getHolderCount, getHolders, getStats, type Holder } from "../chain";
+import { IS_MAINNET, MAINNET_READY, getHolderCount, getHolders, getStats, type Holder } from "../chain";
+/** The numbers on this page come from one arena: say which. */
+const ARENA = IS_MAINNET ? "Mainnet arena" : "Practice arena";
 
 const NET_SUB = MAINNET_READY ? "Practice is free with no wallet · mainnet is real NEAR" : "Practice arena · free · no wallet";
 const NET_FOOT = MAINNET_READY ? "Live on NEAR mainnet. Practice on testnet is free and its coins have no value." : "Practice coins have no value.";
@@ -29,6 +31,7 @@ export function landing(root: HTMLElement) {
         <p class="premise">The year is 2031 and quantum computers can crack old crypto keys. Run your coins into a quantum vault before the hunters catch you. Then hunt everyone who didn't.</p>
         <a class="btn play pulse" href="/play${MAINNET_READY ? "?net=practice" : ""}" data-link id="t-play"><span class="tri" aria-hidden="true"></span>PLAY</a>
         ${MAINNET_READY ? `<a class="btn ghost play-real" href="/play?net=mainnet" data-link id="t-real">Play for real on mainnet</a>` : ""}
+        <a class="t-restore" href="/play?${MAINNET_READY ? "net=mainnet&" : ""}restore=1" data-link id="t-restore">I have a wallet or vault code</a>
         <p class="t-cd"><span class="t-cd-k">Q-DAY IN</span><b id="t-cd">··</b></p>
         <p class="t-sub">${NET_SUB}</p>
       </div>
@@ -41,7 +44,7 @@ export function landing(root: HTMLElement) {
         <div class="how-strip" id="how-strip">
           <article class="how-card"><div class="how-art bag">${ART_BAG}</div><h3>Grab a bag</h3><p>Your coins start exposed, and the hunters turn toward you. They leak a slice to the vaults every round and freeze for good at Q-Day.</p></article>
           <article class="how-card"><div class="how-art vault">${ART_VAULT}</div><h3>Run to the gate</h3><p>Steer your bag with your thumb. Reach the gold gate and the vault door slams shut: only a quantum safe key can open it.</p></article>
-          <article class="how-card"><div class="how-art raid">${ART_RAID}</div><h3>Hunt and survive</h3><p>Lock onto a red rival and shoot to raid it, shoot back at raiders, hit Satoshi. Biggest vault at Q-Day wins.</p></article>
+          <article class="how-card"><div class="how-art raid">${ART_RAID}</div><h3>Hunt and survive</h3><p>Lock onto a red rival and tap SHOOT to raid it, shoot back at raiders, shoot Satoshi's stash. Biggest vault at Q-Day wins.</p></article>
         </div>
         <div class="how-dots" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
       </div>
@@ -58,7 +61,7 @@ export function landing(root: HTMLElement) {
 
     <section class="sec scores">
       <div class="wrap">
-        <h2 class="sec-h"><span>03</span>High scores</h2>
+        <h2 class="sec-h"><span>03</span>High scores <small class="sec-net">${ARENA}</small></h2>
         <ol class="hs" id="hs"><li class="hs-wait">Reading the chain<span class="ell"></span></li></ol>
         <p class="share-line" id="share">&nbsp;</p>
       </div>
@@ -81,7 +84,7 @@ export function landing(root: HTMLElement) {
 
   const core = document.createElement("div");
   core.className = "t-core";
-  core.innerHTML = `<b id="t-share">··</b><span>in vaults</span>`;
+  core.innerHTML = `<b id="t-share">··</b><span>in vaults</span><small class="t-net">${ARENA}</small>`;
   const radar = new Radar(root.querySelector<HTMLElement>("#t-radar")!, core, { interactive: false, max: 18 });
   let qday = 0;
 

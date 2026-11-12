@@ -21,6 +21,8 @@ export interface ArenaBody {
   hunting: boolean; // an NPC that is coming for you
   raidingMe: boolean; // a real open raid on you by this body
   raidedByMe: boolean; // your open raid on it
+  /** An open raid on your old wallet that is already empty (your coins moved to the vault): harmless, drawn grey. */
+  raidEmpty?: boolean;
   until?: number; // deadline of that raid (chain ms)
   svg: string; // portrait
   focus?: boolean; // part of what matters right now; everyone else is a bystander
@@ -93,6 +95,7 @@ const TILE = 48;
  * background bodies. ?crowd=1 brings back every label and the full crowd. (?film=1 was the old switch for the calm mode.) */
 const CROWD = typeof location !== "undefined" && new URLSearchParams(location.search).has("crowd");
 const GOLD = "#ffd60a", RED = "#ff3d2e", CYAN = "#27f0ff", GOLD2 = "#d9b000", GOLD3 = "#8a6d00";
+const GOLD_TEXT = GOLD; // replaced by --gold-ink once the theme is read
 
 /** A phone, a small screen or a weak CPU: start in low power mode. Measured frame time can switch it on later. */
 function detectLowPower(): boolean {
@@ -172,7 +175,8 @@ export class Arena {
   private lastGate = 0; private lastPulse = 0;
   private raf = 0; private last = 0; private t = 0;
   private alive = true;
-  private colors = { field: "#070910", grid: "rgba(39,240,255,0.07)", ink: "#e8eaf2", dim: "#8b90a3", line: "#2a2e3d", bg: "#05060a" };
+  /** goldInk and redInk: the same gold and red for text, darker on the light theme so words read on cream. */
+  private colors = { field: "#070910", grid: "rgba(39,240,255,0.07)", ink: "#e8eaf2", dim: "#8b90a3", line: "#2a2e3d", bg: "#05060a", goldInk: GOLD_TEXT, redInk: RED };
   private colorT = 0;
   private shakeT = 0;
   private flashT = 0; private flashC = RED;
@@ -598,9 +602,9 @@ export class Arena {
   private readColors() {
     const cs = getComputedStyle(document.documentElement);
     const v = (k: string, d: string) => cs.getPropertyValue(k).trim() || d;
-    const next = { field: v("--field", "#070910"), grid: v("--grid", "rgba(39,240,255,0.07)"), ink: v("--ink", "#e8eaf2"), dim: v("--dim", "#8b90a3"), line: v("--line2", "#2a2e3d"), bg: v("--bg", "#05060a") };
+    const next = { field: v("--field", "#070910"), grid: v("--grid", "rgba(39,240,255,0.07)"), ink: v("--ink", "#e8eaf2"), dim: v("--dim", "#8b90a3"), line: v("--line2", "#2a2e3d"), bg: v("--bg", "#05060a"), goldInk: v("--gold-ink", GOLD_TEXT), redInk: v("--hazard-ink", RED) };
     if (next.field !== this.colors.field) this.tiles = null;
-    if (next.bg !== this.colors.bg || next.ink !== this.colors.ink) this.labelCache.clear();
+    if (next.bg !== this.colors.bg || next.ink !== this.colors.ink || next.goldInk !== this.colors.goldInk) this.labelCache.clear();
     this.colors = next;
   }
   /** Pre-render the floor tiles: 6 variants of a 48 px circuit floor. */
@@ -643,7 +647,7 @@ export class Arena {
     }
     this.tap = { id: e.pointerId, x, y, t: performance.now(), moved: 0 };
     if (e.pointerType === "mouse") { this.mouse = { id: e.pointerId, x, y }; return; }
-    if (y < this.h * 0.4 || this.stick) return; // the lower 60% is the thumb zone
+    if (this.stick) return; // drag anywhere on the field to move (a quick tap still locks on)
     this.stick = { id: e.pointerId, ox: x, oy: y, dx: 0, dy: 0 };
   };
   private onMove = (e: PointerEvent) => {
@@ -866,6 +870,9 @@ export class Arena {
         if (s.y - this.cam.y < clearTop) this.cam.y = Math.max(s.y - clearTop, me.y - (this.h - 80)); // pan up, but keep you on screen
       }
     }
+    // never show past the arena edge: the view stays inside the world (centred when the world is smaller than the view)
+    this.cam.x = this.W > this.w ? clamp(this.cam.x, 0, this.W - this.w) : (this.W - this.w) / 2;
+    this.cam.y = this.H > this.h ? clamp(this.cam.y, 0, this.H - this.h) : (this.H - this.h) / 2;
     for (const p of this.particles) {
       p.t += dt;
       if (p.t < 0) continue;
@@ -890,6 +897,8 @@ export class Arena {
       if (!b || !this.bodies.has(id) || (b.raidedByMe && !b.raidingMe)) { this.lockId = null; return; }
     }
     if (this.meInfo.kind !== "vault" || this.autoCool > 0 || !this.shootReady) return;
+    // auto fire only shoots back at the raider charging you (a block is free); a raid always waits for a SHOOT tap
+    if (id === "satoshi" || !this.info.get(id)?.raidingMe) return;
     if (!this.targets.has(id) || this.distTo(id) > this.viewSpan * 0.6) return;
     this.autoCool = 1.1; // one try a second: the page refuses while a move is signing
     this.onAutoFire?.();
@@ -1250,13 +1259,13 @@ export class Arena {
     const ry = r1; // labels hang under the drawn size
     if (b.focus && (CROWD || b.id === this.lockId || b.raidingMe || b.raidedByMe)) {
       c.font = this.font(12);
-      c.fillStyle = hot ? RED : this.colors.ink;
+      c.fillStyle = hot ? this.colors.redInk : this.colors.ink;
       c.globalAlpha = dimmed ? 0.6 : 1;
       this.label(c, b.name, x, y + ry + 7, hot ? 3 : 2);
       if (b.showBag) { c.font = this.font(10.5); c.fillStyle = this.colors.dim; this.label(c, b.bag, x, y + ry + 24, 1); }
     }
     // the rule in words as you come close, before you bump
-    if (iVault && b.hint && (close || !CROWD) && !hot && this.hintIds.has(b.id)) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? RED : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
+    if (iVault && b.hint && (close || !CROWD) && !hot && this.hintIds.has(b.id)) { c.font = this.mono(10); c.fillStyle = b.state === "open" ? this.colors.redInk : this.colors.dim; c.globalAlpha = 1; this.label(c, b.hint, x, y + ry + (b.focus ? (b.showBag ? 39 : 24) : 7), 3); }
     c.restore();
   }
   /** Labels are queued and decluttered: a label that would sit in the top UI
@@ -1296,7 +1305,14 @@ export class Arena {
     const list = [...this.labels].sort((a, b) => b.pri - a.pri);
     this.labels = [];
     const hit = (a: { x: number; y: number; w: number; h: number }) => placed.some((p) => Math.abs(p.x - a.x) * 2 < p.w + a.w && Math.abs(p.y - a.y) * 2 < p.h + a.h);
+    // your own body is reserved: another body's label never lands on top of YOU
+    const meBox = this.meInfo.kind !== "none" ? { x: this.me.x, y: this.me.y, w: this.me.r * 2 + 10, h: this.me.r * 2 + 10 } : null;
     for (const l of list) {
+      if (meBox && l.pri < 5) {
+        const t0 = l.base === "bottom" ? l.y - l.h : l.base === "middle" ? l.y - l.h / 2 : l.y;
+        const b0 = { x: l.x, y: t0 + l.h / 2, w: l.w, h: l.h };
+        if (Math.abs(meBox.x - b0.x) * 2 < meBox.w + b0.w && Math.abs(meBox.y - b0.y) * 2 < meBox.h + b0.h) continue;
+      }
       let top = l.base === "bottom" ? l.y - l.h : l.base === "middle" ? l.y - l.h / 2 : l.y;
       if (top < band) continue;
       let box = { x: l.x, y: top + l.h / 2, w: l.w, h: l.h };
@@ -1376,7 +1392,7 @@ export class Arena {
       for (let i = 0; i < info.maxRaids; i++) { c.fillStyle = i < info.raidsLeft ? RED : this.colors.line; c.fillRect(Math.round(m.x - (info.maxRaids * 7) / 2 + i * 7), Math.round(m.y - m.r - 10), 5, 4); }
     }
     c.textAlign = "center"; c.textBaseline = "top";
-    c.font = this.font(12); c.fillStyle = color;
+    c.font = this.font(12); c.fillStyle = info.kind === "vault" ? this.colors.goldInk : this.colors.redInk;
     this.label(c, "YOU", m.x, m.y + m.r + 8, 6);
     c.font = this.font(10.5); c.fillStyle = this.colors.ink;
     this.label(c, info.bag, m.x, m.y + m.r + 25, 5);
@@ -1428,7 +1444,7 @@ export class Arena {
     c.fillStyle = "#fff";
     for (let i = 0; i < 5; i++) { const ph = (this.t * 0.4 + i / 5) % 1; c.globalAlpha = (1 - ph) * 0.9; c.fillRect(Math.round(x - 60 + rnd(31, i) * 120), Math.round(y + 50 - ph * 110), 2, 2); }
     c.globalAlpha = 1;
-    c.textAlign = "center"; c.textBaseline = "top"; c.font = this.font(13); c.fillStyle = GOLD;
+    c.textAlign = "center"; c.textBaseline = "top"; c.font = this.font(13); c.fillStyle = this.colors.goldInk;
     this.label(c, open ? "VAULT GATE" : "YOUR VAULT", x, y + 54, 4);
     if (open) { c.font = this.mono(10); c.fillStyle = this.colors.ink; this.label(c, "run here to get safe", x, y + 68, 2); }
     c.restore();
@@ -1504,13 +1520,15 @@ export class Arena {
       c.font = this.font(big ? 20 : 15);
       const w2 = sub ? c.measureText(sub).width : 0;
       const w = Math.max(w1, w2) + 16, h = sub ? (big ? 44 : 34) : (big ? 26 : 20);
+      const stem = x;
+      x = clamp(x, this.cam.x + w / 2 + 4, this.cam.x + this.w - w / 2 - 4); // a body by the edge keeps its badge on screen
       const bx = Math.round(x - w / 2), by = Math.round(y - h);
       c.fillStyle = this.colors.bg; c.globalAlpha = 0.92; c.fillRect(bx, by, Math.round(w), h);
       c.globalAlpha = 1; c.strokeStyle = col; c.lineWidth = 2; c.strokeRect(bx + 0.5, by + 0.5, Math.round(w), h);
       c.fillStyle = col; c.font = this.font(big ? 15 : 12); c.fillText(top, Math.round(x), by + (sub ? 12 : h / 2 + 1));
       if (sub) { c.font = this.font(big ? 20 : 15); c.fillStyle = col; c.fillText(sub, Math.round(x), by + h - 13); }
       // the little stem to the body
-      c.fillStyle = col; c.fillRect(Math.round(x) - 2, by + h, 4, 6);
+      c.fillStyle = col; c.fillRect(Math.round(clamp(stem, bx + 4, bx + w - 4)) - 2, by + h, 4, 6);
       c.restore();
     };
     const clockText = (until: number) => { const left = until - now; const sec = Math.max(0, Math.ceil(left / 1000)); return left > 0 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : "settling"; };
@@ -1521,6 +1539,7 @@ export class Arena {
       const top = s.y - s.r - 14;
       if (b.raidedByMe && !b.raidingMe) box(s.x, top, "ROBBING", b.until ? clockText(b.until) : "…", CYAN, true);
       else if (b.raidingMe) box(s.x, top, "ROBBING YOU", b.until ? clockText(b.until) : "", RED, true);
+      else if (b.raidEmpty) box(s.x, top, "Hitting your old wallet · empty", "", this.colors.dim, false);
     }
     // moment badges: HIT, BLOCKED, numbers
     for (const [key, bd] of [...this.badges]) {
@@ -1612,8 +1631,9 @@ export class Arena {
     if (live) {
       c.save();
       c.font = this.font(11); c.textAlign = "center"; c.textBaseline = "bottom";
-      c.fillStyle = GOLD;
-      this.label(c, "LOCKED", s.x, s.y - r - 6, 4);
+      c.fillStyle = this.colors.goldInk;
+      const raider = id !== "satoshi" && !!this.info.get(id)?.raidingMe; // a raider is shot back on its own; anything else waits for SHOOT
+      this.label(c, raider ? "LOCKED" : "LOCKED · TAP SHOOT", s.x, s.y - r - 6, 4);
       c.restore();
     }
   }
@@ -1682,7 +1702,7 @@ export class Arena {
       for (let i = 0; i < 4 && placed.some((q) => Math.abs(q.x - lx) * 2 < q.w + w && Math.abs(q.y - ly) < 16); i++) ly += 16;
       placed.push({ x: lx, y: ly, w });
       c.fillStyle = this.colors.bg; c.globalAlpha = 0.8; c.fillRect(Math.round(lx - w / 2), Math.round(ly - 7), Math.round(w), 14); c.globalAlpha = 1;
-      c.fillStyle = t.color; c.fillText(txt, Math.round(lx), Math.round(ly) + 1);
+      c.fillStyle = t.color === GOLD ? this.colors.goldInk : t.color === RED ? this.colors.redInk : t.color; c.fillText(txt, Math.round(lx), Math.round(ly) + 1);
       c.restore();
     }
   }

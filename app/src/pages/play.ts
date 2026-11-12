@@ -38,6 +38,19 @@ function qrSvg(text: string): string {
   return `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" shape-rendering="crispEdges" role="img" aria-label="Deposit address as a QR code"><rect x="-2" y="-2" width="${n + 4}" height="${n + 4}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
 }
 const NEAR_NAME = /^([a-z0-9]+([_-][a-z0-9]+)*\.)+near$|^[0-9a-f]{64}$/;
+const IMPLICIT = /^[0-9a-f]{64}$/;
+/** Is this a NEAR account a send can go to? A 64 hex implicit address is always fine (the account is made when
+ * NEAR lands); a named account must already exist, or the NEAR would be lost. */
+async function checkNearDest(raw: string): Promise<{ ok: boolean; hint: string }> {
+  const v = raw.trim().toLowerCase();
+  const named = chain.IS_MAINNET ? NEAR_NAME : /^([a-z0-9]+([_-][a-z0-9]+)*\.)+(near|testnet)$|^[0-9a-f]{64}$/;
+  if (!named.test(v)) return { ok: false, hint: `That is not a NEAR account name (like yourname.${chain.IS_MAINNET ? "near" : "testnet"}).` };
+  if (IMPLICIT.test(v)) return { ok: true, hint: "New wallet address. It is created when the NEAR lands." };
+  try {
+    if (await chain.accountExists(v)) { const bal = await chain.nearBalance(v); return { ok: true, hint: `Found. ${v} holds ${chain.fmtNear(bal, 2)} NEAR.` }; }
+    return { ok: false, hint: "That account does not exist on NEAR. Sending there would lose the NEAR, so it is blocked." };
+  } catch { return { ok: false, hint: "NEAR is not answering right now. Try again in a moment." }; }
+}
 
 const bps = (x: bigint, b: number | bigint) => (x * BigInt(b)) / 10000n;
 const isqrt = (n: bigint) => { if (n < 2n) return n; let x = BigInt(Math.floor(Math.sqrt(Number(n)))); while (x * x > n) x--; while ((x + 1n) * (x + 1n) <= n) x++; return x; };
@@ -72,6 +85,20 @@ const LS_PAID = `qday.paid.v1.${chain.NETWORK}`;
 function paidNear(): number { try { return Number(localStorage.getItem(LS_PAID) || 0) || 0; } catch { return 0; } }
 function addPaid(near: number) { try { localStorage.setItem(LS_PAID, String(paidNear() + near)); } catch {} }
 
+// ------------------------------------------------------------------ a deposit in flight (mainnet top up)
+
+interface PendingDeposit { depositAddress: string; deadline: string; amountInFormatted: string; amountOut: string; label: string; chain: string; source: string; near: number }
+const LS_DEP = `keyfall.deposit.v1.${chain.NETWORK}`;
+function pendingDeposit(): PendingDeposit | null {
+  try {
+    const d = JSON.parse(localStorage.getItem(LS_DEP) || "null") as PendingDeposit | null;
+    if (!d || !d.depositAddress) return null;
+    if (Date.parse(d.deadline) + 30 * 60_000 < Date.now()) { localStorage.removeItem(LS_DEP); return null; } // long past its deadline: gone
+    return d;
+  } catch { return null; }
+}
+function savePendingDeposit(d: PendingDeposit | null) { try { if (d) localStorage.setItem(LS_DEP, JSON.stringify(d)); else localStorage.removeItem(LS_DEP); } catch {} }
+
 // ------------------------------------------------------------------ local progress
 
 interface Progress { stage?: "strike" | "done" | "free"; vault?: string; escapeId?: string; backedUp?: string; raids?: string[]; stripHidden?: string }
@@ -85,7 +112,7 @@ const TITLES: Record<TitleKey, [string, string]> = {
   native: ["Quantum Native", "You own a quantum vault"],
   escape: ["Escape Artist", "A raid on your old wallet found nothing"],
   shield: ["Shield Up", "You charged a shield"],
-  slayer: ["Satoshi Slayer", "You hit Satoshi"],
+  slayer: ["Satoshi Slayer", "You shot Satoshi's stash"],
   raider: ["Raider", "One of your raids took coins"],
   wall: ["Wall", "You defended a raid"],
 };
@@ -158,7 +185,7 @@ export function play(root: HTMLElement) {
         <button class="hud-snd" type="button" id="h-snd" aria-label="Sound"></button>
         <button class="hud-menu" type="button" id="h-menu" aria-label="Menu">${I.menu}<i class="rdot" hidden></i></button>
       </header>
-      <p class="goal" id="goal"><b>Goal</b><span class="goal-t">Richest vault at Q-Day wins</span><span class="goal-you" id="goal-you"></span></p>
+      <p class="goal" id="goal"><b>Goal</b><span class="goal-t">Top vault at Q-Day wins</span><span class="goal-you" id="goal-you"></span></p>
       <aside class="side left">
         <section class="stats panel" id="stats" aria-label="Your stats"></section>
       </aside>
@@ -172,10 +199,10 @@ export function play(root: HTMLElement) {
         <p class="keys" aria-hidden="true" hidden>WASD or arrows to move · Space to shoot · Shift to dash</p>
       </main>
       <nav class="actions" id="actions" aria-label="Moves">
-        <button type="button" class="act" data-act="shield"><span class="act-fill"></span><span class="act-ic">${I.shield}</span><span class="act-nm">shield</span><span class="act-st" id="a-shield">·</span></button>
-        <button type="button" class="act" data-act="market"><span class="act-fill"></span><span class="act-ic">${I.market}</span><span class="act-nm">market</span><span class="act-st" id="a-market">·</span></button>
-        <button type="button" class="act dash" data-act="dash" id="a-dash"><span class="act-ic"><i class="act-ring"></i>${I.dash}</span><span class="act-nm">dash</span></button>
-        <button type="button" class="act shoot" data-act="shoot" id="shoot-btn"><span class="act-ic">${I.shoot}</span><span class="act-nm">shoot</span><span class="act-st" id="a-shoot">·</span></button>
+        <button type="button" class="act off" data-act="shield"><span class="act-fill"></span><span class="act-ic">${I.shield}</span><span class="act-nm">shield</span><span class="act-st" id="a-shield">·</span></button>
+        <button type="button" class="act off" data-act="market"><span class="act-fill"></span><span class="act-ic">${I.market}</span><span class="act-nm">market</span><span class="act-st" id="a-market">·</span></button>
+        <button type="button" class="act dash off" data-act="dash" id="a-dash"><span class="act-ic"><i class="act-ring"></i>${I.dash}</span><span class="act-nm">dash</span></button>
+        <button type="button" class="act shoot off" data-act="shoot" id="shoot-btn"><span class="act-ic">${I.shoot}</span><span class="act-nm">shoot</span><span class="act-st" id="a-shoot">·</span></button>
       </nav>
       <aside class="side right">
         <section class="panel activity"><header><h2>Activity</h2><span class="live"><i></i>live</span></header><ul class="log" id="log"></ul></section>
@@ -220,6 +247,8 @@ export function play(root: HTMLElement) {
     if (!inVault()) { sfx.play("deny"); nudge(); arena.say("me", "Get gold first. Only gold can shoot.", 2600, true); return; }
     if (busy) { if (!auto) nudge(); return; } // the button reads SIGNING… while a move is on its way
     if (!arena.shootReady) return;
+    // auto fire only blocks: it may shoot back at the raider charging your vault, never start a raid on its own
+    if (auto && !(w.incoming && w.incoming.target === s.vault?.accountId && arena.lockId === w.incoming.attacker)) return;
     const open = (id: string) => arena.targets.has(id) && !w.myRaids.some((r) => r.status === "open" && r.target === id);
     const lock = arena.lockId;
     const mineOn = lock ? w.myRaids.find((r) => r.status === "open" && r.target === lock) : null;
@@ -255,7 +284,7 @@ export function play(root: HTMLElement) {
     if (!id) return;
     sfx.play("blip"); sfx.vibrate(8);
     if (!inVault()) { arena.say("me", "Get gold first. Only gold can shoot.", 2400, true); return; }
-    if (arena.targets.has(id)) return; // it fires on its own
+    if (arena.targets.has(id)) { if (!(w.incoming && w.incoming.attacker === id)) arena.say(id, id === "satoshi" ? "Locked · tap SHOOT" : `Locked · tap SHOOT to rob · stakes about ${short(stakeFor(id))}`, 2600, true); return; } // a raider is shot back on its own
     if (id === "satoshi") { arena.say("satoshi", bossLine(), 2400, true); return; }
     const h = w.holders.find((x) => x.account === id);
     if (!h) return;
@@ -560,7 +589,7 @@ export function play(root: HTMLElement) {
     const m = mission();
     const raid = (m.k === "build" || m.k === "movein" || m.k === "defend") && m.raid ? m.raid : null;
     const esc2 = w.escape;
-    const key = [m.k, raid?.id ?? "", busy, esc2 ? `${esc2.id}:${esc2.status}` : "", m.k === "grab" && m.buyOnly, pendingRaid, prog().stripHidden, guideOn()].join("|");
+    const key = [m.k, raid?.id ?? "", busy, esc2 ? `${esc2.id}:${esc2.status}` : "", m.k === "grab" && m.buyOnly, pendingRaid, prog().stripHidden, guideOn(), m.k === "grab" && MAIN ? `${pendingDeposit()?.depositAddress || ""}:${String(w.walletNear ?? "")}` : ""].join("|");
     root.classList.toggle("has-mission", m.k !== "none" && m.k !== "load");
     if (guideOn() && m.k !== "grab" && m.k !== "load") { // the guide card speaks alone
       missionKey = key;
@@ -593,19 +622,24 @@ export function play(root: HTMLElement) {
         const haveY = w.walletNear ?? 0n;
         const shortY = needY > haveY ? needY - haveY : 0n;
         const nearTxt = !MAIN ? "" : haveY > 0n
-          ? `Your wallet holds <b>${chain.fmtNear(haveY, 2)} NEAR</b>. ${funded ? "" : `A first bag needs <b>${chain.fmtNear(needY, 2)} NEAR</b>, so add <b>${chain.fmtNear(shortY + BigInt(chain.nearToYocto(0.005)), 2)} more</b>. `}`
+          ? `Your wallet holds <b>${chain.fmtNear(haveY, 2)} NEAR</b>. ${funded ? "" : `A first bag needs <b>${chain.fmtNear(needY, 2)} NEAR</b>, so add <b>${shortfallNear()} more</b>. `}`
           : `A first bag needs <b>${chain.fmtNear(needY, 2)} NEAR</b>. `;
+        void shortY;
+        const dep = MAIN && !funded ? pendingDeposit() : null;
         startEl.innerHTML = `<div class="start-card">
           <p class="kick gold">${NET_LABEL} arena · ${MAIN ? "real NEAR, real $KEYFALL" : "free, no wallet"}</p>
           <h2 class="start-title">Grab a bag</h2>
           <p class="s-text">${MAIN
-            ? `${nearTxt}${funded ? "Choose how much NEAR goes into your bag." : "Top up from another chain or any NEAR wallet."} Then run your bag to the vault gate before a hunter catches you.`
+            ? `${nearTxt}<span class="usd" id="m-usd"></span>${funded ? "Choose how much NEAR goes into your bag." : "Top up from another chain or any NEAR wallet."} Then run your bag to the vault gate before a hunter catches you.`
             : `You need coins to enter the arena. ${m.buyOnly ? "Buy your first bag." : "We make you a free practice wallet and buy your first bag."} Then run it to the vault gate before a hunter catches you.`}</p>
-          <button class="btn wide big" id="m-go">${busy === "grab" ? esc(busyText) : MAIN ? (funded ? "Buy my bag" : "Top up") : m.buyOnly ? "Buy my bag" : "Grab my bag"}</button>
-          ${MAIN ? `<button type="button" class="btn ghost wide small" id="m-restore">I have a wallet or vault code</button>
-          ${haveY > BigInt(chain.nearToYocto(0.02)) ? `<button type="button" class="btn ghost wide small" id="m-out">Send this NEAR out</button>` : ""}
+          ${MAIN ? `<ul class="s-facts"><li>Your coins sell back for NEAR any time. Cash out from the menu.</li><li>Top vault at Q-Day is written on chain as the winner.</li></ul>` : ""}
+          ${dep ? `<button type="button" class="btn wide" id="m-dep">Deposit in progress ›</button>` : ""}
+          <button class="btn wide big${dep ? " ghost" : ""}" id="m-go">${busy === "grab" ? esc(busyText) : MAIN ? (funded ? "Buy my bag" : "Top up") : m.buyOnly ? "Buy my bag" : "Grab my bag"}</button>
+          <button type="button" class="btn ghost wide small" id="m-restore">I have a wallet or vault code</button>
+          ${MAIN ? `${haveY > BigInt(chain.nearToYocto(0.02)) ? `<button type="button" class="btn ghost wide small" id="m-out">Send this NEAR out</button>` : ""}
           <button type="button" class="btn ghost wide small" id="m-practice">Practice for free instead</button>` : chain.MAINNET_READY ? `<button type="button" class="btn ghost wide small" id="m-real">Play for real on mainnet</button>` : ""}
           <p class="m-msg" id="m-msg" role="status"></p></div>`;
+        if (MAIN) void showUsd(needY, haveY > 0n && !funded ? BigInt(chain.nearToYocto(shortfallNear())) : 0n);
         break;
       }
       case "exposed":
@@ -642,7 +676,7 @@ export function play(root: HTMLElement) {
           pendingRaid ? `Your shot is in flight to ${N(pendingRaid)}. Waiting for the chain to confirm.` : `Tap a marked rival to lock on, then chase it: red bags run. Each raid you land ticks in the corner until the coins fly to you.`);
         break;
       case "done":
-        html = strip("gold", `<span class="m-count">Free play</span>`, !MAIN && chain.MAINNET_READY ? `You know the arena. Play for real on mainnet with your own NEAR, or keep practising.` : `Shoot Satoshi's core when it glows, shield up before others raid you, and climb the board.`,
+        html = strip("gold", `<span class="m-count">Free play</span>`, !MAIN && chain.MAINNET_READY ? `You know the arena. Play for real on mainnet with your own NEAR, or keep practising.` : `Shoot Satoshi's stash when it glows, shield up before others raid you, and climb the board.`,
           `${!MAIN && chain.MAINNET_READY ? `<button type="button" class="btn small hot" id="m-real">Play for real</button>` : ""}<button type="button" class="btn small ghost" id="m-go">Got it</button>`);
         break;
       case "over": {
@@ -682,7 +716,9 @@ export function play(root: HTMLElement) {
     const real = root.querySelector<HTMLButtonElement>("#m-real");
     if (real) real.onclick = () => chain.switchNetwork("mainnet");
     const rst = root.querySelector<HTMLButtonElement>("#m-restore");
-    if (rst) rst.onclick = () => openSettings(true);
+    if (rst) rst.onclick = () => openRestore();
+    const mdep = root.querySelector<HTMLButtonElement>("#m-dep");
+    if (mdep) mdep.onclick = () => { const d = pendingDeposit(); if (d) openTopUp(d); else { missionKey = ""; renderMission(); } };
     const mout = root.querySelector<HTMLButtonElement>("#m-out");
     if (mout) mout.onclick = () => openWalletOut();
     const prac = root.querySelector<HTMLButtonElement>("#m-practice");
@@ -694,6 +730,22 @@ export function play(root: HTMLElement) {
     if (x) x.onclick = () => { setProg({ stripHidden: m.k }); missionKey = ""; renderMission(); };
     const show = root.querySelector<HTMLButtonElement>("#m-show");
     if (show) show.onclick = () => { setProg({ stripHidden: "" }); missionKey = ""; renderMission(); clearTimeout(stripT); stripT = window.setTimeout(() => { if (alive) { setProg({ stripHidden: m.k }); missionKey = ""; renderMission(); } }, 8000); };
+  }
+
+  /** NEAR still missing for a first bag, rounded up to the cent: the grab card and the top up use the same number. */
+  function shortfallNear(): number {
+    const needY = BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1)), haveY = w.walletNear ?? 0n;
+    return needY > haveY ? Math.ceil(Number((needY - haveY) / 10n ** 18n) / 1e4) / 100 : 0; // micro NEAR, up to the next 0.01
+  }
+  /** The dollar value of what the grab card asks for, from the live NEAR Intents price. */
+  async function showUsd(needY: bigint, addY: bigint) {
+    try {
+      const np = (await chain.intentPrices())[chain.NEAR_ASSET];
+      const el = root.querySelector<HTMLElement>("#m-usd");
+      if (!el || !np) return;
+      const usd = (y: bigint) => `$${((Number(y / 10n ** 18n) / 1e6) * np).toFixed(2)}`;
+      el.textContent = addY > 0n ? `That is about ${usd(addY)} more. ` : `That is about ${usd(needY)}. `;
+    } catch { /* no price: the NEAR amount stands alone */ }
   }
 
   function updateLive() {
@@ -828,10 +880,10 @@ export function play(root: HTMLElement) {
   const CARDS: Record<number, { title: string; text: string; tap?: boolean }> = {
     1: { title: "This is you.", text: TOUCH ? "Drag anywhere to move." : "WASD or the arrow keys to move." },
     2: { title: "You are red.", text: "Your coins sit behind an old key. A quantum computer can crack it, so anyone can rob you, and red bags leak coins over time.", tap: true },
-    3: { title: "Get to the gold door.", text: "It makes a new account locked by an ML-DSA-65 key, made in your phone. A quantum computer cannot crack it." },
+    3: { title: "Get to the gold door.", text: "It makes a new account locked by a quantum safe key, made on your phone." },
     4: { title: "You are gold now. Safe.", text: "Every move you make now is signed with that quantum key. Red bags leak coins to you every round.", tap: true },
-    5: { title: "Rob a red bag.", text: TOUCH ? "Tap a player with a red target mark to lock on. Get close and your shots fire on their own." : "Click a player with a red target mark to lock on. Get close and your shots fire on their own." },
-    6: { title: "Now they hunt you too.", text: "When a raider comes for your vault you lock onto it: shoot it back to win its stake. A SHIELD makes their raids take less, DASH gets you away. Red mines zap you for a second. Hold the map to look around.", tap: true },
+    5: { title: "Rob a red bag.", text: TOUCH ? "The marked player is locked on. Get close and tap SHOOT." : "The marked player is locked on. Get close and press SHOOT or Space." },
+    6: { title: "Now they hunt you too.", text: "When a raider comes for your vault you lock onto it and shoot back on your own: blocking wins its stake. Raids always wait for your SHOOT tap. A SHIELD makes their raids take less, DASH gets you away. Red mines zap you for a second. Hold the map to look around.", tap: true },
     7: { title: "Your goal:", text: "Be the richest vault when Q-Day hits. Red bags freeze forever that day. Satoshi is the boss: every round each vault can shoot his stash once.", tap: true },
   };
 
@@ -899,11 +951,14 @@ export function play(root: HTMLElement) {
       case 2: case 4: case 6: if (Date.now() - gAt > readMs(card.text) && !currentSheet()) guideGo(gstep + 1); break;
       case 3: break; // the gate touch and its real transactions move this on (above)
       case 5: {
+        // step 6 comes only once a raid of yours is confirmed on chain (or the Satoshi hit, when nobody can be robbed)
         if (guideRaided || guideBossHit) { guideGo(6); break; }
+        if (pendingRaid || busy === "raid") break; // a shot is in flight: wait for the chain
         const t = guideRaidTarget();
-        if (t) { gVariant = "body"; if (gTarget !== t) arena.lockOn(t); gTarget = t; } // locked, so the shot goes to the red bag and not the nearest gold bot
+        if (t) { gVariant = "body"; if (gTarget !== t) arena.lockOn(t); gTarget = t; } // locked, so the SHOOT tap goes to the red bag and not the nearest gold bot
         else if (bossReadyForMe()) { gVariant = "boss"; gTarget = ""; }
-        else { guideGo(6); break; }
+        else if ((w.vault?.raids_left ?? 0) <= 0) { guideGo(6); break; } // nothing can land this round: move on rather than stall
+        else { gVariant = "none"; gTarget = ""; } // nobody to rob right now: wait, the card says so
         break;
       }
       case 7: break; // tap only
@@ -917,8 +972,8 @@ export function play(root: HTMLElement) {
     const variant = gstep === 5 ? gVariant : "";
     const waiting = gstep === 3 && !!busy;
     // after the first read, the cards that point into the world shrink to their title so the target stays in the clear
-    const compact = !card.tap && gstep !== 1 && !gExpanded && Date.now() - gAt > readMs(card.text) + 1500;
-    const key = `${gstep}|${variant}|${gTarget}|${waiting}|${gNote}|${w.vault?.raids_left ?? ""}|${compact}`;
+    const compact = !card.tap && gstep !== 1 && gstep !== 5 && !gExpanded && Date.now() - gAt > readMs(card.text) + 1500;
+    const key = `${gstep}|${variant}|${gTarget}|${waiting}|${gNote}|${w.vault?.raids_left ?? ""}|${compact}|${pendingRaid}|${gstep === 5 && gTarget ? String(stakeFor(gTarget)) : ""}`;
     // the arrow in the world
     arena.setGuide(gstep === 1 || gstep === 2 || gstep === 4 ? { kind: "me" } : gstep === 3 ? { kind: "gate" } : gstep === 5 ? (variant === "boss" ? { kind: "boss" } : gTarget ? { kind: "body", id: gTarget } : null) : null);
     placeGuideArrow();
@@ -928,9 +983,15 @@ export function play(root: HTMLElement) {
     guideEl.classList.toggle("low", gstep === 7); // room for the arrow under the goal bar
     const tone = gstep === 2 || gstep === 5 ? "red" : gstep === 1 || gstep === 6 ? "cyan" : "gold";
     const shots = w.vault?.raids_left ?? 0;
-    const ammo = ` You have ${shots} raid${shots === 1 ? "" : "s"} this round. Blocking a raid on you and hitting Satoshi never use one.`;
-    const text = gstep === 5 ? (variant === "boss" ? `Nobody you can rob is near. Satoshi is always there: tap him to lock on, then get close.${ammo}` : card.text + ammo) : card.text;
-    const wait = gstep === 1 ? "Waiting for you to move" : gstep === 3 ? (waiting ? esc(busyText) : "Touch the door when you reach it") : gstep === 5 ? (variant === "boss" ? "Tap Satoshi to lock on" : "Tap the marked player to lock on") : "";
+    const ammo = ` You have ${shots} raid${shots === 1 ? "" : "s"} this round. Blocking a raid on you and shooting Satoshi's stash never use one.`;
+    const stakeN = gstep === 5 && variant === "body" && gTarget ? stakeFor(gTarget) : 0n;
+    const stakeLine = stakeN > 0n ? ` Each raid stakes about ${short(stakeN)} coins. You get them back if it lands.` : "";
+    const text = gstep === 5
+      ? (variant === "boss" ? `Nobody you can rob is near. Satoshi is always there: tap him to lock on, get close, then tap SHOOT to shoot his stash.${ammo}`
+        : variant === "none" ? `Nobody can be robbed right now. Walk around: a red target mark shows who you can rob.${ammo}`
+        : card.text + stakeLine + ammo)
+      : card.text;
+    const wait = gstep === 1 ? "Waiting for you to move" : gstep === 3 ? (waiting ? esc(busyText) : "Touch the door when you reach it") : gstep === 5 ? (pendingRaid ? "Waiting for the chain to confirm" : variant === "boss" ? "Tap Satoshi, then SHOOT" : variant === "none" ? "Looking for a target" : "Tap SHOOT when you are close") : "";
     const still = gShownStep === gstep; // the same card redrawn: no entrance animation again
     gShownStep = gstep;
     guideEl.innerHTML = `<section class="guide tone-${tone}${compact ? " compact" : ""}${still ? " still" : ""}" data-step="${gstep}" aria-live="polite">
@@ -940,6 +1001,8 @@ export function play(root: HTMLElement) {
       <div class="g-foot">${card.tap ? `<button type="button" class="btn small g-next" id="g-next">${gstep === 7 ? "Play" : "Got it"}</button>` : `<span class="g-wait">${wait}</span>`}<span class="g-note" id="g-note">${esc(gNote)}</span></div>
     </section>`;
     arena.topInset = Math.round(guideEl.getBoundingClientRect().height) + 16; // pointers and labels keep clear of the card
+    // the card speaks alone: a toast already up (it came before the card) steps aside and waits its turn
+    if (showing && !showing.classList.contains("pin")) { const t = showing; showing = null; t.remove(); setTimeout(() => { if (alive && !showing && queue.length) nextToast(); }, 1200); }
     guideEl.querySelector<HTMLButtonElement>("#g-skip")!.onclick = () => guideFinish();
     const sec = guideEl.querySelector<HTMLElement>(".guide")!;
     sec.onclick = (e) => { if ((e.target as HTMLElement).closest("button")) return; if (compact) { gExpanded = true; gKey = ""; renderGuide(); setTimeout(() => { gExpanded = false; gKey = ""; if (alive) renderGuide(); }, 6000); } };
@@ -1013,13 +1076,19 @@ export function play(root: HTMLElement) {
     }
   }
 
+  /** What a raid on this holder stakes: enough to cover the take (the contract's stake rule), capped by your vault. */
+  function stakeOf(h: Holder): bigint {
+    const raw = rawTake(h);
+    const mult = BigInt(P(c(), "stake_mult") || 1);
+    const min = PB(c(), "min_stake");
+    return minB(maxB(min, (raw + mult - 1n) / mult), w.vaultBal);
+  }
+  function stakeFor(id: string): bigint { const h = w.holders.find((x) => x.account === id); return h ? stakeOf(h) : 0n; }
+
   async function raidByShot(h: Holder) {
     if (busy) return;
-    const raw = rawTake(h);
-    const mult = BigInt(P(c(), "stake_mult"));
     const min = PB(c(), "min_stake");
-    const best = maxB(min, (raw + mult - 1n) / mult);
-    const stake = minB(best, w.vaultBal);
+    const stake = stakeOf(h);
     if (stake < min) { arena.say("me", `You need at least ${full(min)} in your vault to raid.`, 3600, true); return; }
     pendingRaid = h.account;
     sfx.play("crunch"); sfx.vibrate(20);
@@ -1268,26 +1337,28 @@ export function play(root: HTMLElement) {
   function renderGoal() {
     const s = sess();
     const you = root.querySelector<HTMLElement>("#goal-you")!;
-    let text: string;
-    if (w.stats?.after_q_day) text = "Q-Day has come";
-    else if (!s.wallet && !s.vault) text = "grab a bag to enter";
-    else if (!inVault()) text = w.walletBal > 0n ? "get gold to be ranked" : "grab a bag to enter";
+    // short pieces, so a phone never cuts them: the rank, the next harvest, and (wide screens) what you paid
+    const parts: [string, string][] = [];
+    if (w.stats?.after_q_day) parts.push(["g-rank", "Q-Day has come"]);
+    else if (!s.wallet && !s.vault) parts.push(["g-rank", "grab a bag to enter"]);
+    else if (!inVault()) parts.push(["g-rank", w.walletBal > 0n ? "get gold to be ranked" : "grab a bag to enter"]);
     else {
       const list = vaultsRanked();
       const i = list.findIndex((h) => h.account === s.vault!.accountId);
-      text = i >= 0 ? `you are #${i + 1} of ${list.length}` : `${list.length} vaults on the board`;
+      parts.push(["g-rank", i >= 0 ? `#${i + 1} of ${list.length}` : `${list.length} vaults`]);
     }
     // what the next harvest does to you, from the chain's own numbers (the contract's harvest rule, worked out here)
     const hv = harvestFlow();
-    if (hv) text += hv.gain ? ` · +${short(hv.amount)} next harvest` : ` · −${short(hv.amount)} next harvest`;
+    if (hv) parts.push(["g-harv", `${hv.gain ? "+" : "−"}${short(hv.amount)} next round`]);
     // mainnet: what you paid (your own confirmed buys in this browser) against what the bag sells for now (the contract's quote)
     if (MAIN && (s.wallet || s.vault)) {
       const paid = paidNear();
-      if (paid > 0 && w.sellQuote !== null) text += ` · paid ${paid.toFixed(2)} NEAR, sells for ${chain.fmtNear(w.sellQuote, 2)} NEAR now`;
+      if (paid > 0 && w.sellQuote !== null) parts.push(["g-paid", `paid ${paid.toFixed(2)} NEAR, sells for ${chain.fmtNear(w.sellQuote, 2)} now`]);
     }
+    const text = parts.map(([k, t]) => `<span class="${k}">${esc(t)}</span>`).join("");
     if (text === goalKey) return;
     goalKey = text;
-    you.textContent = text;
+    you.innerHTML = text;
     root.querySelector<HTMLElement>("#goal")!.classList.toggle("has-you", !!text);
   }
 
@@ -1345,7 +1416,8 @@ export function play(root: HTMLElement) {
     const canBlock = !!w.incoming && w.incoming.target === sess().vault?.accountId;
     const boss = arena.targets.has("satoshi");
     const status = over ? "Over" : busy && busyText ? "SIGNING…" : left > 0 ? `${left} raid${left === 1 ? "" : "s"}` : canBlock ? "Block · free" : boss ? "Satoshi ready" : `Next round ${roundIn}`;
-    set("shoot", status, over, 0, (left > 0 || canBlock || boss) && !busy);
+    const dead = !busy && left <= 0 && !canBlock && !boss; // nothing a press could do: dim, the clock still reads
+    set("shoot", status, over || dead, 0, (left > 0 || canBlock || boss) && !busy);
     shootBtn.classList.toggle("signing", !!busy && !!busyText && !over);
     shootBtn.classList.toggle("sending", !!busy && !busyText && !over);
     shootBtn.classList.toggle("empty", !busy && left <= 0 && !canBlock && !boss);
@@ -1398,7 +1470,7 @@ export function play(root: HTMLElement) {
       <button type="button" class="btn ghost wide small" id="wb-have">I already have a wallet or vault code</button>
       <p class="s-msg" id="wb-msg" role="status"></p>`, "gold");
     const B = sheet!.body, out = B.querySelector<HTMLElement>("#wb-msg")!, ok = B.querySelector<HTMLInputElement>("#wb-ok")!, go = B.querySelector<HTMLButtonElement>("#wb-go")!;
-    B.querySelector<HTMLButtonElement>("#wb-have")!.onclick = () => openSettings(true);
+    B.querySelector<HTMLButtonElement>("#wb-have")!.onclick = () => openRestore();
     if (!code) { ok.disabled = true; return; }
     ok.onchange = () => { go.disabled = !ok.checked; };
     B.querySelector<HTMLButtonElement>("#wb-copy")!.onclick = async () => { try { await navigator.clipboard.writeText(code); out.className = "s-msg ok"; out.textContent = "Copied. Paste it somewhere safe, like a password manager."; } catch { out.className = "s-msg"; out.textContent = "Copy is blocked here. Write the 8 blocks down or download them."; } };
@@ -1410,23 +1482,32 @@ export function play(root: HTMLElement) {
     go.onclick = () => { chain.markWalletBackedUp(); then(); };
   }
 
-  function openTopUp() {
+  function openTopUp(resume?: PendingDeposit) {
     clearInterval(fundPoll);
-    if (MAIN && !chain.walletBackedUp()) { void openWalletBackup(() => openTopUp()); return; }
+    if (MAIN && !chain.walletBackedUp()) { void openWalletBackup(() => openTopUp(resume)); return; }
     const wallet = sess().wallet?.accountId || chain.mainnetWallet().accountId;
+    // what the grab card says is missing, as its own amount (rounded up to the cent of NEAR)
+    const needY = BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1));
+    const shortN = shortfallNear();
+    if (resume) fundSource = resume.source as typeof fundSource;
+    const amounts = [...new Set([...(shortN > 0 && shortN < 1 ? [shortN] : []), 1, 2, 5])];
+    if (!amounts.includes(fundNear)) fundNear = amounts[0];
+    if (resume) fundNear = resume.near;
     const refundKey = () => `keyfall.refund.${SOURCES.find((x) => x.id === fundSource)!.chain}`;
     const savedRefund = () => { try { return localStorage.getItem(refundKey()) || ""; } catch { return ""; } };
     show("topup", "", "Top up", `
       <p class="kick gold">Mainnet · step 2 of 2</p>
       <h2 class="s-title">Get $KEYFALL</h2>
       <p class="s-text">Pay from any wallet. <b>NEAR Intents</b> swaps it for you.</p>
-      <div class="pick tu-amt" role="group" aria-label="How much">${[1, 2, 5].map((n) => `<button type="button" data-near="${n}" aria-pressed="${n === fundNear}"><b class="tu-price" data-n="${n}">${n} NEAR</b><small class="tu-gets" data-n="${n}">&nbsp;</small></button>`).join("")}</div>
+      <div class="pick tu-amt" role="group" aria-label="How much">${amounts.map((n) => `<button type="button" data-near="${n}" aria-pressed="${n === fundNear}"><b class="tu-price" data-n="${n}">${n} NEAR</b><small class="tu-fee">plus swap fee</small><small class="tu-gets" data-n="${n}">${n === shortN ? "what you need" : "&nbsp;"}</small></button>`).join("")}</div>
+      <p class="m-hint">Prices are before the swap fee. The deposit address shows the exact amount to send.</p>
       <label class="m-field"><span>Pay with</span><select id="tu-src">${SOURCES.map((s) => `<option value="${s.id}" ${s.id === fundSource ? "selected" : ""}>${s.label} on ${s.chain}</option>`).join("")}</select></label>
       <label class="m-field"><span id="tu-rk">Your ${SOURCES.find((x) => x.id === fundSource)!.chain} address (for refunds)</span><input id="tu-refund" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(savedRefund())}" placeholder="the wallet you pay from"/></label>
       <button class="btn wide" id="tu-go">Get a deposit address</button>
       <p class="s-msg" id="tu-msg" role="status"></p>
       <div id="tu-quote" hidden></div>
       <details class="tu-direct"><summary>Already have NEAR? Send it here</summary>
+        <p class="m-hint">Send at least ${shortN > 0 ? shortN : chain.fmtNear(needY, 2)} NEAR. It arrives in seconds.</p>
         <div class="addr"><code id="tu-wallet">${esc(wallet)}</code><button type="button" class="btn ghost small" data-copy="${esc(wallet)}">Copy</button></div>
       </details>
       <p class="m-hint" id="tu-bal"></p>`, "gold");
@@ -1447,6 +1528,7 @@ export function play(root: HTMLElement) {
           el.textContent = usd ? `≈ $${amt.toFixed(2)}` : `≈ ${amt.toFixed(amt < 0.1 ? 4 : 3)} ${src.label}`;
         }
         for (const el of B.querySelectorAll<HTMLElement>(".tu-gets")) {
+          if (Number(el.dataset.n) === shortN) continue; // "what you need"
           const spend = Math.max(0, Number(el.dataset.n) - VAULT_RESERVE); // the rest builds your vault and pays for moves
           const q = spend > 0 ? await chain.quoteBuy(chain.nearToYocto(spend)).catch(() => null) : null;
           el.textContent = q ? `${short(BigInt(q))} $KEYFALL` : `${el.dataset.n} NEAR`;
@@ -1472,6 +1554,21 @@ export function play(root: HTMLElement) {
         try { localStorage.setItem(refundKey(), refundTo); } catch {}
         const q = await chain.fundingQuote(fundSource, fundNear, refundTo);
         const src = SOURCES.find((s) => s.id === fundSource)!;
+        const dep: PendingDeposit = { depositAddress: q.depositAddress, deadline: q.deadline, amountInFormatted: q.amountInFormatted, amountOut: q.amountOut, label: src.label, chain: src.chain, source: fundSource, near: fundNear };
+        savePendingDeposit(dep);
+        showDeposit(dep);
+        missionKey = "";
+      } catch (e) {
+        const msg = String((e as any)?.message || "");
+        out.className = "s-msg bad";
+        out.textContent = /^Paste your/.test(msg) ? msg : /refundTo/.test(msg) ? "That refund address was not accepted. Paste the wallet address you pay from." : /404|405|failed \(/.test(msg) ? "Paying from another chain is not switched on yet. Send NEAR to the wallet below instead." : plainError(e);
+      } finally {
+        go.disabled = false; go.classList.remove("busy"); go.textContent = "Get a deposit address";
+      }
+    };
+    /** The deposit address, its QR and the live status. Saved on this device until it lands or runs out. */
+    function showDeposit(q: PendingDeposit) {
+        const src = { label: q.label, chain: q.chain };
         const until = new Date(q.deadline);
         B.querySelector<HTMLElement>("#tu-quote")!.hidden = false;
         B.querySelector<HTMLElement>("#tu-quote")!.innerHTML = `
@@ -1483,6 +1580,7 @@ export function play(root: HTMLElement) {
             <p class="s-calc" id="tu-status"><i class="dot"></i> Waiting for your deposit…</p>
           </div>`;
         wireCopy(B);
+        setTimeout(() => B.querySelector<HTMLElement>("#tu-quote")?.scrollIntoView({ block: "start", behavior: "smooth" }), 60); // the address is what you need now
         let last = "";
         clearInterval(fundPoll);
         fundPoll = window.setInterval(async () => {
@@ -1497,17 +1595,13 @@ export function play(root: HTMLElement) {
             el.innerHTML = `<i class="dot hot"></i> <b>${got.toFixed(6)} ${esc(src.label)}</b> arrived, <b>${miss.toFixed(6)}</b> short. Your wallet probably took its network fee out of the transfer. Send <b class="yel">${(Math.ceil(miss * 100) / 100).toFixed(2)} ${esc(src.label)}</b> more to the same address; anything extra comes back to your refund address.`;
             last = st; return;
           }
+          if (st === "SUCCESS" || st === "REFUNDED" || st === "FAILED") savePendingDeposit(null); // done either way: the start card stops pointing here
+          if (st === "PENDING_DEPOSIT" && Date.parse(q.deadline) < Date.now()) { savePendingDeposit(null); el.innerHTML = `<i class="dot hot"></i> This deposit address has expired. Get a new one above.`; clearInterval(fundPoll); return; }
           if (st === "SUCCESS" && fs.refunded && Number(fs.refunded) > 0) { el.innerHTML = `<i class="dot safe"></i> NEAR delivered. ${esc(fs.refunded)} ${esc(src.label)} extra went back to your refund address.`; last = st; return; }
           if (st !== last) { last = st; el.innerHTML = `<i class="dot${st === "SUCCESS" ? " safe" : ""}"></i> ${esc(words[st] || "Waiting for your deposit…")}`; }
         }, 5000);
-      } catch (e) {
-        const msg = String((e as any)?.message || "");
-        out.className = "s-msg bad";
-        out.textContent = /^Paste your/.test(msg) ? msg : /refundTo/.test(msg) ? "That refund address was not accepted. Paste the wallet address you pay from." : /404|405|failed \(/.test(msg) ? "Paying from another chain is not switched on yet. Send NEAR to the wallet below instead." : plainError(e);
-      } finally {
-        go.disabled = false; go.classList.remove("busy"); go.textContent = "Get a deposit address";
-      }
-    };
+    }
+    if (resume) showDeposit(resume);
     wireCopy(B);
     // the wallet balance: the moment NEAR arrives we move on to the bag
     const balPoll = window.setInterval(async () => {
@@ -1517,6 +1611,7 @@ export function play(root: HTMLElement) {
       if (el) el.textContent = bal > 0n ? `Wallet holds ${chain.fmtNear(bal, 2)} NEAR.` : "";
       if (bal >= BigInt(chain.nearToYocto(VAULT_RESERVE + 0.1))) {
         clearInterval(balPoll); clearInterval(fundPoll);
+        savePendingDeposit(null);
         sfx.play("coins");
         toast({ tone: "gold", title: `${chain.fmtNear(bal, 2)} NEAR arrived in your wallet.` });
         await refresh();
@@ -1590,11 +1685,13 @@ export function play(root: HTMLElement) {
     show("cashout", "", "Cash out", `
       <p class="kick gold">Mainnet</p>
       <h2 class="s-title">Cash out</h2>
-      <p class="s-text">Your vault holds <b>${chain.fmtNear(have, 3)} NEAR</b>. Sell $KEYFALL for NEAR in the market first if you want more. Your quantum key signs the send; <b>NEAR Intents</b> delivers it on any chain.</p>
+      <p class="s-text">Your vault holds <b>${chain.fmtNear(have, 3)} NEAR</b>${w.vaultBal > 0n ? ` and <b>${full(w.vaultBal)}</b> coins` : ""}. Your quantum key signs the send; <b>NEAR Intents</b> delivers it on any chain.</p>
+      ${w.vaultBal > 0n ? `<button type="button" class="linkish" id="co-sell">Sell coins first ›</button>` : ""}
       <label class="m-field"><span>Receive</span><select id="co-dest">${DESTS.map((d) => `<option value="${d.id}" ${d.id === dest ? "selected" : ""}>${d.id === "near" ? "NEAR on NEAR" : `${d.label} on ${d.chain}`}</option>`).join("")}</select></label>
+      <p class="m-hint" id="co-time"></p>
       <label class="m-field"><span id="co-tl">Send to</span><input id="co-to" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${placeholder()}" value="${esc(savedTo())}"/></label>
       <p class="m-hint" id="co-hint">Paste the address that should receive it.</p>
-      <label class="s-range"><span>NEAR to send</span><input type="range" id="co-r" min="0" max="${maxNear}" step="0.01" value="0"/></label>
+      <div class="range-row"><label class="s-range"><span>NEAR to send</span><input type="range" id="co-r" min="0" max="${maxNear}" step="0.01" value="0"/></label><button type="button" class="btn ghost small" id="co-max"${maxNear > 0 ? "" : " disabled"}>Max</button></div>
       <p class="s-calc" id="co-calc">Slide to choose how much to send.</p>
       <button class="btn wide hot" id="co-go" disabled>Send</button>
       <p class="s-msg" id="co-msg" role="status"></p>
@@ -1605,6 +1702,13 @@ export function play(root: HTMLElement) {
     const r = B.querySelector<HTMLInputElement>("#co-r")!, go = B.querySelector<HTMLButtonElement>("#co-go")!, calc = B.querySelector<HTMLElement>("#co-calc")!, msg = B.querySelector<HTMLElement>("#co-msg")!;
     let okTo = false, n = 0, priceN = 0, priceTimer = 0, poll = 0;
     const amt = () => Number(r.value);
+    const sellFirst = B.querySelector<HTMLButtonElement>("#co-sell");
+    if (sellFirst) sellFirst.onclick = () => openMarket("sell");
+    B.querySelector<HTMLButtonElement>("#co-max")!.onclick = () => { r.value = String(maxNear); gate(); };
+    /** How long each route usually takes: NEAR to NEAR lands in seconds; other chains go through NEAR Intents. */
+    const routeMins: Record<string, number> = {};
+    const timeEl = B.querySelector<HTMLElement>("#co-time")!;
+    const showTime = () => { timeEl.textContent = dest === "near" ? "Arrives in seconds." : routeMins[dest] ? `Usually arrives in about ${routeMins[dest]} min.` : "Usually arrives in a few minutes."; };
     const check = async () => {
       const v = to.value.trim();
       okTo = false;
@@ -1616,14 +1720,11 @@ export function play(root: HTMLElement) {
         hint.textContent = okTo ? `${D().label} lands at this ${D().chain} address. Check it twice: a send to the wrong address cannot be undone.` : `That is not a ${D().chain} address.`;
         return gate();
       }
-      const lower = v.toLowerCase();
-      if (!NEAR_NAME.test(lower)) { hint.className = "m-hint bad"; hint.textContent = "That is not a NEAR account name (like yourname.near)."; return gate(); }
       const id = ++n;
-      hint.className = "m-hint"; hint.textContent = "Checking that account exists…";
-      const bal = await chain.nearBalance(lower);
+      hint.className = "m-hint"; hint.textContent = "Checking that account…";
+      const r = await checkNearDest(v);
       if (id !== n) return;
-      if (bal > 0n) { okTo = true; hint.className = "m-hint"; hint.textContent = `Found. ${lower} holds ${chain.fmtNear(bal, 2)} NEAR.`; }
-      else { hint.className = "m-hint bad"; hint.textContent = "That account does not exist on NEAR. Sending there would lose the NEAR, so it is blocked."; }
+      okTo = r.ok; hint.className = r.ok ? "m-hint" : "m-hint bad"; hint.textContent = r.hint;
       gate();
     };
     /** The price in the coin they receive: a live 1Click dry quote for the amount on the slider. */
@@ -1637,6 +1738,7 @@ export function play(root: HTMLElement) {
         try {
           const q = await chain.cashoutQuote(dest as chain.CashoutDest, chain.nearToYocto(a), probe, true);
           if (id !== priceN) return;
+          if (q.timeEstimate) { routeMins[dest] = Math.max(1, Math.round(q.timeEstimate / 60)); showTime(); }
           calc.innerHTML = `Send ${a.toFixed(2)} NEAR, receive about <b class="yel">${esc(fmtCoin(q.amountOutFormatted, D().label))} ${esc(D().label)}</b> on ${esc(D().chain)}${q.timeEstimate ? ` in about ${Math.max(1, Math.round(q.timeEstimate / 60))} min` : ""}.`;
         } catch (e) {
           if (id === priceN) calc.textContent = `Send ${a.toFixed(2)} NEAR. ${plainError(e)}`;
@@ -1652,8 +1754,10 @@ export function play(root: HTMLElement) {
       else { calc.textContent = `Send ${a.toFixed(2)} NEAR. Pricing in ${D().label}…`; price(); }
       if (!go.classList.contains("busy")) go.disabled = !(okTo && a > 0 && (dest === "near" || a >= 0.1));
     };
+    showTime();
     sel.onchange = () => {
       dest = sel.value as typeof dest;
+      showTime();
       try { localStorage.setItem("keyfall.cashout.dest", dest); } catch {}
       to.placeholder = placeholder();
       to.value = savedTo();
@@ -1686,7 +1790,7 @@ export function play(root: HTMLElement) {
         if (dest === "near") {
           const res = await chain.cashOut(target, yocto);
           keepReceipt("cashout", res.hash);
-          msg.className = "s-msg ok"; msg.textContent = `Sent ${a.toFixed(2)} NEAR to ${target}.`;
+          msg.className = "s-msg ok"; msg.textContent = `Sent ${a.toFixed(2)} NEAR to ${target}. It arrives in seconds.`;
           toast({ tone: "gold", title: esc(msg.textContent) });
           sfx.play("coins");
           await refresh();
@@ -1737,6 +1841,7 @@ export function play(root: HTMLElement) {
   function renderArena() {
     const s = sess();
     const raider = w.incoming?.attacker;
+    const liveRaider = threat() ? raider : undefined; // a raid on an empty old wallet is no threat: no charge, no alarm
     const hunt = hunters();
     const me = mine();
     const myOpen = new Map(w.myRaids.filter((r) => r.status === "open").map((r) => [r.target, r] as const));
@@ -1756,7 +1861,8 @@ export function play(root: HTMLElement) {
         id: h.account, name: nameOf(h.account, me), bag: short(h.balance), kind: h.kind, balance: whole(h.balance),
         state: b.state, shieldBps: h.shield_bps || 0, immune: Number(h.immune_until) > chainNow(), npc,
         hunting: hunt.has(h.account) && !busy,
-        raidingMe: h.account === raider && !!w.incoming,
+        raidingMe: h.account === raider && !!w.incoming && threat(),
+        raidEmpty: h.account === raider && !!w.incoming && !threat(), // your old wallet is empty: the raid finds nothing
         raidedByMe: !!mineRaid,
         until: h.account === raider ? w.incoming!.deadline : mineRaid?.deadline || undefined,
         svg: avatar(h.account),
@@ -1774,11 +1880,11 @@ export function play(root: HTMLElement) {
     }
     arena.targets = targets;
     // a new raid on you: the raider fires (the raid is already on chain); in a vault you lock straight onto it, so your shots defend on their own
-    if (raider && raider !== prevRaider && kind !== "none") {
-      arena.npcShot(raider);
-      if (kind === "vault" && w.incoming?.target === s.vault?.accountId) arena.lockOn(raider);
+    if (liveRaider && liveRaider !== prevRaider && kind !== "none") {
+      arena.npcShot(liveRaider);
+      if (kind === "vault" && w.incoming?.target === s.vault?.accountId) arena.lockOn(liveRaider);
     }
-    prevRaider = raider || "";
+    prevRaider = liveRaider || "";
     const idForArt = s.vault?.accountId || s.wallet?.accountId || "you";
     arena.setMe({
       kind, bag: kind === "none" ? "" : short(myBag()), balance: whole(myBag()), shieldBps: inVault() ? w.vault?.shield_bps || 0 : 0,
@@ -1871,7 +1977,7 @@ export function play(root: HTMLElement) {
     for (const f of fresh) {
       const amt = full(f.amount);
       const won = BigInt(f.amount) > 0n;
-      if (f.kind === "harvest") toast({ tone: "ink", title: `Harvest: exposed bags bled ${amt}. Half went to vaults.` });
+      if (f.kind === "harvest") { if (sess().vault || w.walletBal > 0n) toast({ tone: "ink", title: `Harvest: red bags leaked ${amt}. Half went to vaults.` }); } // no bag yet: the line means nothing to you
       else if (f.kind === "raid" && me.includes(f.target || "")) arena.say(f.actor, line(f.actor, "raids")); // the strip carries the raid; no toast on top
       else if (f.kind === "resolve" && me.includes(f.actor)) {
         toast({ tone: "gold", who: f.target || undefined, title: won ? `Your raid on ${N(f.target)} landed: took ${amt}` : `Your raid on ${N(f.target)} took nothing` });
@@ -1951,7 +2057,7 @@ export function play(root: HTMLElement) {
       case "vault": return `${W(f.actor)} built a quantum vault`;
       case "migrate": return me.includes(f.actor) ? `<b>You</b> moved ${amt} into your vault` : `${W(f.target)} moved ${amt} into its vault`;
       case "transfer": return `${W(f.actor)} sent ${amt} to ${O(f.target)}`;
-      case "harvest": return `Harvest: exposed bags bled ${amt}`;
+      case "harvest": return `Harvest: red bags leaked ${amt}, half to vaults`;
       case "raid": return `${W(f.actor)} raided ${O(f.target)}, staking ${amt}`;
       case "defend": return `${W(f.actor)} fought off ${O(f.target)} and won ${amt}`;
       case "resolve": {
@@ -1959,7 +2065,7 @@ export function play(root: HTMLElement) {
         return BigInt(f.amount) > 0n ? `${who} on ${O(f.target)} took ${amt}` : `${who} on ${O(f.target)} took nothing`;
       }
       case "shield": return `${W(f.actor)} burned ${amt} for a ${pct(Number(f.extra || 0))} shield`;
-      case "boss": return `${W(f.actor)} hit Satoshi for ${amt}`;
+      case "boss": return `${W(f.actor)} shot Satoshi's stash for ${amt}`;
       default: return `${W(f.actor)} made a move`;
     }
   }
@@ -1990,7 +2096,7 @@ export function play(root: HTMLElement) {
 
   function show(kind: string, arg: string, label: string, html: string, tone: "hot" | "gold" | "" = "") {
     let self: Sheet | null = null;
-    const s = openSheet({ label, html, tone, host: root, onClose: () => { if (sheet === self) { sheetKind = ""; sheet = null; } } });
+    const s = openSheet({ label, html, tone, host: root, onClose: () => { if (sheet === self) { sheetKind = ""; sheet = null; } if (alive && loaded) renderMission(); } }); // a closed sheet may leave news for the start card (a deposit in progress)
     self = s;
     sheet = s;
     sheetKind = kind;
@@ -2126,6 +2232,12 @@ export function play(root: HTMLElement) {
     const won = w.myRaids.filter((r) => r.status === "resolved" && BigInt(r.take) > 0n);
     const blocked = w.myRaids.filter((r) => r.status === "defended");
     const sum = (xs: string[]) => xs.reduce((a, x) => a + BigInt(x), 0n);
+    const openMine = w.myRaids.filter((r) => r.status === "open");
+    if (openMine.length) rows.push(["Staked in open raids", `<b>${full(sum(openMine.map((r) => r.stake)))}</b> <small>back when they land</small>`]);
+    const inc = w.incoming;
+    if (inc && inc.status === "open") rows.push(["Raid on you now", threat()
+      ? `<b class="red">${N(inc.attacker)} is robbing you</b> <small><span data-until="${inc.deadline}">${clock(inc.deadline - chainNow())}</span></small>`
+      : `<span class="dim">${N(inc.attacker)} is hitting your old wallet · empty</span>`]);
     rows.push(["Raids won", won.length ? `<b class="yel">+${full(sum(won.map((r) => r.take)))}</b> <small>${won.length} raid${won.length === 1 ? "" : "s"}</small>` : "none yet"]);
     rows.push(["Raids blocked", blocked.length ? `<b class="red">−${full(sum(blocked.map((r) => r.stake)))}</b> <small>${blocked.length} stake${blocked.length === 1 ? "" : "s"} lost</small>` : "none"]);
     const onMe = w.feed.filter((f) => f.kind === "resolve" && me.includes(f.target || ""));
@@ -2135,7 +2247,7 @@ export function play(root: HTMLElement) {
     const signed = receipts().filter((r) => ["raid", "defend", "shield", "boss"].includes(r.kind)).length;
     keys.innerHTML = `
       ${s.wallet ? `<a class="key-row" href="${chain.accountLink(s.wallet.accountId)}" target="_blank" rel="noopener"><b class="red">Wallet key: ed25519</b><span>an old key, a quantum computer can crack it</span></a>` : ""}
-      ${s.vault ? `<a class="key-row" href="${chain.accountLink(s.vault.accountId)}" target="_blank" rel="noopener"><b class="yel">Vault key: ML-DSA-65</b><span>quantum safe, it signed ${signed} of your move${signed === 1 ? "" : "s"}</span></a>` : `<p class="m-hint">No vault yet: the gold door makes one with a quantum safe key.</p>`}`;
+      ${s.vault ? `<a class="key-row" href="${chain.accountLink(s.vault.accountId)}" target="_blank" rel="noopener"><b class="yel">Vault key: <span class="nowrap">ML-DSA-65</span></b><span>quantum safe, it signed ${signed} of your move${signed === 1 ? "" : "s"}</span></a>` : `<p class="m-hint">No vault yet: the gold door makes one with a quantum safe key.</p>`}`;
   }
 
   // ----- shield
@@ -2143,7 +2255,8 @@ export function play(root: HTMLElement) {
   function openShield() {
     show("shield", "", "Shield", `
       <div class="who"><span class="av big icon gold">${I.shield}</span><div><h2 class="s-title">Shield</h2><p class="who-sub" id="sh-now"></p></div></div>
-      <p class="s-text">Shield: shots on you take less. Burn a slice of your bag for a shield that cuts what any raid takes, until the next harvest. Burning 1% gives 10%, 4% gives 20%, 9% gives 30%.</p>
+      <p class="sh-last" id="sh-last"></p>
+      <p class="s-text">Burn a slice of your bag for a shield that cuts what any raid takes. Burning 1% gives 10%, 4% gives 20%, 9% gives 30%.</p>
       <label class="s-range"><span>Burn</span><input type="range" id="sh-r" min="0" max="900" step="25" value="400"/></label>
       <p class="s-calc" id="sh-calc"></p>
       <p class="m-hint hot" id="sh-raid" hidden></p>
@@ -2160,12 +2273,18 @@ export function play(root: HTMLElement) {
     const share = Number(B.querySelector<HTMLInputElement>("#sh-r")!.value);
     const amt = bps(w.vaultBal, share);
     const str = Math.min(Number(isqrt(BigInt(share) * 10000n)), P(c(), "max_shield_bps"));
-    const left = span(Number(st.epoch_ends_ms) - chainNow());
+    const leftMs = Number(st.epoch_ends_ms) - chainNow();
+    const left = span(leftMs);
     B.querySelector<HTMLElement>("#sh-now")!.textContent = v.shield_bps ? `Up now: ${pct(v.shield_bps)} for ${left}` : "No shield up";
+    // how long a shield charged now lasts comes first: it ends at the next harvest, however much you burn
+    const lastEl = B.querySelector<HTMLElement>("#sh-last")!;
+    const shortNow = leftMs < (P(c(), "epoch_ms") || 1) / 3;
+    lastEl.className = `sh-last${shortNow ? " short" : ""}`;
+    lastEl.innerHTML = `Lasts <b data-until="${st.epoch_ends_ms}">${left}</b>, until the next harvest${shortNow ? ". That is soon: a shield now covers only this short stretch." : "."}`;
     const inc = w.incoming && w.incoming.target === sess().vault?.accountId && w.incoming.status === "open" ? w.incoming : null;
     const note = B.querySelector<HTMLElement>("#sh-raid");
     if (note) { note.hidden = !inc; if (inc) note.innerHTML = `A shield charged now also cuts <b>${esc(N(inc.attacker))}</b>'s raid on you: it counts when that clock ends, in <b data-until="${inc.deadline}">${clock(inc.deadline - chainNow())}</b>.`; }
-    B.querySelector<HTMLElement>("#sh-calc")!.innerHTML = share === 0 ? "Slide to choose how much to burn." : `Burn <b>${pct(share)}</b> (${full(amt)}) for a <b class="yel">${pct(str)}</b> shield until the next harvest in ${left}.`;
+    B.querySelector<HTMLElement>("#sh-calc")!.innerHTML = share === 0 ? "Slide to choose how much to burn." : `Burn <b>${pct(share)}</b> (${full(amt)}) for a <b class="yel">${pct(str)}</b> shield.`;
     const go = B.querySelector<HTMLButtonElement>("#sh-go")!;
     if (!go.classList.contains("busy")) {
       go.disabled = amt === 0n || str <= v.shield_bps;
@@ -2219,9 +2338,9 @@ export function play(root: HTMLElement) {
     B.querySelector<HTMLElement>("#bs-stash")!.textContent = full(stash);
     B.querySelector<HTMLElement>("#bs-of")!.textContent = supply > 0n ? `of ${full(supply)}` : "";
     B.querySelector<HTMLElement>("#bs-hp")!.style.width = `${supply > 0n ? Number((stash * 10000n) / supply) / 100 : 0}%`;
-    B.querySelector<HTMLElement>("#bs-rule")!.textContent = `Every player can hit once ${every(P(c(), "epoch_ms"))}. A hit takes ${pct(P(c(), "boss_bps"))} of the stash, up to ${full(PB(c(), "boss_cap"))}. ${pct(P(c(), "boss_burn_bps"))} burns. In the arena, touch his core.`;
+    B.querySelector<HTMLElement>("#bs-rule")!.textContent = `Every vault can shoot his stash once ${every(P(c(), "epoch_ms"))}. A hit takes ${pct(P(c(), "boss_bps"))} of the stash, up to ${full(PB(c(), "boss_cap"))}. ${pct(P(c(), "boss_burn_bps"))} burns. In the arena, tap him, then SHOOT.`;
     const enough = !!v && w.vaultBal >= PB(c(), "boss_min_balance");
-    B.querySelector<HTMLElement>("#bs-next")!.innerHTML = !v ? "Only a vault can hit Satoshi." : !enough ? `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to hit Satoshi.` : v.boss_ready ? `A hit now takes <b class="yel">${full(hit)}</b>. You keep <b class="yel">${full(keep)}</b>.` : `Next hit ready in <b data-until="${st.epoch_ends_ms}">${span(Number(st.epoch_ends_ms) - chainNow())}</b>.`;
+    B.querySelector<HTMLElement>("#bs-next")!.innerHTML = !v ? "Only a vault can shoot his stash." : !enough ? `Your vault needs ${full(PB(c(), "boss_min_balance"))} coins to shoot his stash.` : v.boss_ready ? `A hit now takes <b class="yel">${full(hit)}</b>. You keep <b class="yel">${full(keep)}</b>.` : `Next hit ready in <b data-until="${st.epoch_ends_ms}">${span(Number(st.epoch_ends_ms) - chainNow())}</b>.`;
     const go = B.querySelector<HTMLButtonElement>("#bs-go")!;
     if (!go.classList.contains("busy")) { go.disabled = !(v && enough && v.boss_ready); go.textContent = v?.boss_ready ? "HIT" : "HIT · on cooldown"; }
     const hits = w.feed.filter((f) => f.kind === "boss").slice(0, 5);
@@ -2230,34 +2349,41 @@ export function play(root: HTMLElement) {
 
   // ----- market
 
-  let mkNear = 0.25;
-  function openMarket() {
+  const MK_AMOUNTS = [0.1, 0.25, 0.5, 1]; // the smallest fits what a new practice vault holds (0.3 NEAR less gas)
+  let mkNear = 0.1;
+  function openMarket(tab: "buy" | "sell" = "buy") {
     show("market", "", "Market", `
       <div class="who"><span class="av big icon">${I.market}</span><div><h2 class="s-title">Market</h2><p class="who-sub" id="mk-have"></p></div></div>
       <div class="seg2" role="group" aria-label="Buy or sell"><button type="button" data-tab="buy" aria-pressed="true">Buy</button><button type="button" data-tab="sell" aria-pressed="false">Sell</button></div>
       <div id="mk-buy">
-        <div class="pick" role="group" aria-label="NEAR to spend">${[0.25, 0.5, 1].map((n) => `<button type="button" data-n="${n}" aria-pressed="${n === mkNear}">${n} NEAR</button>`).join("")}</div>
+        <div class="pick four" role="group" aria-label="NEAR to spend">${MK_AMOUNTS.map((n) => `<button type="button" data-n="${n}" aria-pressed="${n === mkNear}">${n} NEAR</button>`).join("")}</div>
         <p class="s-calc" id="mk-bq"></p>
         <button class="btn wide" id="mk-bgo">Buy</button>
+        <p class="m-hint" id="mk-why" hidden></p>
       </div>
       <div id="mk-sell" hidden>
         <label class="s-range"><span>Sell</span><input type="range" id="mk-sr" min="0" max="100" step="1" value="25"/></label>
         <p class="s-calc" id="mk-sq"></p>
         <button class="btn wide ghost" id="mk-sgo">Sell</button>
       </div>
-      <p class="s-msg" id="mk-msg" role="status"></p>`);
+      <p class="s-msg" id="mk-msg" role="status"></p>
+      <div id="mk-next"></div>`);
     const B = sheet!.body;
-    for (const t of B.querySelectorAll<HTMLButtonElement>("[data-tab]"))
-      t.onclick = () => {
-        for (const x of B.querySelectorAll<HTMLButtonElement>("[data-tab]")) x.setAttribute("aria-pressed", String(x === t));
-        B.querySelector<HTMLElement>("#mk-buy")!.hidden = t.dataset.tab !== "buy";
-        B.querySelector<HTMLElement>("#mk-sell")!.hidden = t.dataset.tab !== "sell";
-      };
+    const setTab = (name: string) => {
+      for (const x of B.querySelectorAll<HTMLButtonElement>("[data-tab]")) x.setAttribute("aria-pressed", String(x.dataset.tab === name));
+      B.querySelector<HTMLElement>("#mk-buy")!.hidden = name !== "buy";
+      B.querySelector<HTMLElement>("#mk-sell")!.hidden = name !== "sell";
+    };
+    for (const t of B.querySelectorAll<HTMLButtonElement>("[data-tab]")) t.onclick = () => setTab(t.dataset.tab!);
+    setTab(tab);
+    // the biggest amount you can pay for, when the one picked last time is too much
+    if (!buyPayer()) { const fit = [...MK_AMOUNTS].reverse().find((n) => { const need = BigInt(chain.nearToYocto(n)); return (sess().vault && spendable(w.vaultNear) >= need) || (sess().wallet && spendable(w.walletNear) >= need); }); if (fit) mkNear = fit; }
+    for (const x of B.querySelectorAll<HTMLButtonElement>("[data-n]")) x.setAttribute("aria-pressed", String(Number(x.dataset.n) === mkNear));
     for (const b of B.querySelectorAll<HTMLButtonElement>("[data-n]"))
       b.onclick = () => { mkNear = Number(b.dataset.n); for (const x of B.querySelectorAll<HTMLButtonElement>("[data-n]")) x.setAttribute("aria-pressed", String(x === b)); quoteBuy(); updateMarket(); };
     const sr = B.querySelector<HTMLInputElement>("#mk-sr")!;
     let t = 0;
-    sr.addEventListener("input", () => { clearTimeout(t); updateSellText(null); t = window.setTimeout(quoteSell, 250); });
+    sr.addEventListener("input", () => { clearTimeout(t); updateSellText(); t = window.setTimeout(quoteSell, 250); });
     const out = B.querySelector<HTMLElement>("#mk-msg")!;
     move(B.querySelector("#mk-bgo")!, out, async () => {
       const payer = buyPayer();
@@ -2268,7 +2394,16 @@ export function play(root: HTMLElement) {
       if (sess().vault) { keepReceipt("buy", r.hash); return chain.migrate(); }
       return r;
     }, () => (sess().vault ? "Bought, and it's in your vault." : "Bought."), sess().vault && buyPayer() === "wallet" ? "migrate" : "buy");
-    move(B.querySelector("#mk-sgo")!, out, () => chain.sell(sellAmount().toString(), sess().vault ? "vault" : "wallet"), (v) => `Sold for ${chain.fmtNear(String(v ?? "0"), 3)} NEAR.`, "sell", () => { sr.value = "0"; });
+    move(B.querySelector("#mk-sgo")!, out, () => chain.sell(sellAmount().toString(), sess().vault ? "vault" : "wallet"), (v) => `Sold for ${chain.fmtNear(String(v ?? "0"), 3)} NEAR.`, "sell", () => {
+      sr.value = "0";
+      // mainnet: the NEAR from a sale is one tap from leaving
+      const nx = B.querySelector<HTMLElement>("#mk-next");
+      if (MAIN && nx) {
+        nx.innerHTML = sess().vault ? `<button type="button" class="btn wide" id="mk-cash">Cash out ›</button>` : `<button type="button" class="btn wide" id="mk-wout">Send NEAR out ›</button>`;
+        const cb = nx.querySelector<HTMLButtonElement>("#mk-cash"); if (cb) cb.onclick = () => openCashOut();
+        const wb = nx.querySelector<HTMLButtonElement>("#mk-wout"); if (wb) wb.onclick = () => openWalletOut();
+      }
+    });
     quoteBuy();
     quoteSell();
     updateMarket();
@@ -2290,19 +2425,25 @@ export function play(root: HTMLElement) {
       el.innerHTML = q ? `Get about <b class="yel">${full(q)}</b> coins${sess().vault ? ", straight into your vault" : ""}.` : "The market is full right now.";
     } catch { el.textContent = "Can't reach NEAR for a price right now."; }
   }
-  let sellQuote: string | null = null;
-  function updateSellText(q: string | null | undefined) {
+  /** The last sell quote and the amount it was for: a quote for another amount (the bag moved) is never shown. */
+  let mkSellQ: { amt: string; q: string | null } | null = null;
+  let mkSellT = 0;
+  function updateSellText() {
     const el = sheet?.body.querySelector<HTMLElement>("#mk-sq");
-    if (!el) return;
+    if (!el || sheetKind !== "market") return;
     const a = sellAmount();
     if (a === 0n) { el.textContent = "Slide to choose how much to sell."; return; }
+    const fresh = !!mkSellQ && mkSellQ.amt === a.toString();
     const fee = pct(P(c(), "sell_fee_bps"));
-    el.innerHTML = `Sell <b>${full(a)}</b> coins for about <b class="yel">${q ? chain.fmtNear(q, 3) : "(checking the price)"}</b> NEAR. A ${fee} fee is taken in coins: half burns, half goes to vault holders.`;
+    el.innerHTML = `Sell <b>${full(a)}</b> coins for about <b class="yel">${fresh && mkSellQ!.q ? `${chain.fmtNear(mkSellQ!.q, 3)} NEAR` : "(checking the price)"}</b>. A ${fee} fee is taken in coins: half burns, half goes to vault holders.`;
+    if (!fresh) { clearTimeout(mkSellT); mkSellT = window.setTimeout(quoteSell, 250); } // the amount changed under the quote: price it again
   }
   async function quoteSell() {
+    if (sheetKind !== "market") return;
     const a = sellAmount();
-    if (a === 0n) { updateSellText(null); return; }
-    try { sellQuote = await chain.quoteSell(a.toString()); updateSellText(sellQuote); } catch { updateSellText(null); }
+    if (a === 0n) { updateSellText(); return; }
+    try { const q = await chain.quoteSell(a.toString()); mkSellQ = { amt: a.toString(), q }; } catch { mkSellQ = { amt: a.toString(), q: null }; }
+    if (sheetKind === "market" && sellAmount() === a) updateSellText(); // a newer amount has its own quote coming
   }
   function updateMarket() {
     const B = sheet!.body;
@@ -2319,10 +2460,13 @@ export function play(root: HTMLElement) {
       const p = buyPayer();
       bgo.disabled = !p;
       bgo.textContent = p ? `Buy for ${mkNear} NEAR` : `Not enough ${NET_LABEL.toLowerCase()} NEAR`;
+      const why = B.querySelector<HTMLElement>("#mk-why")!;
+      why.hidden = !!p;
+      if (!p) why.textContent = MAIN ? "Sell coins for NEAR, then buy back. Or top up your wallet." : "Sell coins for practice NEAR, then buy back.";
     }
     const sgo = B.querySelector<HTMLButtonElement>("#mk-sgo")!;
     if (!sgo.classList.contains("busy")) sgo.disabled = sellAmount() === 0n || !!w.stats?.after_q_day && !inVault();
-    updateSellText(sellQuote);
+    updateSellText();
   }
 
   // ----- settings
@@ -2333,27 +2477,38 @@ export function play(root: HTMLElement) {
     const maxY = have - BigInt(chain.nearToYocto(0.01)); // a little stays for gas
     const maxN = maxY > 0n ? Math.floor(Number(maxY / 10n ** 21n)) / 1000 : 0;
     show("walletout", "", "Send NEAR out", `
-      <p class="kick gold">Mainnet · your wallet</p>
+      <p class="kick gold">${NET_LABEL} · your wallet</p>
       <h2 class="s-title">Send NEAR out</h2>
-      <p class="s-text">This wallet holds <b>${chain.fmtNear(have, 3)} NEAR</b>. Send it to any NEAR account, like an exchange deposit address or your own wallet.</p>
-      <label class="m-field"><span>To NEAR account</span><input id="wo-to" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name.near or a 64 character address"/></label>
+      <p class="s-text">This wallet holds <b>${chain.fmtNear(have, 3)} ${MAIN ? "" : "practice "}NEAR</b>. Send it to any NEAR account${MAIN ? ", like an exchange deposit address or your own wallet" : ""}. It arrives in seconds.</p>
+      <label class="m-field"><span>To NEAR account</span><input id="wo-to" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name.${MAIN ? "near" : "testnet"} or a 64 character address"/></label>
+      <p class="m-hint" id="wo-hint">Paste the account that should receive it.</p>
       <label class="m-field"><span>Amount (max ${maxN})</span><input id="wo-n" inputmode="decimal" value="${maxN}"/></label>
-      <button class="btn wide" id="wo-go"${maxN > 0 ? "" : " disabled"}>Send</button>
+      <button class="btn wide" id="wo-go" disabled>Send</button>
       <p class="s-msg" id="wo-msg" role="status"></p>`, "gold");
-    const B = sheet!.body, out = B.querySelector<HTMLElement>("#wo-msg")!;
-    B.querySelector<HTMLButtonElement>("#wo-go")!.onclick = async (e) => {
+    const B = sheet!.body, out = B.querySelector<HTMLElement>("#wo-msg")!, hint = B.querySelector<HTMLElement>("#wo-hint")!, goB = B.querySelector<HTMLButtonElement>("#wo-go")!;
+    const toIn = B.querySelector<HTMLInputElement>("#wo-to")!;
+    let okTo = false, chk = 0;
+    toIn.addEventListener("input", async () => {
+      const id = ++chk; okTo = false; goB.disabled = true;
+      if (!toIn.value.trim()) { hint.className = "m-hint"; hint.textContent = "Paste the account that should receive it."; return; }
+      hint.className = "m-hint"; hint.textContent = "Checking that account…";
+      const r = await checkNearDest(toIn.value);
+      if (id !== chk) return;
+      okTo = r.ok; hint.className = r.ok ? "m-hint" : "m-hint bad"; hint.textContent = r.hint; goB.disabled = !(okTo && maxN > 0);
+    });
+    goB.onclick = async (e) => {
       const btn = e.currentTarget as HTMLButtonElement;
-      const to = B.querySelector<HTMLInputElement>("#wo-to")!.value.trim().toLowerCase();
+      const to = toIn.value.trim().toLowerCase();
       const n = Number(B.querySelector<HTMLInputElement>("#wo-n")!.value);
-      if (!NEAR_NAME.test(to)) { out.className = "s-msg bad"; out.textContent = "That is not a NEAR account."; return; }
+      if (!okTo) { out.className = "s-msg bad"; out.textContent = hint.textContent || "That is not a NEAR account."; return; }
       if (!(n > 0) || n > maxN) { out.className = "s-msg bad"; out.textContent = `Send between 0 and ${maxN} NEAR.`; return; }
       btn.disabled = true; out.className = "s-msg"; out.textContent = "Sending…";
-      try { const r = await chain.walletWithdraw(to, chain.nearToYocto(n)); out.className = "s-msg ok"; out.innerHTML = `Sent ${n} NEAR to ${esc(to)}.${r.hash ? ` <a href="https://nearblocks.io/txns/${r.hash}" target="_blank" rel="noopener">Receipt ↗</a>` : ""}`; void refresh(); }
+      try { const r = await chain.walletWithdraw(to, chain.nearToYocto(n)); out.className = "s-msg ok"; out.innerHTML = `Sent ${n} NEAR to ${esc(to)}.${r.hash ? ` <a href="${chain.txLink(r.hash)}" target="_blank" rel="noopener">Receipt ↗</a>` : ""}`; void refresh(); }
       catch (err) { btn.disabled = false; out.className = "s-msg bad"; out.textContent = plainError(err); }
     };
   }
 
-  function openSettings(restore = false) {
+  function openSettings() {
     const s = sess();
     const theme = document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
     show("settings", "", "Menu", `
@@ -2366,23 +2521,17 @@ export function play(root: HTMLElement) {
         <div id="bk"><button type="button" class="btn wide ghost" id="bk-show">Show recovery code</button></div>
       </div>` : ""}
       <div class="titles"><span class="set-k">Your titles</span><div class="title-row">${(Object.keys(TITLES) as TitleKey[]).map((k) => `<span class="ttl ${titles().includes(k) ? "on" : ""}" title="${TITLES[k][1]}">${TITLES[k][0]}</span>`).join("")}</div>
-        ${titles().length ? `<button type="button" class="btn ghost wide small" id="st-share">${I.share} Share your titles</button>` : `<p class="m-hint">Earn titles by playing: build a vault, escape a raid, shield, defend, raid, hit Satoshi.</p>`}</div>
+        ${titles().length ? `<button type="button" class="btn ghost wide small" id="st-share">${I.share} Share your titles</button>` : `<p class="m-hint">Earn titles by playing: build a vault, escape a raid, shield, defend, raid, shoot Satoshi's stash.</p>`}</div>
       <div class="set-list">
         <button type="button" class="set-item" id="st-act"><span>Activity</span><span>›</span></button>
         <button type="button" class="set-item" id="st-boss"><span>Satoshi boss fight</span><span>›</span></button>
         <button type="button" class="set-item" id="st-net"><span>Switch arena</span><span>${MAIN ? "Mainnet" : "Practice"}</span></button>
-        ${MAIN && s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out NEAR</span><span>›</span></button>` : ""}
-        ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>
-        <button type="button" class="set-item" id="st-wout"><span>Send wallet NEAR out</span><span>›</span></button>` : ""}
+        ${MAIN && s.vault ? `<button type="button" class="set-item" id="st-cash"><span>Cash out</span><span>›</span></button>` : ""}
+        ${MAIN && s.wallet && !s.vault ? `<button type="button" class="set-item" id="st-topup"><span>Top up wallet</span><span>›</span></button>` : ""}
+        ${s.wallet && (w.walletNear ?? 0n) > BigInt(chain.nearToYocto(0.02)) ? `<button type="button" class="set-item" id="st-wout"><span>Send wallet NEAR out</span><span>${chain.fmtNear(w.walletNear ?? 0n, 2)} ${NET_LABEL} NEAR ›</span></button>` : ""}
         <button type="button" class="set-item" id="st-theme"><span>Theme</span><span>${theme === "dark" ? "Dark" : "Light"}</span></button>
         ${MAIN && s.wallet ? `<button type="button" class="set-item" id="st-wbk"><span>Back up wallet code</span><span>${chain.walletBackedUp() ? "Saved" : "Not saved"}</span></button>` : ""}
-        ${MAIN ? `<details class="set-item det"${restore ? " open" : ""}><summary><span>Restore a wallet from a code</span><span>›</span></summary>
-          <div class="restore"><label class="m-field"><span>Wallet recovery code</span><input id="rw-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
-          <button type="button" class="btn wide ghost" id="rw-go">Restore wallet</button></div></details>` : ""}
-        <details class="set-item det"${restore ? " open" : ""}><summary><span>Restore a vault from a code</span><span>›</span></summary>
-          <div class="restore"><label class="m-field"><span>Vault name</span><input id="rs-n" autocomplete="off" autocapitalize="off" spellcheck="false"/></label>
-          <label class="m-field"><span>Recovery code</span><input id="rs-c" autocomplete="off" autocapitalize="characters" spellcheck="false"/></label>
-          <button type="button" class="btn wide ghost" id="rs-go">Restore vault</button></div></details>
+        <button type="button" class="set-item" id="st-restore"><span>Restore a wallet or vault</span><span>›</span></button>
         <a class="set-item" href="/proof" data-link><span>Under the hood</span><span>›</span></a>
         ${s.wallet || s.vault ? `<button type="button" class="set-item danger" id="st-forget"><span>Forget this device</span><span></span></button>` : ""}
       </div>
@@ -2390,8 +2539,7 @@ export function play(root: HTMLElement) {
     const B = sheet!.body;
     const wout = B.querySelector<HTMLButtonElement>("#st-wout");
     if (wout) wout.onclick = () => openWalletOut();
-    if (restore) setTimeout(() => B.querySelector(".det[open]")?.scrollIntoView({ block: "center", behavior: "smooth" }), 80);
-    const out = B.querySelector<HTMLElement>("#st-msg")!;
+    B.querySelector<HTMLButtonElement>("#st-restore")!.onclick = () => openRestore();
     B.querySelector<HTMLButtonElement>("#st-act")!.onclick = () => openActivity();
     B.querySelector<HTMLButtonElement>("#st-boss")!.onclick = () => openSatoshi();
     B.querySelector<HTMLButtonElement>("#st-net")!.onclick = () => openNetwork();
@@ -2419,7 +2567,9 @@ export function play(root: HTMLElement) {
       const bk = B.querySelector<HTMLElement>("#bk")!;
       if (!code) { bk.innerHTML = `<p class="s-msg bad">This browser can't open the sealed key. Use the code you saved before.</p>`; return; }
       bk.innerHTML = `<div class="code">${code.split("-").map((b, i) => `<span><i>${i + 1}</i>${b}</span>`).join("")}</div>
-        <div class="row2"><button type="button" class="btn ghost" id="bk-copy">Copy</button><button type="button" class="btn ghost" id="bk-dl">Download</button></div>`;
+        <div class="row2"><button type="button" class="btn ghost" id="bk-copy">Copy</button><button type="button" class="btn ghost" id="bk-dl">Download</button></div>
+        <p class="s-msg" id="bk-msg" role="status"></p>`;
+      const out = bk.querySelector<HTMLElement>("#bk-msg")!; // the answer sits right under the button you tapped
       const mark = () => { setProg({ backedUp: sess().vault!.accountId }); renderHud(); };
       bk.querySelector<HTMLButtonElement>("#bk-copy")!.onclick = async () => {
         try { await navigator.clipboard.writeText(code); out.className = "s-msg ok"; out.textContent = "Copied. Paste it somewhere safe."; mark(); }
@@ -2438,21 +2588,6 @@ export function play(root: HTMLElement) {
     };
     const wbk = B.querySelector<HTMLButtonElement>("#st-wbk");
     if (wbk) wbk.onclick = () => void openWalletBackup(() => { sheet?.close(); toast({ tone: "gold", title: "Wallet code saved." }); });
-    const rw = B.querySelector<HTMLButtonElement>("#rw-go");
-    if (rw) rw.onclick = async () => {
-      const code = B.querySelector<HTMLInputElement>("#rw-c")!.value.trim();
-      out.className = "s-msg"; out.textContent = "Opening the wallet…";
-      try { const r = await chain.restoreWallet(code); const bal = await chain.nearBalance(r.accountId); out.className = "s-msg ok"; out.textContent = `Wallet restored: ${chain.fmtNear(bal, 3)} NEAR.`; missionKey = ""; await refresh(); }
-      catch (e) { out.className = "s-msg bad"; out.textContent = plainError(e); }
-    };
-    B.querySelector<HTMLButtonElement>("#rs-go")!.onclick = async () => {
-      const n = B.querySelector<HTMLInputElement>("#rs-n")!.value.trim();
-      const code = B.querySelector<HTMLInputElement>("#rs-c")!.value.trim();
-      if (!n) { out.className = "s-msg bad"; out.textContent = "Type the vault name."; return; }
-      out.className = "s-msg"; out.textContent = "Checking the code…";
-      try { await chain.restoreVault(n, code); setProg({ backedUp: chain.session().vault!.accountId, vault: chain.session().vault!.accountId, stage: "free" }); out.className = "s-msg ok"; out.textContent = "Vault restored on this device."; missionKey = ""; await refresh(); }
-      catch (e) { out.className = "s-msg bad"; out.textContent = plainError(e); }
-    };
     const fg = B.querySelector<HTMLButtonElement>("#st-forget");
     let armed = false;
     if (fg) fg.onclick = () => {
@@ -2464,6 +2599,70 @@ export function play(root: HTMLElement) {
       lastBag = -1n;
       prevState = "";
       refresh();
+    };
+  }
+
+  /** Restore from a saved code: two clear choices, each with its answer right under its own button. */
+  function openRestore() {
+    const other = MAIN ? "Practice" : "Mainnet";
+    show("restore", "", "Restore", `
+      <p class="kick gold">${NET_LABEL} arena</p>
+      <h2 class="s-title">Restore from a code</h2>
+      <section class="rs-opt">
+        <h3 class="rs-h">Wallet code</h3>
+        <p class="m-hint">Your NEAR before you built a vault.</p>
+        <label class="m-field"><span>Wallet recovery code</span><input id="rw-c" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="8 blocks of 8"/></label>
+        <button type="button" class="btn wide ghost" id="rw-go">Restore wallet</button>
+        <p class="s-msg" id="rw-msg" role="status"></p>
+      </section>
+      <section class="rs-opt">
+        <h3 class="rs-h">Vault name and vault code</h3>
+        <p class="m-hint">Your vault and coins.</p>
+        <label class="m-field"><span>Vault name</span><input id="rs-n" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="the name on your saved code file"/></label>
+        <label class="m-field"><span>Vault recovery code</span><input id="rs-c" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="8 blocks of 8"/></label>
+        <button type="button" class="btn wide ghost" id="rs-go">Restore vault</button>
+        <p class="s-msg" id="rs-msg" role="status"></p>
+      </section>
+      ${chain.MAINNET_READY ? `<p class="m-hint">Each arena keeps its own codes. Saved a ${other.toLowerCase()} code? <button type="button" class="linkish" id="rs-net">Switch to ${other}</button></p>` : ""}`, "gold");
+    const B = sheet!.body;
+    const net = B.querySelector<HTMLButtonElement>("#rs-net");
+    if (net) net.onclick = () => { const u = new URL(location.href); u.searchParams.set("restore", "1"); history.replaceState(history.state, "", u.toString()); chain.switchNetwork(MAIN ? "testnet" : "mainnet"); };
+    const rwOut = B.querySelector<HTMLElement>("#rw-msg")!, rsOut = B.querySelector<HTMLElement>("#rs-msg")!;
+    const rwGo = B.querySelector<HTMLButtonElement>("#rw-go")!, rsGo = B.querySelector<HTMLButtonElement>("#rs-go")!;
+    const rwIn = B.querySelector<HTMLInputElement>("#rw-c")!;
+    let armedFor = ""; // a second tap on the same code replaces a wallet that holds NEAR
+    rwIn.addEventListener("input", () => { if (armedFor) { armedFor = ""; rwGo.textContent = "Restore wallet"; rwOut.textContent = ""; } });
+    rwGo.onclick = async () => {
+      const code = rwIn.value.trim();
+      if (!code) { rwOut.className = "s-msg bad"; rwOut.textContent = "Paste or type your wallet code."; return; }
+      rwGo.disabled = true; rwOut.className = "s-msg"; rwOut.textContent = "Checking the code…";
+      try {
+        const r = await chain.restoreWallet(code, armedFor === code);
+        armedFor = ""; rwGo.textContent = "Restore wallet";
+        const bal = await chain.nearBalance(r.accountId);
+        rwOut.className = "s-msg ok"; rwOut.textContent = `Wallet restored: ${chain.fmtNear(bal, 3)} NEAR.`;
+        missionKey = ""; await refresh();
+      } catch (e) {
+        if (e instanceof chain.ChainError && e.code === "E_REPLACE_WALLET") {
+          armedFor = code;
+          rwOut.className = "s-msg bad"; rwOut.textContent = `This replaces the wallet on this device (${chain.fmtNear(e.near ?? 0n, 3)} NEAR). Save its code first.`;
+          rwGo.textContent = "Tap again to replace it";
+        } else { rwOut.className = "s-msg bad"; rwOut.textContent = plainError(e); }
+      } finally { rwGo.disabled = false; }
+    };
+    rsGo.onclick = async () => {
+      const nIn = B.querySelector<HTMLInputElement>("#rs-n")!;
+      const n = nIn.value.trim().toLowerCase();
+      nIn.value = n;
+      const code = B.querySelector<HTMLInputElement>("#rs-c")!.value.trim();
+      if (!n) { rsOut.className = "s-msg bad"; rsOut.textContent = "Type the vault name."; return; }
+      if (!code) { rsOut.className = "s-msg bad"; rsOut.textContent = "Paste or type your vault code."; return; }
+      rsGo.disabled = true; rsOut.className = "s-msg"; rsOut.textContent = "Checking the name and code…";
+      try { await chain.restoreVault(n, code); setProg({ backedUp: chain.session().vault!.accountId, vault: chain.session().vault!.accountId, stage: "free" }); rsOut.className = "s-msg ok"; rsOut.textContent = "Vault restored on this device."; missionKey = ""; await refresh(); }
+      catch (e) {
+        rsOut.className = "s-msg bad";
+        rsOut.textContent = e instanceof chain.ChainError && e.code === "E_NO_VAULT" ? `No vault called ${n.replace(/\..*$/, "")}. Check the name on your saved code file.` : plainError(e);
+      } finally { rsGo.disabled = false; }
     };
   }
 
@@ -2482,8 +2681,27 @@ export function play(root: HTMLElement) {
     if (key === trkKey) return;
     trkKey = key;
     el.hidden = !open.length || guideOn();
+    requestAnimationFrame(placeTracker);
     el.innerHTML = open.map((r) => `<li class="rt${r.target_kind === "vault" ? " v" : ""}"><span class="av">${avatar(r.target)}</span><span class="rt-n">${N(r.target)}</span><b data-until="${r.deadline}">${clock(r.deadline - chainNow())}</b></li>`).join("") + (all.length > 2 ? `<li class="rt more">+${all.length - 2} more robbing</li>` : "");
   }
+
+  /** The raid tracker sits under the minimap, and under the toasts whenever they would reach it: nothing covers it. */
+  function placeTracker() {
+    const el = root.querySelector<HTMLElement>("#raid-trk");
+    if (!el || el.hidden) return;
+    const fr = field.getBoundingClientRect();
+    let top = 122; // the minimap and its HOLD TO LOOK line end above this
+    const tr = el.getBoundingClientRect();
+    for (const t of evHost.querySelectorAll<HTMLElement>(".ev")) {
+      const r = t.getBoundingClientRect();
+      if (!r.height || getComputedStyle(t).display === "none") continue;
+      const overlapX = r.right > tr.left - 4 && r.left < tr.right + 4;
+      if (overlapX) top = Math.max(top, Math.round(r.bottom - fr.top + 6));
+    }
+    if (el.style.top !== `${top}px`) el.style.top = `${top}px`;
+  }
+  new ResizeObserver(() => placeTracker()).observe(evHost);
+  new MutationObserver(() => requestAnimationFrame(placeTracker)).observe(evHost, { childList: true });
 
   function renderPinned() {
     const r = w.incoming;
@@ -2500,7 +2718,7 @@ export function play(root: HTMLElement) {
       pin.dataset.id = `${r.id}:${live}`;
       const onVault = r.target === sess().vault?.accountId;
       const shield = onVault && (w.vault?.shield_bps || 0) > 0 ? ` · shield takes ${pct(w.vault!.shield_bps)} off` : "";
-      const what = live ? `${N(r.attacker).toUpperCase()} IS ROBBING YOU${shield} · ${onVault ? "SHOOT BACK" : "RUN TO THE GOLD DOOR"}` : `${N(r.attacker)}'s raid finds an empty wallet`;
+      const what = live ? `${N(r.attacker).toUpperCase()} IS ROBBING YOU${shield} · ${onVault ? "SHOOT BACK" : "RUN TO THE GOLD DOOR"}` : `${N(r.attacker)} is hitting your old wallet · empty`;
       pin.innerHTML = `<span class="av">${avatar(r.attacker)}</span><span class="ev-t">${what}</span><b class="ev-clock" data-until="${r.deadline}">${clock(r.deadline - chainNow())}</b>`;
       pin.onclick = () => openUnderRaid();
       evHost.appendChild(pin);
@@ -2510,7 +2728,7 @@ export function play(root: HTMLElement) {
   // ---------------------------------------------------------------- render
 
   function render() {
-    if (!w.ok && !loaded) { renderMission(); renderArena(); return; }
+    if (!w.ok && !loaded) { renderMission(); renderArena(); renderActions(); return; }
     renderHud();
     renderMission();
     renderArena();
@@ -2567,6 +2785,14 @@ export function play(root: HTMLElement) {
   })();
   vaultName = suggestVaultName(sess().wallet?.accountId || String(Date.now()));
   render();
+  // ?restore=1 (from the title screen): straight to the restore sheet, past the intro
+  const wantsRestore = new URLSearchParams(location.search).has("restore");
+  if (wantsRestore) {
+    introDone = true;
+    try { localStorage.setItem(LS_INTRO, "1"); } catch {}
+    const u = new URL(location.href); u.searchParams.delete("restore"); history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+    setTimeout(() => { if (alive) openRestore(); }, 50);
+  }
   if (!introDone) { introDone = true; sfx.duckMusic(true); coldOpen().then(() => sfx.duckMusic(false)); }
   tick(false);
   // While the game is open, wake the NPCs once a minute: they settle closed raids,
@@ -2581,6 +2807,7 @@ export function play(root: HTMLElement) {
   (field as any).__music = () => sfx.musicState();
   (field as any).__toastTitle = (k: TitleKey) => { const [name, why] = TITLES[k]; toast({ tone: "gold", cls: "ev-title", title: `<b>Title earned</b> · ${esc(name)} · ${esc(why)}` }); }; // styling check only: stores nothing
   (field as any).__guide = () => ({ step: gstep, on: guideOn(), holds: guideHolds(), target: gTarget, variant: gVariant });
+  (field as any).__open = (k: string) => ({ cashout: openCashOut, walletout: openWalletOut, restore: openRestore, topup: () => openTopUp(), market: () => openMarket("sell"), shield: openShield, bag: openBag, menu: openSettings } as Record<string, () => void>)[k]?.(); // acceptance: open a sheet by name
   (field as any).__world = () => ({ incoming: w.incoming, myRaids: w.myRaids.length, walletBal: String(w.walletBal), vaultBal: String(w.vaultBal), vault: sess().vault?.accountId, wallet: sess().wallet?.accountId, holders: w.holders.length, raidsLeft: w.vault?.raids_left });
 
   return () => {

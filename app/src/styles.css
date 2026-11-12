@@ -985,3 +985,63 @@ input[type="range"] { width: 100%; accent-color: var(--gold); height: 32px; }
 .round-chip b { font: 700 24px/1 var(--display); font-variant-numeric: tabular-nums; color: #27f0ff; }
 .act.shoot.sending .act-ic { animation: blink 0.5s steps(2) infinite; }
 @media (prefers-reduced-motion: reduce) { .hud-cell.bag.fx-bump .hud-v, .hud-cell.bag.fx-bump-big .hud-v, .field-top .combo.in, .act.shoot.sending .act-ic { animation: none !important; } }
+
+/* ------------------------------------------------------------ v9: the outside walk fixes */
+/* market: four amounts, the reason when buy is off */
+.pick.four button { font-size: 14px; letter-spacing: 0.02em; }
+#mk-why { margin-top: -4px; }
+/* a link that is a button */
+.linkish { justify-self: start; padding: 4px 0; background: none; border: 0; color: var(--ink); font: 600 13px/1.3 var(--mono); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.linkish:hover { color: var(--gold-ink); }
+.m-hint .linkish { font-size: inherit; padding: 0; }
+/* restore: two clear choices, each answer under its own button */
+.rs-opt { display: grid; gap: 8px; padding: 12px 14px 14px; background: var(--panel); box-shadow: inset 3px 0 0 var(--gold); }
+.rs-h { margin: 0; font: 700 18px/1 var(--display); text-transform: uppercase; letter-spacing: 0.04em; }
+/* the mainnet grab card: plain facts */
+.s-facts { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12.5px; line-height: 1.4; color: var(--dim); }
+.s-facts li { padding-left: 14px; position: relative; }
+.s-facts li::before { content: ""; position: absolute; left: 0; top: 0.5em; width: 6px; height: 6px; background: var(--gold); }
+.usd:empty { display: none; }
+.usd { color: var(--ink); }
+/* cash out: slider with a Max button */
+.range-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.range-row .btn.small { min-height: 36px; }
+.tu-amt button small.tu-fee { opacity: 0.6; }
+/* shield: how long it lasts comes first */
+.sh-last { margin: 0; padding: 10px 12px; font: 600 14px/1.4 var(--mono); background: var(--panel); box-shadow: inset 3px 0 0 var(--cyan); }
+.sh-last.short { box-shadow: inset 3px 0 0 var(--hazard); color: var(--hazard-ink); }
+.sh-last b { font-variant-numeric: tabular-nums; }
+/* a success line that reads on both themes */
+.s-msg.ok { color: var(--ink); background: var(--gold-soft); box-shadow: inset 3px 0 0 var(--gold); padding: 8px 10px; }
+.s-msg.ok a { color: inherit; }
+.s-msg.bad { padding: 8px 10px; background: var(--red-soft); box-shadow: inset 3px 0 0 var(--hazard); }
+/* SHOOT with nothing to shoot: dim, the clock still reads */
+.act.shoot.off .act-st b { color: var(--ink); }
+/* the title earned pill wraps instead of cutting */
+.field > .events .ev.ev-title .ev-t { display: block; -webkit-line-clamp: unset; line-clamp: unset; }
+.field > .events .ev.ev-title { width: auto; max-width: 100%; }
+/* the raid tracker under the minimap (JS moves it below any toast that would reach it) */
+.raid-trk { top: 122px; }
+@media (min-width: 1024px) { .raid-trk { top: 122px; } }
+.raid-trk .rt b { color: var(--cyan-ink); }
+.raid-trk .rt { box-shadow: inset 0 0 0 2px var(--cyan); }
+/* the goal bar: short pieces; what you paid only where there is room */
+.goal .goal-you span + span::before { content: "·"; color: var(--dim); margin: 0 6px; font-weight: 500; }
+@media (max-width: 430px) { .goal .g-paid { display: none; } .goal { gap: 5px; font-size: 10px; } .goal .goal-you span + span::before { margin: 0 4px; } .goal.has-you .goal-you::before { margin-right: 4px; } }
+/* the title screen: which arena the numbers come from, and a way back in with a code */
+.t-restore { display: inline-block; margin-top: 10px; font: 500 12.5px/1.3 var(--mono); color: var(--ink); text-underline-offset: 3px; background: color-mix(in srgb, var(--bg) 82%, transparent); padding: 4px 8px; }
+.sec-net { font: 500 11px/1 var(--mono); letter-spacing: 0.12em; color: var(--dim); margin-left: 10px; vertical-align: middle; }
+.t-core .t-net { display: block; font: 500 9px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-top: 4px; }
+/* /proof: the mainnet section */
+.mn-sec { padding-bottom: 24px; }
+/* the nav never wraps */
+.nav a, .nav button { white-space: nowrap; }
+@media (max-width: 400px) { .nav a { padding: 10px 5px; letter-spacing: 0.06em; } .nav .ico { width: 32px; } }
+/* top up: four amounts fit a phone (the shortfall plus 1, 2, 5) */
+.pick.tu-amt { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); }
+.pick.tu-amt:has(> button:nth-child(4)) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pick.tu-amt button { min-width: 0; padding: 12px 3px; }
+.pick.tu-amt button b { font-size: 17px; white-space: nowrap; }
+.pick.tu-amt button small { white-space: normal; line-height: 1.25; font-size: 9.5px; }
+.sheet { overflow-x: hidden; }
+.sheet-body > * { min-width: 0; }
