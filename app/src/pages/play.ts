@@ -1341,7 +1341,7 @@ export function play(root: HTMLElement) {
     const parts: [string, string][] = [];
     if (w.stats?.after_q_day) parts.push(["g-rank", "Q-Day has come"]);
     else if (!s.wallet && !s.vault) parts.push(["g-rank", "grab a bag to enter"]);
-    else if (!inVault()) parts.push(["g-rank", w.walletBal > 0n ? "get gold to be ranked" : "grab a bag to enter"]);
+    else if (!inVault()) parts.push(["g-rank", w.walletBal > 0n ? "no vault yet" : "grab a bag to enter"]);
     else {
       const list = vaultsRanked();
       const i = list.findIndex((h) => h.account === s.vault!.accountId);
