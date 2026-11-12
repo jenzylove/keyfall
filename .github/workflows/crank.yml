@@ -40,6 +40,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
           LOOP_SEC: "30"
           LOOP_MIN: "345"
+          FIRST_SEEN_FILE: ${{ runner.temp }}/first-seen.json
         run: node scripts/crank-loop.mjs
       - name: Start the next heartbeat
         if: always() && github.event.inputs.dry_run != 'true'

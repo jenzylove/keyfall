@@ -61,7 +61,7 @@ export default async function handler(req: any, res: any) {
     });
     const j: any = await r.json().catch(() => ({}));
     const q = j?.quote;
-    if (!r.ok || !q?.amountOut || (!dry && !q?.depositAddress)) return res.status(502).json({ error: j?.message || `1Click answered ${r.status}` });
+    if (!r.ok || !q?.amountOut || (!dry && !q?.depositAddress)) return res.status(502).json({ error: r.status >= 500 || /internal/i.test(String(j?.message || "")) ? "No swap route for this amount right now. Try a little more, or another coin." : j?.message || `1Click answered ${r.status}` });
     // The deposit must be a NEAR implicit account: the vault sends wNEAR there with ft_transfer.
     if (!dry && !/^[0-9a-f]{64}$/.test(q.depositAddress)) return res.status(502).json({ error: "1Click returned a deposit address the vault cannot pay" });
     return res.status(200).json({

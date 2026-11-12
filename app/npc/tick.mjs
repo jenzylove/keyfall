@@ -65,6 +65,17 @@ async function firstSeenFromFeed(view) {
   for (const f of [...feed].reverse()) {
     for (const a of [f.actor, f.target]) if (a && seen[a] === undefined && (f.kind === "buy" || f.kind === "vault")) seen[a] = Number(f.at);
   }
+  // The feed keeps only 64 moves; on a busy arena a new player's buy can scroll out inside their grace period.
+  // A long running heartbeat keeps what it saw in a file, so the grace holds however busy it gets.
+  const file = typeof process !== "undefined" ? process.env.FIRST_SEEN_FILE : undefined;
+  if (file) {
+    try {
+      const fs = await import("node:fs");
+      const kept = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+      for (const [a, t] of Object.entries(kept)) if (seen[a] === undefined || Number(t) < seen[a]) seen[a] = Number(t);
+      fs.writeFileSync(file, JSON.stringify(seen));
+    } catch { /* memory is a bonus: the feed alone still works */ }
+  }
   return seen;
 }
 

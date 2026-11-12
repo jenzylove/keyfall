@@ -33,7 +33,7 @@ export function landing(root: HTMLElement) {
         <a class="btn play pulse" href="/play${MAINNET_READY ? "?net=practice" : ""}" data-link id="t-play"><span class="tri" aria-hidden="true"></span>PLAY</a>
         ${MAINNET_READY ? `<a class="btn ghost play-real" href="/play?net=mainnet" data-link id="t-real">Play for real on mainnet</a>` : ""}
         <a class="t-restore" href="/play?${MAINNET_READY ? "net=mainnet&" : ""}restore=1" data-link id="t-restore">I have a wallet or vault code</a>
-        <p class="t-cd"><span class="t-cd-k">Q-DAY IN</span><b id="t-cd">··</b></p>
+        <p class="t-cd"><span class="t-cd-k">${IS_MAINNET ? "MAINNET" : "PRACTICE"} Q-DAY IN</span><b id="t-cd">··</b></p>
         <p class="t-sub">${NET_SUB}</p>
       </div>
       <a class="t-more" href="#how">How to play <i aria-hidden="true">▼</i></a>

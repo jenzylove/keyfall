@@ -78,6 +78,8 @@ Before locking the mainnet contract, a spike proved mainnet accepts transactions
 | The deployed code is this repo | `node scripts/judge-checks.mjs` compares your local wasm build hash with the deployed one when cargo near is installed; otherwise it prints the deployed sha256 for you to compare. The mainnet wasm hash is in [`deployments/mainnet.json`](deployments/mainnet.json). How to rebuild it: [Rebuild the wasm](#rebuild-the-wasm) |
 | The books add up | exposed + vaults + market + escrow + burned = 21,000,000, checked live (practice also counts Satoshi's reserve and unclaimed blast pots) |
 | The whole season works, Q-Day included | 33 of 33 end to end checks on a fresh testnet season with real transactions, including frozen bags, stopped raids and `finalize()`: [docs/e2e/latest.md](docs/e2e/latest.md) |
+| Money comes in through NEAR Intents | A real top up: `intents.near` delivered 1 NEAR to a player wallet, which then bought in and built a mainnet vault: [`34NUTDJ45NZfePRoJKJk4L8CbLbnnPoCKptHtsLLuUed`](https://nearblocks.io/txns/34NUTDJ45NZfePRoJKJk4L8CbLbnnPoCKptHtsLLuUed) |
+| Money goes out through NEAR Intents, signed by a quantum key | A real cash out: `shor.keyfall.near` signed with its ML-DSA-65 key and sent 0.2 NEAR ([`CNrCrcBVqKanDhKwnWCduyRhBUbVWER9XZFBks64KjrH`](https://nearblocks.io/txns/CNrCrcBVqKanDhKwnWCduyRhBUbVWER9XZFBks64KjrH)); 1Click delivered 0.729 USDC on Base ([`0x86173edd…f044`](https://basescan.org/tx/0x86173edd4a8a2526075c20d95f569632b1a234e33e82230bb6653d9260f6f044)) |
 | Harvest cost does not grow with holders | Harvest gas was equal at 4 and 44 exposed holders in the recorded testnet run |
 
 ```sh
@@ -86,6 +88,8 @@ cd scripts && npm install && node judge-checks.mjs
 ```
 
 `judge-checks.mjs` runs against the practice contract by default (`deployments/testnet-live.json`).
+
+The practice contract (season 5) was built on the builder's machine with the plain cargo near route, like mainnet, so its exact bytes (`ae79495d…`, recorded in [`deployments/testnet-arcade5.json`](deployments/testnet-arcade5.json)) depend on that toolchain (cargo near 0.23.0, rustc 1.98.1, source as of commit `604ed4c`); judge-checks compares the deployed code hash with that record. The end to end run (33 of 33) ran on a testnet copy of the mainnet code; the arcade moves are covered by the sandbox suite on a local NEAR node.
 
 ### Rebuild the wasm
 
@@ -113,10 +117,10 @@ Anyone with Docker gets the same bytes from the same commit, and the wasm record
 ## The rules
 
 - **Supply:** 21,000,000 coins. Satoshi's stash (1,100,000 on mainnet, 3,000,000 in practice) is an exposed holder that can never move. The rest sits in a bonding curve inside the contract. No team allocation, no admin mint, no outside pool.
-- **Harvest:** every round anyone can call `harvest()`: a slice of every exposed balance, Satoshi included (2.5% per 6 hour round on mainnet, 0.04% per 10 minute round in practice, about the same pressure per day); half burns, half goes to vaults.
-- **Raids:** a vault stakes coins against any holder. An exposed target cannot defend but can escape by moving into a vault before the clock runs out (10 minutes on mainnet, 90 seconds in practice). A vault target can defend and take the stake. The take is 7 to 10% of an exposed bag or 0.5 to 2% of a vault, reduced by its shield, capped at 3 times the stake. No punching down: the target must be at least a quarter (mainnet) or half (practice) of your size.
-- **Shields:** burn a share of your bag; strength is the square root of the share (1% buys 10%, 4% buys 20%).
-- **Satoshi:** once per round each vault can take a slice of Satoshi's stash (0.1% on mainnet; 0.05% of a bigger 3,000,000 stash in practice, about 1,500 coins a hit at the start, sized by simulation so he lasts to Q-Day). The bots hit him at most once every 6 hours, so on the short clock his stash is left for players.
+- **Harvest:** every round anyone can call `harvest()`: a slice of every exposed balance, Satoshi included (2.5% per 6 hour round on mainnet, about 10% a day; 0.04% per 10 minute round in practice, about 6% a day); half burns, half goes to vaults.
+- **Raids:** a vault stakes coins against any holder. An exposed target cannot defend but can escape by moving into a vault before the clock runs out (10 minutes on mainnet, 25 seconds in practice). A vault target can defend and take the stake. The take is 10% of an exposed bag or 2% of a vault on mainnet (7% and 0.4% in practice), reduced by its shield, capped at 3 times the stake. No punching down: the target must be at least a quarter (mainnet) or half (practice) of your size.
+- **Shields (mainnet):** burn a share of your bag; strength is the square root of the share (1% buys 10%, 4% buys 20%).
+- **Satoshi (mainnet):** once per round each vault can take 0.1% of Satoshi's stash. The bots hit him at most once every 6 hours, so his stash is left for players. In practice he is a shared life bar instead (below).
 - **Practice arcade (season 5):** the practice contract adds arcade rules on top, all in its params (`config().arcade`); mainnet keeps the rules above.
   - **Bullets.** A vault holds a clip of 5. A raid, a shot back or a hit on Satoshi costs one bullet. One comes back free every minute. `reload()` burns 50,000 coins and fills the clip.
   - **Shield charges.** Up to 3; one comes back free every 2 minutes, and `buy_shield()` burns 4,000 for one. When someone raids you, you have 25 seconds to answer. `block()` spends a charge, `defend()` shoots back with a bullet; either way the raid fails and the stake is yours, less the 10% burn. After any raid you rest for 90 seconds.
@@ -151,7 +155,7 @@ The plan for the next season:
 - **Every season will be a new keyless contract,** the way this one was launched: the same code and its own rules, so nobody can change a season while it runs, not even the builder.
 - **Season 1's result will carry over.** Season 2 will read the finalized result of this season from the chain, and its vault holders will start with a head start in proportion to their final rank.
 - **Value never gets stuck** (live now). A vault can sell its coins back to the bonding curve for NEAR before or after Q-Day, so leaving a season costs nothing but the 2% sell fee.
-- **Running costs come from the game** (live now). The bots pay their own gas by selling a slice of their bag when they run low, and the cranks are free to call: the GitHub heartbeat keeps a season moving, and anyone can run `scripts/crank.mjs` too.
+- **Running costs come from the game.** A bot that drops below 0.15 NEAR sells 10% of its bag to pay for its moves (built in and tested in [`app/npc/rules.test.mjs`](app/npc/rules.test.mjs); no bot has needed it on chain yet), and the cranks are free to call: the GitHub heartbeat keeps a season moving, and anyone can run `scripts/crank.mjs` too.
 
 ## How it works
 
