@@ -1,9 +1,10 @@
 name: crank
 
-# The heartbeat when nobody is on the site: harvest, resolve, NPC moves.
+# The arena heartbeat: one long job ticks the bots every 30 s (harvest, resolve, NPC moves).
+# A new run starts every 6 hours; concurrency queues it behind the running one.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -18,7 +19,7 @@ concurrency:
 jobs:
   crank:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,4 +34,6 @@ jobs:
         env:
           NPC_SEEDS: ${{ secrets.NPC_SEEDS }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
-        run: node scripts/crank.mjs
+          LOOP_SEC: "30"
+          LOOP_MIN: "345"
+        run: node scripts/crank-loop.mjs

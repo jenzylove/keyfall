@@ -3149,9 +3149,8 @@ export function play(root: HTMLElement) {
   }
   if (!introDone) { introDone = true; sfx.duckMusic(true); coldOpen().then(() => sfx.duckMusic(false)); }
   tick(false);
-  // While the game is open, wake the NPCs once a minute: they settle closed raids,
-  // run the harvest when it is due, and answer raids on their own vaults.
-  const npcBeat = window.setInterval(() => tick(false), 30_000); // rounds are short now: wake the bots every 30 s
+  // The bots run on their own heartbeat (a GitHub Actions loop every 30 s), so an open tab never polls the server.
+  const npcBeat = 0;
 
   const guideT = window.setInterval(() => { if (alive) guideTick(); }, 300);
   holdTicks = () => guideHolds() || (!guideSave().done && !!sess().wallet && !sess().vault); // a red first timer is never pointed at
