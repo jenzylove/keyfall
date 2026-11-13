@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, decideHunt, isNpc, ROSTER, MAX_MOVES, GREET_DELAY_MS, explainRaid, MAX_HUNTERS_ARCADE } from "./rules.mjs";
+import { decide, decideHunt, isNpc, ROSTER, MAX_MOVES, GREET_DELAY_MS, explainRaid, MAX_HUNTERS_ARCADE, MAX_BOSS_ARCADE } from "./rules.mjs";
 
 const C = "qday-test.testnet";
 const Q = (n) => (BigInt(n) * 10n ** 18n).toString();
@@ -348,7 +348,7 @@ test("arcade: after a player's immunity ends, bots wait a random 0 to 15 s more"
   assert.ok(js.size > 5, "gaps vary");
 });
 
-test("arcade: three bot hits on Satoshi a tick", () => {
-  const ns = ["qubit-01", "qubit-02", "qubit-03", "qubit-04"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
-  assert.equal(decide(base({ config: arcadeConfig, npcs: ns })).filter((x) => x.action === "boss").length, 3);
+test("arcade: bot hits on Satoshi stop at MAX_BOSS_ARCADE a tick", () => {
+  const ns = ["qubit-01", "qubit-02", "qubit-03", "qubit-04", "qubit-05", "qubit-06", "qubit-07"].map((n) => npc(n, { boss_ready: true, raids_left: 0, arcade: av({ bullets: 0 }) }));
+  assert.equal(decide(base({ config: arcadeConfig, npcs: ns })).filter((x) => x.action === "boss").length, MAX_BOSS_ARCADE);
 });
