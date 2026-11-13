@@ -8,7 +8,7 @@
 
 import bagholderList from "./bagholders.json" with { type: "json" };
 
-export const MAX_MOVES = 6; // per tick
+export const MAX_MOVES = 10; // per tick: room for settling raids, hunts, a bot fight and Satoshi hits together
 export const MAX_BOSS = 2; // boss raids per tick
 export const DEFEND_CHANCE = 1 / 3; // an NPC defends 1 raid in 3 (2 in 3 made every raid on a bot a sure loss)
 export const DEFEND_AFTER = 0.5; // ...and only in the second half of the clock, so a raid on a bot is a real gamble

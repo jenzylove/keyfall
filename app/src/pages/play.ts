@@ -2476,6 +2476,7 @@ export function play(root: HTMLElement) {
     if (go && !go.classList.contains("busy")) {
       const full_ = a.bullets >= A("clip_size"), poor = w.vaultBal < AB("reload_price");
       go.disabled = full_ || poor;
+      if (full_) { setTimeout(() => { if (sheetKind === "reload" && !go.classList.contains("busy")) sheet?.close(); }, 900); }
       go.textContent = full_ ? "Clip is full" : poor ? `Needs ${short(AB("reload_price"))} coins` : `Reload · ${short(AB("reload_price"))}`;
     }
   }
@@ -2550,8 +2551,11 @@ export function play(root: HTMLElement) {
   }
 
   function openRecap(lr: chain.RoundEnd, myD: bigint, myShare: bigint, rank: number, n: number) {
+    if (!sess().vault) return; // a visitor with no bag yet does not need last round's recap
     const me = myId();
     const iWon = !!lr.winner && lr.winner === me;
+    // a winner sees the big banner on its own first, then the recap
+    if (iWon && !(openRecap as any).bannered) { (openRecap as any).bannered = true; sfx.play("fanfare"); fx.banner(field, "YOU WON THE ROUND", `+${full(lr.winner_take)}`, "gold"); setTimeout(() => { openRecap(lr, myD, myShare, rank, n); (openRecap as any).bannered = false; }, 1800); return; }
     const row = (k: string, v: string) => `<div class="set-row"><span class="set-k">${k}</span><b>${v}</b></div>`;
     show("recap", String(lr.round), "Round recap", `
       <p class="kick gold">Round ${lr.round + 1} · ${lr.killer ? "Satoshi blasted" : "Satoshi survived"}</p>
@@ -2562,7 +2566,6 @@ export function play(root: HTMLElement) {
       <p class="s-text dim">${myD > 0n ? (lr.killer ? "Your share is already in your bag." : "He survived, so damage paid nothing this round. A full life bar comes back now.") : "Each hit on Satoshi is one bullet. More damage, bigger share when he blasts."}</p>
       <button class="btn wide" id="rc-go">Next round</button>`, "gold");
     sheet!.body.querySelector<HTMLButtonElement>("#rc-go")!.onclick = () => sheet?.close();
-    if (iWon) { sfx.play("fanfare"); fx.banner(field, "YOU WON THE ROUND", `+${full(lr.winner_take)}`, "gold"); }
   }
 
   // ----- take a break: the game's bots leave you alone (players still can raid)
