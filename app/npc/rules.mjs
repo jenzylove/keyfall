@@ -21,7 +21,7 @@ export const FUEL_LOW_YOCTO = 15n * 10n ** 22n; // 0.15 NEAR: above the ~0.1 NEA
 export const FUEL_SELL_BPS = 1000n; // by selling 10% of its bag to the market
 export const BRAWLS_PER_TICK = 1; // arcade: bots also raid each other, so the arena is never still
 export const MAX_HUNTERS_ARCADE = 3; // arcade: at most 3 bots raid players per tick (steady pressure, never a pile on)
-export const MAX_BOSS_ARCADE = 3; // tuned for the 30 s page tick: 6 bot hits a minute take about 15% of his life bar, so he blasts in about 7 minutes alone and about 5 with a player shooting
+export const MAX_BOSS_ARCADE = 5; // tuned for the 30 s page tick: 6 bot hits a minute take about 15% of his life bar, so he blasts in about 7 minutes alone and about 5 with a player shooting
 export const PACE_JITTER_MS = 15_000; // arcade: after a player's 90 s immunity ends, bots wait a random 0 to 15 s more
 /** Deterministic jitter per (player, immunity end), so ticks agree on when a player is fair game again. */
 export function paceJitter(account, immuneUntil) {
