@@ -26,6 +26,16 @@
 
 Built at **NEAR HACKATHON** (November 2026). Tracks: **Memecoins With Mechanics** and **Games With Real Economies**. The practice contract keeps the season codename it was deployed with.
 
+## In 30 seconds
+
+One day a quantum computer will be able to steal coins held behind normal crypto keys. NEAR already supports keys it cannot break, but almost nobody switches. KEYFALL turns switching into a game.
+
+- **Red bags** sit behind a normal key. They leak coins every round, anyone can raid them, and on Q-Day they freeze for good.
+- **Gold vaults** sit behind a quantum safe key. They are safe, they collect what the red bags leak, and only they can attack.
+- **Run your bag into the gold gate, then go hunting.** The richest vault at Q-Day wins.
+
+**[Play free in your browser](https://keyfall.jdollar.site)**, no wallet or sign up. Every shot you fire is a real transaction, signed with a quantum safe key and checked by the contract.
+
 ## The mechanic in one line
 
 **The contract checks which kind of key signed every move.** Bags behind an ordinary key bleed every 6 hours, can be raided and freeze for good on Q-Day. Bags behind a quantum safe key (ML-DSA-65) are safe, earn the bleed and are the only ones allowed to attack.
