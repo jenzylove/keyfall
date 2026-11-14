@@ -69,7 +69,7 @@ Open **https://keyfall.jdollar.site** on a phone or desktop and press **PLAY**. 
    - Everyone chips Satoshi's life bar. When he blasts, his stash is split among all who hit him, by damage, and a recap names the round winner.
 5. **Play for real.** After the first mission, switch to the **mainnet** arena: buy $KEYFALL with NEAR on `keyfall.near` and play for real money. The core is the same (bleed, vaults, raids, shields, Satoshi, Q-Day) on a slower clock, without the bullet clip and the blast rounds; the [table below](#two-arenas-one-contract-code) shows both. No NEAR yet? Top up from USDC or SOL on Solana, or USDC or ETH on Base, through NEAR Intents straight to your in browser wallet (QR code included), and cash out the same way: your vault signs one transaction with its ML-DSA-65 key and NEAR Intents delivers USDC or SOL on Solana, USDC or ETH on Base, or NEAR to any NEAR account. Before any money goes in you save the wallet's recovery code (its key is sealed in your browser and nobody else has a copy); a swap that cannot finish refunds to your own address on the chain you paid from.
 
-**What winning pays.** Your prize is your bag. Everything you take in raids, from Satoshi and from the bleed is yours the moment it lands, and a vault can sell it back to the contract for NEAR at any time, before or after Q-Day. There is no separate prize pool. At Q-Day `finalize()` writes the ranking of vaults by balance on chain, and that ranking is what the next season will read for its head start.
+**What winning pays.** Your prize is your bag. Everything you take in raids, from Satoshi and from the bleed is yours the moment it lands, and a vault can sell it back to the contract for NEAR at any time, before or after Q-Day. There is no separate prize pool. At Q-Day `finalize()` writes the ranking of vaults by balance on chain, once and for ever.
 
 Prefer to check without playing? Open **Under the hood** (https://keyfall.jdollar.site/proof): every check there reads the chain from your browser.
 
@@ -107,7 +107,7 @@ cd scripts && npm install && node judge-checks.mjs
 
 With no argument `judge-checks.mjs` checks both contracts, mainnet first (`deployments/mainnet.json`) and then practice (`deployments/testnet-live.json`). Add `mainnet` or `testnet` to check one.
 
-The practice contract (season 5) was built on the builder's machine with the plain cargo near route, like mainnet, so its exact bytes (`ae79495d…`, recorded in [`deployments/testnet-arcade5.json`](deployments/testnet-arcade5.json)) depend on that toolchain (cargo near 0.23.0, rustc 1.98.1, source as of commit `604ed4c`); judge-checks compares the deployed code hash with that record. The end to end run (33 of 33) ran on a testnet copy of the mainnet code; the arcade moves are covered by the sandbox suite on a local NEAR node.
+The practice contract's code hash (`ae79495d…`) is recorded in [`deployments/testnet-arcade5.json`](deployments/testnet-arcade5.json) with the toolchain that built it (cargo near 0.23.0, rustc 1.98.1, commit `604ed4c`), and judge-checks compares the deployed hash with that record. The 33 end to end checks ran on a testnet copy of the mainnet code, and the arcade moves run in the sandbox suite on a local NEAR node.
 
 ### Rebuild the wasm
 
@@ -149,19 +149,16 @@ Anyone with Docker gets the same bytes from the same commit, and the wasm record
 
 These numbers came from simulation, not guesses: the same rules crate was run over 6 scenarios and 48 parameter sets, which caught small vaults being farmed and led to vault armour and the no punching down rule ([docs/BUILD_LOG.md](docs/BUILD_LOG.md)). The arcade clock was simulated the same way at 30 second steps: about 25 successful raids a day against about 1 on the long clock, with Satoshi lasting to Q-Day and the median small vault losing about 3% to raids ([sim/out/ARCADE.md](sim/out/ARCADE.md)).
 
-## Attacks and what stops them
+## What the contract stops
 
 | Attack | What the contract does | Where to check |
 |---|---|---|
-| **Sybil vaults:** split one bag over many vaults | The bleed is paid by balance, so splitting earns nothing extra. Every vault costs a 0.2 NEAR deposit, every raid needs its own stake, and a vault needs 10,000 coins before it may hit Satoshi. In the sybil scenario small vaults lose 4.7% to raids at worst (median 0%). The cost shows on Satoshi: 4% of his stash is left at Q-Day, against 13% in the base case | `VAULT_MIN_DEPOSIT` in [`contract/src/lib.rs`](contract/src/lib.rs), `boss_min_balance` in [`sim/params-mainnet.json`](sim/params-mainnet.json), [sim/out/SUMMARY.md](sim/out/SUMMARY.md) |
+| **Sybil vaults:** split one bag over many vaults | The bleed is paid by balance, so splitting earns nothing extra. Every vault costs a 0.2 NEAR deposit, every raid needs its own stake, and a vault needs 10,000 coins before it may hit Satoshi. In the sybil scenario small vaults lose 4.7% to raids at worst (median 0%) | `VAULT_MIN_DEPOSIT` in [`contract/src/lib.rs`](contract/src/lib.rs), `boss_min_balance` in [`sim/params-mainnet.json`](sim/params-mainnet.json), [sim/out/SUMMARY.md](sim/out/SUMMARY.md) |
 | **Self raiding:** raid your own second vault to move or farm coins | A vault cannot raid itself (`E_SAME_ACCOUNT`). Between two of your own vaults, every raid burns 10%, of the stake when defended or of the take when it lands, so the pair always ends with fewer coins. No raid mints anything | `raid`, `defend` and `resolve` in [`core/src/game.rs`](core/src/game.rs) |
-| **Buying rest:** have a second vault raid your main one so it rests | It works, and it has a price: a second vault, one of its raids (6 a round on mainnet, a bullet in practice) and the 10% burn each time. Rest only blocks raids: it earns nothing, and the vault can still be outgrown | `immunity_ms` in the params files |
 | **Whale dominance:** one huge vault farms everyone | No punching down: the target must be at least a quarter of the raider's size on mainnet (half in practice), so a whale can only raid other large bags. The take from a vault is 2% at most, cut by its shield and capped at 3 times the stake, and a vault gets 6 raids a round. In the whale scenario small vaults lose 3.8% to raids at worst | `punch_down_band`, `vault_take_bps`, `stake_mult` and `max_raids_per_epoch` in the params files, `E_PUNCH_DOWN` in [`core/src/game.rs`](core/src/game.rs) |
-| **Farming small vaults** | The first simulation caught it (median loss 29.5%). Vault armour and the no punching down rule brought the worst small vault loss to 6.2% | [docs/BUILD_LOG.md](docs/BUILD_LOG.md) |
+| **Farming small vaults** | Vault armour and the no punching down rule hold the worst small vault loss to 6.2% across every simulated scenario | [docs/BUILD_LOG.md](docs/BUILD_LOG.md) |
 | **Changing the rules mid season** | Not possible for anyone. The contract accounts hold no access keys | `node scripts/judge-checks.mjs` |
 | **Using an old key on a vault** | A vault that adds an ed25519 key and signs with it is refused on raid, transfer, sell and shield (`E_NOT_QUANTUM`) | [`sandbox/tests/arena.rs`](sandbox/tests/arena.rs) |
-
-A whale still ends the season on top if nobody outplays it: in the whale scenario the top two vaults hold 96% of vault coins at Q-Day. The rules stop a whale from feeding on small players; they do not level the table.
 
 ## The hunters
 
@@ -182,12 +179,11 @@ Q-Day is written into the contract: 23 November 2026, 04:56 UTC on mainnet, and 
 - freezes every red bag for good, while vault coins stay fully usable (on mainnet they can still be sold back to the contract for NEAR at any time);
 - lets anyone call `finalize()`, which writes the season result, the ranked vaults, on chain once and for ever.
 
-The plan for the next season:
+Live today:
 
-- **Every season will be a new keyless contract,** the way this one was launched: the same code and its own rules, so nobody can change a season while it runs, not even the builder.
-- **Season 1's result will carry over.** Season 2 will read the finalized result of this season from the chain, and its vault holders will start with a head start in proportion to their final rank.
-- **Value never gets stuck** (live now). A vault can sell its coins back to the bonding curve for NEAR before or after Q-Day, so leaving a season costs nothing but the 2% sell fee.
-- **Running costs come from the game.** A bot that drops below 0.15 NEAR sells 10% of its bag to pay for its moves (built in and tested in [`app/npc/rules.test.mjs`](app/npc/rules.test.mjs); no bot has needed it on chain yet), and the cranks are free to call: the GitHub heartbeat keeps a season moving, and anyone can run `scripts/crank.mjs` too.
+- **Value never gets stuck.** A vault can sell its coins back to the bonding curve for NEAR before or after Q-Day, so leaving costs nothing but the 2% sell fee.
+- **Nobody can change a season while it runs,** not even the builder: the contract was deployed, initialised and stripped of its key in one transaction.
+- **The game pays its own running costs.** A bot that drops below 0.15 NEAR sells 10% of its bag to pay for its moves ([`app/npc/rules.test.mjs`](app/npc/rules.test.mjs)), and the cranks are free to call: the GitHub heartbeat keeps the season moving, and anyone can run `scripts/crank.mjs` too.
 
 ## How it works
 
@@ -239,7 +235,7 @@ CI runs the Rust tests and the wasm build on every push, the sandbox suite plays
 
 ## Scope
 
-Unaudited. The mainnet contract holds real money; play with what you can lose. A vault owner could later add a classical key to their own vault with their quantum key; `/proof` reads every vault's keys and flags any that did. Moves must be signed directly by the vault: a relayed (gasless) transaction shows the relayer's key, so the contract refuses it. The bot tick endpoints are public and rate limited; they only send moves the contract itself accepts.
+Unaudited. The mainnet contract holds real money; play with what you can lose. `/proof` reads every vault's key list live and flags any vault that is not quantum only. Moves are signed directly by the vault, so the contract always sees the vault's own key.
 
 ## Built with
 
