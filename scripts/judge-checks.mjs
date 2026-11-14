@@ -2,13 +2,27 @@
 // no keys needed, nothing is signed or sent.
 //
 // Usage: node judge-checks.mjs [testnet|mainnet] [contract]
-//   testnet (default): the practice arena in deployments/testnet-live.json, rules in its params_file (sim/params-arcade.json for season 2)
-//   mainnet:           keyfall.near from deployments/mainnet.json, rules in sim/params-mainnet.json
+//   no argument: both, mainnet first and then the practice arena
+//   mainnet:     keyfall.near from deployments/mainnet.json, rules in sim/params-mainnet.json
+//   testnet:     the practice arena in deployments/testnet-live.json, rules in its params_file
 
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const args = process.argv.slice(2);
+if (args.length === 0) {
+  // Each network gets its own process, since lib.mjs picks the network on import.
+  let failed = false;
+  for (const net of ["mainnet", "testnet"]) {
+    console.log(`\n===== ${net === "mainnet" ? "MAINNET" : "PRACTICE (testnet)"} =====\n`);
+    const run = spawnSync(process.execPath, [fileURLToPath(import.meta.url), net], { stdio: "inherit" });
+    if (run.status !== 0) failed = true;
+  }
+  console.log(failed ? "\nBOTH NETWORKS: FAILURES" : "\nBOTH NETWORKS: ALL PASS");
+  process.exit(failed ? 1 : 0);
+}
 const target = args[0] === "mainnet" || args[0] === "testnet" ? args.shift() : "testnet";
 process.env.NEAR_NETWORK = target; // lib.mjs reads it on import
 const { near, view, keyList, explorer, unwrap } = await import("./lib.mjs");
@@ -98,11 +112,21 @@ for (const v of vaults) {
 check(`vault census: ${quantumOnly} of ${vaults.length} vaults are controlled only by an ML-DSA-65 key`, flagged.length === 0, flagged.length ? `flagged: ${flagged.join("; ")}` : "");
 
 // 5. The books add up
-const s = await view(contract, "stats");
-// Satoshi's stash is an exposed balance, so it is inside exposed_tokens.
-let sum = ["exposed_tokens", "vault_tokens", "market_tokens", "escrow", "burned"].reduce((a, k) => a + BigInt(s[k]), 0n);
 // Arcade seasons also hold Satoshi's reserve (his next lives) and unclaimed blast pots.
-const arena = params.arcade ? await view(contract, "arena") : null;
+// Those live in a second view, and the bots move every few seconds, so read
+// stats, arena, stats and keep the set only when nothing moved in between.
+const BOOKS = ["exposed_tokens", "vault_tokens", "market_tokens", "escrow", "burned"];
+let s = await view(contract, "stats");
+let arena = null;
+for (let i = 0; params.arcade && i < 8; i++) {
+  arena = await view(contract, "arena");
+  const again = await view(contract, "stats");
+  const still = BOOKS.every((k) => again[k] === s[k]);
+  s = again;
+  if (still) break;
+}
+// Satoshi's stash is an exposed balance, so it is inside exposed_tokens.
+let sum = BOOKS.reduce((a, k) => a + BigInt(s[k]), 0n);
 if (arena) sum += BigInt(arena.reserve) + BigInt(arena.blast_escrow);
 check(`exposed (incl. Satoshi) + vaults + market + escrow + burned${arena ? " + Satoshi's reserve + unclaimed blasts" : ""} = total supply`, sum === BigInt(params.total_supply), `${sum} vs ${params.total_supply}`);
 
