@@ -261,8 +261,21 @@ export function play(root: HTMLElement) {
       if (next) arena.lockOn(next);
       else { if (auto) return; sfx.play("deny"); nudge(); arena.say("me", `Already robbing ${nameOf(lock, mine())} · coins in ${clock(mineOn.deadline - chainNow())}`, 3000, true); return; }
     }
-    const left = w.vault?.raids_left || 0;
     const canDefend = !!w.incoming && w.incoming.target === s.vault?.accountId;
+    // you tapped a body that cannot be shot right now (Satoshi after your hit this round, a resting vault):
+    // say why and hold fire, never send the shot at somebody you did not pick
+    const held = arena.lockId;
+    if (!auto && held && !arena.targets.has(held) && !canDefend && arena.distTo(held) <= arena.viewSpan) {
+      sfx.play("deny"); nudge();
+      if (held === "satoshi") arena.say("satoshi", bossLine(), 3000, true);
+      else {
+        const hh = w.holders.find((x) => x.account === held);
+        const bl = hh ? blocker(hh) : null;
+        arena.say(held, (hh && bl && (hintFor(hh, bl.state) || bl.why)) || "Can't be robbed right now", 3000, true);
+      }
+      return;
+    }
+    const left = w.vault?.raids_left || 0;
     if (ARC() && left <= 0 && !canDefend) { if (auto) return; sfx.play("deny"); nudge(); openReload(); return; }
     if (left <= 0 && !canDefend && !arena.targets.has("satoshi")) { if (auto) return; sfx.play("deny"); nudge(); arena.say("me", `Out of raids · next round in ${clock(Number(w.stats!.epoch_ends_ms) - chainNow())} · blocking stays free`, 3200, true); return; }
     if (!arena.aimTarget()) {
@@ -364,6 +377,7 @@ export function play(root: HTMLElement) {
   let sheetArg = "";
   let sheet: Sheet | null = null;
   let pendingRaid = ""; // target of a raid in flight (sent, not yet confirmed)
+  let raidsSpent = { epoch: "", n: 0 }; // raids of yours the chain confirmed this round, so a late or failed read can never show more raids than you have
   const justRaided = new Map<string, number>(); // target -> until (ms): a raid of yours confirmed, the view not caught up yet
   let prevState = "";
   let prevThreat = false;
@@ -464,6 +478,14 @@ export function play(root: HTMLElement) {
       sellQuote,
       arena: arenaV ?? w.arena ?? null,
     };
+    // long season only: the read of your vault can lag or fail (it then keeps the last view), so cap raids left by the raids confirmed here this round
+    if (w.vault && !(config as any)?.arcade && raidsSpent.n > 0) {
+      if (String(stats.epoch) !== raidsSpent.epoch) raidsSpent = { epoch: String(stats.epoch), n: 0 };
+      else {
+        const cap = Math.max(0, Number((config as any)?.max_raids_per_epoch ?? 0) - raidsSpent.n);
+        if (w.vault.raids_left > cap) w.vault = { ...w.vault, raids_left: cap };
+      }
+    }
     loaded = true;
   }
 
@@ -1120,6 +1142,7 @@ export function play(root: HTMLElement) {
     await act("raid", "", () => chain.raid(h.account, stake.toString()), (v) => {
       const rid = String(v ?? "");
       if (rid) setProg({ raids: [...(prog().raids || []), rid].slice(-20) });
+      { const ep = String(w.stats?.epoch ?? ""); if (raidsSpent.epoch !== ep) raidsSpent = { epoch: ep, n: 0 }; raidsSpent.n++; if (w.vault && !ARC()) w.vault.raids_left = Math.max(0, w.vault.raids_left - 1); }
       justRaided.set(h.account, Date.now() + 30_000); // until the chain view shows this raid, the body stays robbed (no second shot at it)
       if (prog().stage === "strike") setProg({ stage: "done" });
       guideRaided = true;
